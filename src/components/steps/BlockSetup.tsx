@@ -1,0 +1,284 @@
+'use client';
+
+import { useState } from 'react';
+import type { Block, Resident } from '@/types';
+import { HOLIDAYS, parseDate, fmtShort } from '@/lib/scheduler';
+import { api } from '../App';
+import AddResidentModal from '../modals/AddResidentModal';
+import PinDisplayModal from '../modals/PinDisplayModal';
+
+interface Props {
+  block: Block | null;
+  residents: Resident[];
+  onBlockSaved: (b: Block | null) => void;
+  onResidentsChanged: () => void;
+  onNext: () => void;
+  showToast: (msg: string, err?: boolean) => void;
+}
+
+function avatar(res: Resident, size = 26) {
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        background: res.color,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: Math.round(size * 0.38),
+        fontWeight: 700,
+        color: '#000',
+        flexShrink: 0,
+      }}
+    >
+      {res.name.slice(0, 2).toUpperCase()}
+    </div>
+  );
+}
+
+export default function BlockSetup({ block, residents, onBlockSaved, onResidentsChanged, onNext, showToast }: Props) {
+  const [blockName, setBlockName] = useState(block?.name ?? 'CUH/PMH Block — Q3 2026');
+  const [startDate, setStartDate] = useState(block?.start_date ?? '2026-07-01');
+  const [endDate, setEndDate] = useState(block?.end_date ?? '2026-09-30');
+  const [newChiefPw, setNewChiefPw] = useState('');
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [pinModal, setPinModal] = useState<{ open: boolean; title: string; name: string; pin: string }>({
+    open: false, title: '', name: '', pin: '',
+  });
+
+  async function saveBlock() {
+    try {
+      const body: Record<string, string> = { name: blockName, start_date: startDate, end_date: endDate };
+      if (newChiefPw) body.chief_password = newChiefPw;
+      await api('/block', 'PUT', body);
+      setNewChiefPw('');
+      // Re-fetch block
+      const updated = await api<Block | null>('/block');
+      onBlockSaved(updated);
+      showToast('Block saved');
+    } catch (e) {
+      showToast((e as Error).message, true);
+    }
+  }
+
+  async function removeResident(id: string) {
+    try {
+      await api(`/residents/${id}`, 'DELETE');
+      onResidentsChanged();
+      showToast('Resident removed');
+    } catch (e) {
+      showToast((e as Error).message, true);
+    }
+  }
+
+  function revealPin(res: Resident) {
+    setPinModal({ open: true, title: 'Reveal PIN', name: res.name, pin: res.pin });
+  }
+
+  function handleAdded(id: string, pin: string, name: string) {
+    onResidentsChanged();
+    setPinModal({ open: true, title: 'PIN Generated', name, pin });
+    showToast(`${name} added`);
+  }
+
+  const sorted = [...residents].sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
+  const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active');
+  const res = residents.filter((r) => r.pgy >= 4 && r.status === 'research');
+  const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
+
+  const bStart = parseDate(startDate);
+  const bEnd = parseDate(endDate);
+  const inBlockHolidays = [...HOLIDAYS]
+    .filter((h) => { const d = parseDate(h); return d >= bStart && d <= bEnd; })
+    .sort();
+
+  return (
+    <div>
+      <div className="page-title">Block Setup</div>
+      <div className="page-sub">
+        Configure the block and build the call pool. Each resident gets a unique PIN for blinded
+        request submission. Changes are saved to the database automatically.
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginBottom: 18 }}>
+        {/* Block config card */}
+        <div className="card">
+          <div className="ch">
+            <div className="ct">Block Configuration</div>
+            <button className="btn bgh bsm" onClick={saveBlock}>Save</button>
+          </div>
+          <div className="cb">
+            <div className="fg f2" style={{ marginBottom: 14 }}>
+              <div className="fl">
+                <label className="flb">Start Date</label>
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+              </div>
+              <div className="fl">
+                <label className="flb">End Date</label>
+                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+              </div>
+            </div>
+            <div className="fg f2" style={{ marginBottom: 14 }}>
+              <div className="fl">
+                <label className="flb">Block Name</label>
+                <input type="text" value={blockName} onChange={(e) => setBlockName(e.target.value)} />
+              </div>
+              <div className="fl">
+                <label className="flb">New Admin Password</label>
+                <input
+                  type="password"
+                  placeholder="Leave blank to keep current"
+                  value={newChiefPw}
+                  onChange={(e) => setNewChiefPw(e.target.value)}
+                />
+              </div>
+            </div>
+            <span className="slabel">Federal Holidays in Block (all 24h shifts)</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {inBlockHolidays.length > 0
+                ? inBlockHolidays.map((h) => (
+                    <span key={h} className="bdg bo">{fmtShort(h)} 24h</span>
+                  ))
+                : <span style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>None in this block</span>
+              }
+            </div>
+          </div>
+        </div>
+
+        {/* Shift structure card */}
+        <div className="card">
+          <div className="ch"><div className="ct">Shift Structure</div></div>
+          <div className="cb">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
+              {[
+                { badge: 'bb', dur: '12h', title: 'Mon–Thu non-holiday', sub: '5:00 PM → 5:00 AM' },
+                { badge: 'bt', dur: '12h', title: 'Friday night non-holiday', sub: 'Same resident covers Sunday' },
+                { badge: 'bp', dur: '24h', title: 'Saturday', sub: 'Separate resident from Fri/Sun pair' },
+                { badge: 'bt', dur: '24h', title: 'Sunday', sub: 'Same resident as Friday' },
+                { badge: 'bo', dur: '24h', title: 'Any Holiday', sub: 'Always 24h regardless of day' },
+                { badge: 'bpk', dur: '1+1', title: 'Research Senior', sub: '1 backup week + 1 backup weekend only' },
+              ].map((row, i) => (
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: '32px 1fr', gap: 8, alignItems: 'start' }}>
+                  <span className={`bdg ${row.badge}`} style={{ fontSize: 9 }}>{row.dur}</span>
+                  <div>
+                    <strong>{row.title}</strong>
+                    <br />
+                    <span style={{ color: 'var(--muted)', fontSize: 12 }}>{row.sub}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Call pool */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="ch">
+          <div className="ct">Call Pool</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Hover PIN to reveal · Click to copy</span>
+            <button className="btn bg bsm" onClick={() => setAddModalOpen(true)}>＋ Add Resident</button>
+          </div>
+        </div>
+        <div className="cbt">
+          <table className="ptable">
+            <thead>
+              <tr>
+                <th>Name</th><th>PGY</th><th>Role</th><th>Hospital</th><th>Status</th><th>PIN</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 28, color: 'var(--muted)', fontStyle: 'italic' }}>
+                    No residents added yet.
+                  </td>
+                </tr>
+              ) : sorted.map((r) => {
+                const statusBadge =
+                  r.status === 'research' ? <span className="bdg bpk">Research</span> :
+                  r.status === 'active' ? <span className="bdg bm">Active</span> :
+                  <span className="bdg bo">Away</span>;
+                return (
+                  <tr key={r.id}>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {avatar(r)}
+                        <span style={{ fontWeight: 500 }}>{r.name}</span>
+                      </div>
+                    </td>
+                    <td><span className={`bdg ${r.pgy >= 4 ? 'bg2' : 'bb'}`}>PGY-{r.pgy}</span></td>
+                    <td>
+                      <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                        {r.status === 'research' ? 'Research (backup)' : r.pgy >= 4 ? 'Senior Call' : 'Junior Call'}
+                      </span>
+                    </td>
+                    <td><span className={`bdg ${r.hospital === 'CUH' ? 'bgr' : 'bp'}`}>{r.hospital}</span></td>
+                    <td>{statusBadge}</td>
+                    <td>
+                      <span
+                        className="pin-chip"
+                        title="Hover to reveal · Click to copy"
+                        onClick={() => navigator.clipboard.writeText(r.pin).then(() => showToast('PIN copied!'))}
+                      >
+                        {r.pin}
+                      </span>
+                    </td>
+                    <td style={{ display: 'flex', gap: 4 }}>
+                      <button
+                        className="bico"
+                        style={{ fontSize: 11, width: 'auto', padding: '0 8px', color: 'var(--muted)' }}
+                        onClick={() => revealPin(r)}
+                      >
+                        🔑
+                      </button>
+                      <button className="bico" onClick={() => removeResident(r.id)}>✕</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Pool summary */}
+      <div className="srow" style={{ gridTemplateColumns: 'repeat(5,1fr)', marginBottom: 20 }}>
+        {[
+          { l: 'Seniors Active', v: srs.length, c: 'var(--gold)' },
+          { l: 'Research Sr', v: res.length, c: 'var(--pink)' },
+          { l: 'Juniors PGY-2/3', v: jrs.length, c: 'var(--blue)' },
+          { l: 'CUH', v: residents.filter((r) => r.hospital === 'CUH' && r.status !== 'away').length, c: 'var(--green)' },
+          { l: 'PMH', v: residents.filter((r) => r.hospital === 'PMH' && r.status !== 'away').length, c: 'var(--purple)' },
+        ].map((s) => (
+          <div key={s.l} className="sc">
+            <div className="sn" style={{ color: s.c }}>{s.v}</div>
+            <div className="sl">{s.l}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button className="btn bg" onClick={onNext}>Continue to Requests →</button>
+      </div>
+
+      <AddResidentModal
+        open={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+        onAdded={handleAdded}
+        showToast={showToast}
+      />
+      <PinDisplayModal
+        open={pinModal.open}
+        title={pinModal.title}
+        residentName={pinModal.name}
+        pin={pinModal.pin}
+        onClose={() => setPinModal((p) => ({ ...p, open: false }))}
+        showToast={showToast}
+      />
+    </div>
+  );
+}

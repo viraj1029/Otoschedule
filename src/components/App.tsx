@@ -1,0 +1,240 @@
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import type { Block, Resident, Request, ScheduleData, Step, Role } from '@/types';
+import LoginGate from './LoginGate';
+import TopBar from './TopBar';
+import BlockSetup from './steps/BlockSetup';
+import Requests from './steps/Requests';
+import Generate from './steps/Generate';
+import ScheduleView from './steps/ScheduleView';
+import Toast from './Toast';
+
+export interface AppState {
+  role: Role | null;
+  currentResId: string | null;
+  currentResidentFull: Resident | null;
+  block: Block | null;
+  residents: Resident[];
+  allRequests: Request[];
+  schedule: ScheduleData | null;
+  step: Step;
+}
+
+async function api<T = unknown>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  const opts: RequestInit = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch('/api' + path, opts);
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error((e as { error?: string }).error ?? 'Request failed');
+  }
+  return r.json() as Promise<T>;
+}
+
+export { api };
+
+export default function App() {
+  const [state, setState] = useState<AppState>({
+    role: null,
+    currentResId: null,
+    currentResidentFull: null,
+    block: null,
+    residents: [],
+    allRequests: [],
+    schedule: null,
+    step: 1,
+  });
+
+  const [toast, setToast] = useState<{ msg: string; err: boolean } | null>(null);
+
+  const showToast = useCallback((msg: string, err = false) => {
+    setToast({ msg, err });
+    setTimeout(() => setToast(null), 2800);
+  }, []);
+
+  const loadData = useCallback(async () => {
+    const [block, residents, allRequests, schedule] = await Promise.all([
+      api<Block | null>('/block').catch(() => null),
+      api<Resident[]>('/residents').catch(() => [] as Resident[]),
+      api<Request[]>('/requests').catch(() => [] as Request[]),
+      api<ScheduleData | null>('/schedule').catch(() => null),
+    ]);
+    setState((s) => ({ ...s, block: block ?? s.block, residents, allRequests, schedule }));
+  }, []);
+
+  // Check existing session on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const me = await api<{ role: Role | null; resident?: Resident }>('/auth/me');
+        if (me.role === 'chief') {
+          setState((s) => ({ ...s, role: 'chief', step: 1 }));
+          await loadData();
+        } else if (me.role === 'resident' && me.resident) {
+          setState((s) => ({
+            ...s,
+            role: 'resident',
+            currentResId: me.resident!.id,
+            currentResidentFull: me.resident!,
+          }));
+          await loadData();
+        } else {
+          // Load residents for the login dropdown even when not authed
+          const residents = await api<Resident[]>('/residents').catch(() => [] as Resident[]);
+          setState((s) => ({ ...s, residents }));
+        }
+      } catch {
+        const residents = await api<Resident[]>('/residents').catch(() => [] as Resident[]);
+        setState((s) => ({ ...s, residents }));
+      }
+    })();
+  }, [loadData]);
+
+  const handleLogin = useCallback(
+    async (mode: 'chief' | 'resident', resId?: string, residentFull?: Resident) => {
+      if (mode === 'chief') {
+        setState((s) => ({ ...s, role: 'chief', step: 1 }));
+      } else {
+        setState((s) => ({
+          ...s,
+          role: 'resident',
+          currentResId: resId ?? null,
+          currentResidentFull: residentFull ?? null,
+        }));
+      }
+      await loadData();
+    },
+    [loadData],
+  );
+
+  const handleSignOut = useCallback(async () => {
+    await api('/auth/signout', 'POST');
+    location.reload();
+  }, []);
+
+  const goStep = useCallback((step: Step) => {
+    if (state.role !== 'chief') return;
+    setState((s) => ({ ...s, step }));
+  }, [state.role]);
+
+  const setResidents = useCallback((residents: Resident[]) => {
+    setState((s) => ({ ...s, residents }));
+  }, []);
+
+  const setAllRequests = useCallback((allRequests: Request[]) => {
+    setState((s) => ({ ...s, allRequests }));
+  }, []);
+
+  const setBlock = useCallback((block: Block | null) => {
+    setState((s) => ({ ...s, block }));
+  }, []);
+
+  const setSchedule = useCallback((schedule: ScheduleData | null) => {
+    setState((s) => ({ ...s, schedule }));
+  }, []);
+
+  const isLoggedIn = Boolean(state.role);
+
+  return (
+    <>
+      {!isLoggedIn && (
+        <LoginGate
+          residents={state.residents}
+          onLogin={handleLogin}
+          showToast={showToast}
+        />
+      )}
+
+      {isLoggedIn && (
+        <>
+          <TopBar
+            role={state.role!}
+            step={state.step}
+            residentName={state.currentResidentFull?.name ?? null}
+            block={state.block}
+            onGoStep={goStep}
+            onSignOut={handleSignOut}
+          />
+          <div className="app-body">
+            <div className="main">
+              {state.role === 'chief' && state.step === 1 && (
+                <BlockSetup
+                  block={state.block}
+                  residents={state.residents}
+                  onBlockSaved={setBlock}
+                  onResidentsChanged={async () => {
+                    const residents = await api<Resident[]>('/residents');
+                    const allRequests = await api<Request[]>('/requests');
+                    setResidents(residents);
+                    setAllRequests(allRequests);
+                  }}
+                  onNext={() => goStep(2)}
+                  showToast={showToast}
+                />
+              )}
+              {(state.role === 'chief' ? state.step === 2 : true) && state.role === 'chief' && (
+                <Requests
+                  block={state.block}
+                  residents={state.residents}
+                  allRequests={state.allRequests}
+                  role={state.role}
+                  currentResId={null}
+                  currentResidentFull={null}
+                  onRequestsChanged={setAllRequests}
+                  onBack={() => goStep(1)}
+                  onNext={() => goStep(3)}
+                  showToast={showToast}
+                />
+              )}
+              {state.role === 'resident' && (
+                <Requests
+                  block={state.block}
+                  residents={state.residents}
+                  allRequests={state.allRequests}
+                  role="resident"
+                  currentResId={state.currentResId}
+                  currentResidentFull={state.currentResidentFull}
+                  onRequestsChanged={setAllRequests}
+                  onBack={null}
+                  onNext={null}
+                  showToast={showToast}
+                  schedule={state.schedule}
+                />
+              )}
+              {state.role === 'chief' && state.step === 3 && (
+                <Generate
+                  block={state.block}
+                  residents={state.residents}
+                  allRequests={state.allRequests}
+                  schedule={state.schedule}
+                  onScheduleGenerated={(sched) => {
+                    setSchedule(sched);
+                    goStep(4);
+                  }}
+                  onBack={() => goStep(2)}
+                  showToast={showToast}
+                />
+              )}
+              {state.role === 'chief' && state.step === 4 && (
+                <ScheduleView
+                  schedule={state.schedule}
+                  residents={state.residents}
+                  allRequests={state.allRequests}
+                  block={state.block}
+                  role="chief"
+                  onScheduleChanged={setSchedule}
+                  onBlockChanged={setBlock}
+                  onRegenerate={() => goStep(3)}
+                  showToast={showToast}
+                />
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      <Toast msg={toast?.msg ?? null} err={toast?.err ?? false} />
+    </>
+  );
+}

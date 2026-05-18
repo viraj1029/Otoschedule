@@ -1,0 +1,30 @@
+{
+  "name": "oto-scheduler",
+  "version": "2.0.0",
+  "description": "OTO Residency Call Scheduler — UTSW CUH/PMH Block",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "migrate": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/migrate.ts"
+  },
+  "dependencies": {
+    "next": "^15",
+    "react": "^19",
+    "react-dom": "^19",
+    "@vercel/postgres": "^0.10",
+    "iron-session": "^8",
+    "bcryptjs": "^2",
+    "uuid": "^11"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "@types/bcryptjs": "^2",
+    "@types/uuid": "^10",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/node": "^22",
+    "ts-node": "^10"
+  }
+}
