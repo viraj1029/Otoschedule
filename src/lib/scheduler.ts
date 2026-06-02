@@ -153,13 +153,21 @@ export function generateSchedule(
       });
     }
 
-    // Backup weekend day
+    // Build set of dates already covered by this resident's backup week
+    const thisResWeekDates = new Set<string>();
+    resBkpWeeks.filter((w) => w.res.id === rr.id).forEach((w) => {
+      let wd = parseDate(w.wS);
+      const wEnd = parseDate(w.wE);
+      while (wd <= wEnd) { thisResWeekDates.add(dk(wd)); wd = addDays(wd, 1); }
+    });
+
+    // Backup weekend day — skip if already within the assigned backup week
     let d = new Date(bStart);
     let bkpWk = false;
     while (d <= bEnd && !bkpWk) {
       const key = dk(d);
       const dow = d.getDay();
-      if ((dow === 6 || dow === 0) && !offMap[rr.id].has(key)) {
+      if ((dow === 6 || dow === 0) && !offMap[rr.id].has(key) && !thisResWeekDates.has(key)) {
         resBkpDays.push({ dateKey: key, res: rr, isBackup: true });
         bkpWk = true;
       }

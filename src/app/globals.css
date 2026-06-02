@@ -367,6 +367,7 @@ select {
 .ccell.cwk { background: rgba(255, 255, 255, 0.012); }
 .ccell.coff { opacity: 0.22; cursor: default; }
 .ccell.chol { background: rgba(251, 146, 60, 0.05); }
+.ccell.csel { background: rgba(99, 179, 237, 0.12); outline: 2px solid rgba(99, 179, 237, 0.5); outline-offset: -2px; }
 .cdate {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
