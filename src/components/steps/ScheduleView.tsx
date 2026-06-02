@@ -123,22 +123,26 @@ export default function ScheduleView({
         const isResBkpDay = resBkpDayKeys.has(key);
 
         let chips = '';
-        if (sr) chips += `<div class="chip ${sr.isBackup ? 'cres' : 'csr'}">${sr.isBackup ? '🔬' : '🔶'} ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}</div>`;
+        const rc = (color: string, label: string) =>
+          `<div class="chip" style="background:${color}22;color:${color};border:1px solid ${color}44">${label}</div>`;
+
+        if (sr) chips += rc(sr.res.color, `${sr.isBackup ? '🔬' : '🔶'} ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}`);
         if (isResBkpDay) {
           const rb = (schedule!.resBkpDays ?? []).find((d) => d.dateKey === key);
-          if (rb) chips += `<div class="chip cres">🔬 ${rb.res.name} (bkp)</div>`;
+          if (rb) chips += rc(rb.res.color, `🔬 ${rb.res.name} (bkp)`);
         }
         if (jr) {
-          if (isHol) chips += `<div class="chip chc">🎉 ${jr.res.name} 24h</div>`;
-          else if (jr.type === 'saturday') chips += `<div class="chip csat">🟣 ${jr.res.name} 24h</div>`;
-          else if (jr.type === 'fri-pair') chips += `<div class="chip csun">🔗Fri ${jr.res.name} 12h</div>`;
-          else if (jr.type === 'sun-pair') chips += `<div class="chip csun">🔗Sun ${jr.res.name} 24h</div>`;
-          else chips += `<div class="chip cjr">${jr.res.name} ${jr.shiftHrs}h</div>`;
+          const label = isHol ? `🎉 ${jr.res.name} 24h`
+            : jr.type === 'saturday' ? `🟣 ${jr.res.name} 24h`
+            : jr.type === 'fri-pair' ? `🔗Fri ${jr.res.name} 12h`
+            : jr.type === 'sun-pair' ? `🔗Sun ${jr.res.name} 24h`
+            : `${jr.res.name} ${jr.shiftHrs}h`;
+          chips += rc(jr.res.color, label);
           if ((isWk || isHol) && jr.res.hospital === 'CUH') chips += `<div class="chip ccuh">🏥 CUH</div>`;
           if ((isWk || isHol) && jr.res.hospital === 'PMH') {
             chips += `<div class="chip csat">🏥 PMH</div>`;
             chips += jr.cuhRounder
-              ? `<div class="chip ccuh">CUH:${jr.cuhRounder.name}</div>`
+              ? rc(jr.cuhRounder.color, `CUH:${jr.cuhRounder.name}`)
               : `<div class="chip cwrn">⚠CUH?</div>`;
           }
         }
