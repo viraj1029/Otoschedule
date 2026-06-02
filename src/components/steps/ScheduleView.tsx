@@ -286,8 +286,65 @@ export default function ScheduleView({
     const ms12 = mAll.filter((d) => d.shiftHrs === 12).length;
     const ms24 = mAll.filter((d) => d.shiftHrs === 24).length;
 
+    const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active')
+      .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
+    const srStats = srs.map((res) => {
+      const weeks = schedule!.seniorWeeks.filter((w) => w.res.id === res.id && !w.isBackup);
+      let totalDays = 0, weekendDays = 0, holidayDays = 0;
+      weeks.forEach((w) => {
+        let d = parseDate(w.wS);
+        const end = parseDate(w.wE);
+        while (d <= end) {
+          const key = dk(d);
+          totalDays++;
+          const dow = d.getDay();
+          if (dow === 0 || dow === 6) weekendDays++;
+          if (HOLIDAYS.has(key)) holidayDays++;
+          d = addDays(d, 1);
+        }
+      });
+      return { res, weeks: weeks.length, totalDays, weekendDays, holidayDays };
+    });
+
     return (
       <div>
+        {srStats.length > 0 && (
+          <div className="card" style={{ marginBottom: 18 }}>
+            <div className="ch"><div className="ct">Senior Call Summary</div></div>
+            <div className="cbt">
+              <table className="htable">
+                <thead>
+                  <tr>
+                    <th>Resident</th><th>PGY</th>
+                    <th className="r">Weeks</th>
+                    <th className="r">Total Days</th>
+                    <th className="r">Weekend Days</th>
+                    <th className="r">Holidays</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {srStats.map(({ res, weeks, totalDays, weekendDays, holidayDays }) => (
+                    <tr key={res.id}>
+                      <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{avatar(res)}<span style={{ fontWeight: 500 }}>{res.name}</span></div></td>
+                      <td><span className="bdg bg2">PGY-{res.pgy}</span></td>
+                      <td className="r"><span className="hn">{weeks}</span></td>
+                      <td className="r"><span className="ht" style={{ color: 'var(--gold)' }}>{totalDays}</span></td>
+                      <td className="r"><span className="ht" style={{ color: 'var(--purple)' }}>{weekendDays}</span></td>
+                      <td className="r"><span className="ht" style={{ color: 'var(--orange)' }}>{holidayDays}</span></td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: 'rgba(255,255,255,.03)' }}>
+                    <td colSpan={2} style={{ fontWeight: 600, fontSize: 12, padding: '10px 12px' }}>TOTAL</td>
+                    <td className="r"><span className="hn">{srStats.reduce((a, s) => a + s.weeks, 0)}</span></td>
+                    <td className="r"><span className="ht" style={{ color: 'var(--gold)' }}>{srStats.reduce((a, s) => a + s.totalDays, 0)}</span></td>
+                    <td className="r"><span className="ht" style={{ color: 'var(--purple)' }}>{srStats.reduce((a, s) => a + s.weekendDays, 0)}</span></td>
+                    <td className="r"><span className="ht" style={{ color: 'var(--orange)' }}>{srStats.reduce((a, s) => a + s.holidayDays, 0)}</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginBottom: 18 }}>
           <div className="card">
             <div className="ch"><div className="ct">Block Total Hours</div></div>

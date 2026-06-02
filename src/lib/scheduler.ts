@@ -182,13 +182,8 @@ export function generateSchedule(
   if (needSr) {
   let srI = 0;
   let lastSrId: string | null = null;
-  let cur = new Date(bStart);
-  while (cur.getDay() !== 1) cur = addDays(cur, 1);
-  while (cur <= bEnd) {
-    const wS = new Date(cur);
-    const wE = addDays(cur, 6);
-    const wEC = wE > bEnd ? new Date(bEnd) : new Date(wE);
 
+  function assignWeek(wS: Date, wEC: Date) {
     function hasConflict(r: Resident): boolean {
       let d2 = new Date(wS);
       while (d2 <= wEC) {
@@ -197,43 +192,49 @@ export function generateSchedule(
       }
       return false;
     }
-
-    // Sort by fewest weeks assigned; deprioritize whoever worked last week
     const cands = [...srs].sort((a, b) => {
       const aLast = a.id === lastSrId ? 1 : 0;
       const bLast = b.id === lastSrId ? 1 : 0;
       if (aLast !== bLast) return aLast - bLast;
       return srC[a.id] - srC[b.id];
     });
-
-    // Pass 1: no conflict, not consecutive
     let assigned: Resident | null = null;
     for (const c of cands) {
       if (c.id !== lastSrId && !hasConflict(c)) { assigned = c; break; }
     }
-    // Pass 2: allow consecutive if needed (everyone else has a conflict)
     if (!assigned) {
       for (const c of cands) {
         if (!hasConflict(c)) { assigned = c; break; }
       }
     }
-    // Pass 3: all have conflicts — fall back to round-robin, still avoid consecutive
     if (!assigned) {
       assigned = cands.find((c) => c.id !== lastSrId) ?? srs[srI % srs.length];
     }
-
     srC[assigned.id]++;
     srI++;
     lastSrId = assigned.id;
-    seniorWeeks.push({
-      wS: dk(wS),
-      wE: dk(wEC),
-      res: assigned,
-      isBackup: false,
-      override: false,
-    });
+    seniorWeeks.push({ wS: dk(wS), wE: dk(wEC), res: assigned, isBackup: false, override: false });
+  }
+
+  // Cover any partial days before the first Monday
+  let cur = new Date(bStart);
+  if (cur.getDay() !== 1) {
+    const partialEnd = new Date(cur);
+    while (partialEnd.getDay() !== 0) partialEnd.setDate(partialEnd.getDate() + 1);
+    const pEC = partialEnd > bEnd ? new Date(bEnd) : new Date(partialEnd);
+    assignWeek(cur, pEC);
+    cur = addDays(partialEnd, 1);
+  }
+
+  // Full Monday-to-Sunday weeks
+  while (cur <= bEnd) {
+    const wS = new Date(cur);
+    const wE = addDays(cur, 6);
+    const wEC = wE > bEnd ? new Date(bEnd) : new Date(wE);
+    assignWeek(wS, wEC);
     cur = addDays(wE, 1);
   }
+
   resBkpWeeks.forEach((w) => seniorWeeks.push({ ...w, override: false }));
   seniorWeeks.sort((a, b) => a.wS.localeCompare(b.wS));
   } // end needSr
