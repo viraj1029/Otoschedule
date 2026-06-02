@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import type { Block, Resident, Request, ScheduleData } from '@/types';
-import { HOLIDAYS, parseDate } from '@/lib/scheduler';
-import { generateSchedule } from '@/lib/scheduler';
+import { HOLIDAYS, parseDate, generateSchedule } from '@/lib/scheduler';
+import type { ScheduleMode } from '@/lib/scheduler';
 import { api } from '../App';
 
 interface Props {
@@ -36,6 +36,7 @@ function getResRequests(allRequests: Request[], resId: string) {
 
 export default function Generate({ block, residents, allRequests, onScheduleGenerated, onBack, showToast }: Props) {
   const [generating, setGenerating] = useState(false);
+  const [mode, setMode] = useState<ScheduleMode>('merged');
 
   const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active');
   const resR = residents.filter((r) => r.pgy >= 4 && r.status === 'research');
@@ -72,6 +73,7 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
         block?.start_date ?? '2026-07-01',
         block?.end_date ?? '2026-09-30',
         block?.published ?? false,
+        mode,
       );
       await api('/schedule/generate', 'POST', { scheduleData });
       onScheduleGenerated(scheduleData);
@@ -143,6 +145,31 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
               );
             })}
           </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 18 }}>
+        <div className="ch"><div className="ct">Schedule Type</div></div>
+        <div className="cb" style={{ display: 'flex', gap: 10 }}>
+          {([
+            { id: 'merged', label: '⚡ Merged (Senior + Junior)', desc: 'Generates both senior call weeks and junior call days together.' },
+            { id: 'senior', label: '🔶 Senior Only', desc: 'Generates senior call weeks only. No junior days.' },
+            { id: 'junior', label: '🔷 Junior Only', desc: 'Generates junior call days only. No senior weeks.' },
+          ] as { id: ScheduleMode; label: string; desc: string }[]).map(({ id, label, desc }) => (
+            <div
+              key={id}
+              onClick={() => setMode(id)}
+              style={{
+                flex: 1, padding: '12px 14px', borderRadius: 'var(--r)',
+                border: `2px solid ${mode === id ? 'var(--blue)' : 'var(--border)'}`,
+                background: mode === id ? 'var(--blue-dim)' : 'var(--s2)',
+                cursor: 'pointer', transition: 'all .15s',
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{label}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{desc}</div>
+            </div>
+          ))}
         </div>
       </div>
 
