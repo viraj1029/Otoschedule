@@ -46,7 +46,9 @@ export default function ScheduleView({
   const [calMonth, setCalMonth] = useState<number>(0);
   const [hrsMonth, setHrsMonth] = useState<{ year: number; month: number } | null>(null);
   const [published, setPublished] = useState<boolean>(block?.published ?? false);
-  const [overrideKey, setOverrideKey] = useState<string | null>(null);
+  const [overrideKeys, setOverrideKeys] = useState<string[]>([]);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
 
   useEffect(() => {
     if (schedule) {
@@ -147,13 +149,20 @@ export default function ScheduleView({
           }
         }
 
+        const isSel = selectedKeys.includes(key);
+        const handleClick = role === 'chief'
+          ? selectMode
+            ? () => setSelectedKeys((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key])
+            : () => setOverrideKeys([key])
+          : undefined;
+
         rows.push(
           <div
             key={key}
-            className={`ccell${isWk ? ' cwk' : ''}${isHol ? ' chol' : ''}`}
-            onClick={role === 'chief' ? () => setOverrideKey(key) : undefined}
+            className={`ccell${isWk ? ' cwk' : ''}${isHol ? ' chol' : ''}${isSel ? ' csel' : ''}`}
+            onClick={handleClick}
           >
-            <div className={`cdate${isToday ? ' tod' : ''}`}>{day}{isHol ? ' 🎉' : ''}</div>
+            <div className={`cdate${isToday ? ' tod' : ''}`}>{day}{isHol ? ' 🎉' : ''}{isSel ? ' ✓' : ''}</div>
             <div className="cchips" dangerouslySetInnerHTML={{ __html: chips }} />
           </div>
         );
@@ -659,8 +668,34 @@ export default function ScheduleView({
             <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 16, fontWeight: 700, flex: 1, textAlign: 'center' }}>
               {MONTHS[calMonth]} {calYear}
             </div>
+            {role === 'chief' && !selectMode && (
+              <button className="btn bgh bsm" onClick={() => setSelectMode(true)}>☑ Select Days</button>
+            )}
+            {role === 'chief' && selectMode && (
+              <>
+                {selectedKeys.length > 0 && (
+                  <button
+                    className="btn bg bsm"
+                    onClick={() => { setOverrideKeys([...selectedKeys]); }}
+                  >
+                    Override {selectedKeys.length} day{selectedKeys.length !== 1 ? 's' : ''}
+                  </button>
+                )}
+                <button
+                  className="btn bgh bsm"
+                  onClick={() => { setSelectMode(false); setSelectedKeys([]); }}
+                >
+                  ✕ Cancel
+                </button>
+              </>
+            )}
             <button className="btn bgh bsm" onClick={() => navCal(1)}>Next ›</button>
           </div>
+          {selectMode && (
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, padding: '6px 10px', background: 'rgba(255,255,255,0.04)', borderRadius: 6 }}>
+              Click days to select · {selectedKeys.length} selected
+            </div>
+          )}
           <div className="calgrid">
             <div className="cdow" style={{ background: 'var(--s2)' }}>Wk</div>
             {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => (
@@ -691,15 +726,21 @@ export default function ScheduleView({
       {/* Override modal */}
       {role === 'chief' && (
         <OverrideModal
-          open={overrideKey !== null}
-          dateKey={overrideKey}
+          open={overrideKeys.length > 0}
+          dateKeys={overrideKeys}
           schedule={schedule}
           residents={residents}
           onSave={(updated) => {
             onScheduleChanged(updated);
-            setOverrideKey(null);
+            setOverrideKeys([]);
+            setSelectedKeys([]);
+            setSelectMode(false);
           }}
-          onClose={() => setOverrideKey(null)}
+          onClose={() => {
+            setOverrideKeys([]);
+            setSelectedKeys([]);
+            setSelectMode(false);
+          }}
           showToast={showToast}
         />
       )}
