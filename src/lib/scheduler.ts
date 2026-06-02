@@ -361,43 +361,77 @@ export function generateSchedule(
   const juniorDays: JuniorDay[] = [];
   const jrC: Record<string, number> = {};
   const jrH: Record<string, number> = {};
+  const jrHwknd: Record<string, number> = {};   // weekend + holiday hours
+  const jrHwkday: Record<string, number> = {};  // weekday hours
+  const jrDwknd: Record<string, number> = {};   // weekend + holiday shift count
+  const jrDwkday: Record<string, number> = {};  // weekday shift count
+  const lastCallKey: Record<string, string> = {}; // last assigned date per resident
+
   if (needJr) {
-  jrs.forEach((r) => { jrC[r.id] = 0; jrH[r.id] = 0; });
+  jrs.forEach((r) => { jrC[r.id] = 0; jrH[r.id] = 0; jrHwknd[r.id] = 0; jrHwkday[r.id] = 0; jrDwknd[r.id] = 0; jrDwkday[r.id] = 0; });
   const processed = new Set<string>();
 
-  function pickJr(key: string, ex: string | null = null): Resident {
-    const candidates = jrs
-      .filter((r) => r.id !== ex && !offMap[r.id].has(key))
-      .sort((a, b) => {
-        const ar = jrH[a.id] / rotDays[a.id];
-        const br = jrH[b.id] / rotDays[b.id];
+  // Compute rotation weekend / weekday day counts (for proportional equity sorting)
+  const rotWkndDays: Record<string, number> = {};
+  const rotWkdayDays: Record<string, number> = {};
+  jrs.forEach((r) => {
+    let wknd = 0, wkday = 0;
+    const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
+    const rE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
+    const effS = rS < bStart ? bStart : rS;
+    const effE = rE > bEnd   ? bEnd   : rE;
+    let dd = new Date(effS);
+    while (dd <= effE) {
+      const dow = dd.getDay();
+      if (dow === 0 || dow === 6 || HOLIDAYS.has(dk(dd))) wknd++; else wkday++;
+      dd = addDays(dd, 1);
+    }
+    rotWkndDays[r.id] = Math.max(1, wknd);
+    rotWkdayDays[r.id] = Math.max(1, wkday);
+  });
+
+  // Pick junior: enforce rest gap (2 days preferred, 1 day minimum), balance weekend/weekday separately
+  function pickJr(key: string, ex: string | null = null, isWeekendSlot = false, skipGap = false): Resident {
+    const d = parseDate(key);
+
+    function sortFn(a: Resident, b: Resident) {
+      if (isWeekendSlot) {
+        const ar = jrHwknd[a.id] / rotWkndDays[a.id];
+        const br = jrHwknd[b.id] / rotWkndDays[b.id];
         return ar !== br ? ar - br : jrC[a.id] - jrC[b.id];
-      });
-    return candidates[0] ?? jrs.sort((a, b) => jrH[a.id] / rotDays[a.id] - jrH[b.id] / rotDays[b.id])[0];
+      }
+      const ar = jrHwkday[a.id] / rotWkdayDays[a.id];
+      const br = jrHwkday[b.id] / rotWkdayDays[b.id];
+      return ar !== br ? ar - br : jrC[a.id] - jrC[b.id];
+    }
+
+    function daysSince(r: Resident): number {
+      if (!lastCallKey[r.id]) return 999;
+      return Math.round((d.getTime() - parseDate(lastCallKey[r.id]).getTime()) / 86400000);
+    }
+
+    // Progressive gap relaxation: prefer ≥2 days, fallback to ≥1 (no back-to-back), then any
+    const minGaps = skipGap ? [0] : [2, 1, 0];
+    for (const minGap of minGaps) {
+      const candidates = jrs
+        .filter((r) => r.id !== ex && !offMap[r.id].has(key) && daysSince(r) >= minGap)
+        .sort(sortFn);
+      if (candidates.length) return candidates[0];
+    }
+    return jrs.sort(sortFn)[0]; // absolute fallback
   }
 
-  function addJD(
-    key: string,
-    res: Resident,
-    type: JuniorDayType,
-    paired = false,
-    cuhR: Resident | null = null,
-  ) {
+  function addJD(key: string, res: Resident, type: JuniorDayType, paired = false, cuhR: Resident | null = null) {
     const hrs = shiftHours(key);
-    jrC[res.id]++;
-    jrH[res.id] += hrs;
     const d = parseDate(key);
     const isWk = d.getDay() === 0 || d.getDay() === 6;
-    juniorDays.push({
-      dateKey: key,
-      res,
-      shiftHrs: hrs,
-      type,
-      paired,
-      cuhRounder: cuhR,
-      isWeekend: isWk,
-      override: false,
-    });
+    const isWkndSlot = isWk || HOLIDAYS.has(key);
+    jrC[res.id]++;
+    jrH[res.id] += hrs;
+    if (isWkndSlot) { jrHwknd[res.id] += hrs; jrDwknd[res.id]++; }
+    else             { jrHwkday[res.id] += hrs; jrDwkday[res.id]++; }
+    lastCallKey[res.id] = key;
+    juniorDays.push({ dateKey: key, res, shiftHrs: hrs, type, paired, cuhRounder: cuhR, isWeekend: isWk, override: false });
     processed.add(key);
   }
 
@@ -412,52 +446,37 @@ export function generateSchedule(
     const dow = d.getDay();
 
     if (dow === 5) {
-      // Friday — pair with Sunday
+      // Friday — pair with Sunday; treat as weekend slot since resident gets a Sunday too
       const sunDate = addDays(d, 2);
       const sunKey = dk(sunDate);
       const inBlock = sunDate <= bEnd;
-      const friRes = pickJr(key);
-      addJD(key, friRes, 'fri-pair', true);
+      const friRes = pickJr(key, null, true); // weekend sort: picks resident with fewest wknd hrs
+      addJD(key, friRes, 'fri-pair', true);   // Friday itself is a weekday shift (12h)
       if (inBlock && !processed.has(sunKey)) {
         const hrs = shiftHours(sunKey);
         jrC[friRes.id]++;
         jrH[friRes.id] += hrs;
-        const cuhR =
-          friRes.hospital === 'PMH'
-            ? jrs.find(
-                (r) =>
-                  r.hospital === 'CUH' &&
-                  r.id !== friRes.id &&
-                  !offMap[r.id].has(sunKey),
-              ) ?? null
-            : null;
-        juniorDays.push({
-          dateKey: sunKey,
-          res: friRes,
-          shiftHrs: hrs,
-          type: 'sun-pair',
-          paired: true,
-          cuhRounder: cuhR,
-          isWeekend: true,
-          override: false,
-        });
+        jrHwknd[friRes.id] += hrs; // Sunday is a weekend day
+        jrDwknd[friRes.id]++;
+        lastCallKey[friRes.id] = sunKey; // gap tracking: last call = Sunday
+        const cuhR = friRes.hospital === 'PMH'
+          ? jrs.find((r) => r.hospital === 'CUH' && r.id !== friRes.id && !offMap[r.id].has(sunKey)) ?? null
+          : null;
+        juniorDays.push({ dateKey: sunKey, res: friRes, shiftHrs: hrs, type: 'sun-pair', paired: true, cuhRounder: cuhR, isWeekend: true, override: false });
         processed.add(sunKey);
       }
     } else if (dow === 6) {
-      // Saturday
-      const satRes = pickJr(key);
-      const cuhR =
-        satRes.hospital === 'PMH'
-          ? jrs.find(
-              (r) =>
-                r.hospital === 'CUH' &&
-                r.id !== satRes.id &&
-                !offMap[r.id].has(key),
-            ) ?? null
-          : null;
+      // Saturday — weekend slot
+      const satRes = pickJr(key, null, true);
+      const cuhR = satRes.hospital === 'PMH'
+        ? jrs.find((r) => r.hospital === 'CUH' && r.id !== satRes.id && !offMap[r.id].has(key)) ?? null
+        : null;
       addJD(key, satRes, 'saturday', false, cuhR);
     } else {
-      addJD(key, pickJr(key), dow === 0 ? 'sunday' : 'weekday');
+      // Weekday or holiday-weekday
+      const isHolWknd = HOLIDAYS.has(key) && (dow === 0 || dow === 6);
+      addJD(key, pickJr(key, null, HOLIDAYS.has(key)), dow === 0 ? 'sunday' : 'weekday');
+      void isHolWknd; // holidays on weekdays are treated as weekend slots via addJD
     }
   }
 
@@ -465,13 +484,7 @@ export function generateSchedule(
   juniorDays.forEach((jd) => {
     if (!jd.isWeekend && !HOLIDAYS.has(jd.dateKey)) return;
     if (jd.res.hospital === 'PMH' && !jd.cuhRounder) {
-      jd.cuhRounder =
-        jrs.find(
-          (r) =>
-            r.hospital === 'CUH' &&
-            r.id !== jd.res.id &&
-            !offMap[r.id].has(jd.dateKey),
-        ) ?? null;
+      jd.cuhRounder = jrs.find((r) => r.hospital === 'CUH' && r.id !== jd.res.id && !offMap[r.id].has(jd.dateKey)) ?? null;
     }
   });
 

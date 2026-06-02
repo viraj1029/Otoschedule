@@ -437,6 +437,58 @@ export default function ScheduleView({
             </div>
           </div>
         </div>
+        <div className="card" style={{ marginBottom: 18 }}>
+          <div className="ch"><div className="ct">Weekend vs Weekday Breakdown (Juniors)</div></div>
+          <div className="cbt">
+            <table className="htable">
+              <thead>
+                <tr>
+                  <th>Resident</th><th>PGY</th>
+                  <th className="r" style={{ color: 'var(--purple)' }}>Wknd Days</th>
+                  <th className="r" style={{ color: 'var(--purple)' }}>Wknd Hrs</th>
+                  <th className="r" style={{ color: 'var(--blue)' }}>Wkday Days</th>
+                  <th className="r" style={{ color: 'var(--blue)' }}>Wkday Hrs</th>
+                  <th className="r">Total Hrs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {jrs.map((res) => {
+                  const wkndDays = schedule!.juniorDays.filter((d) => d.res.id === res.id && (d.isWeekend || HOLIDAYS.has(d.dateKey)));
+                  const wkdayDays = schedule!.juniorDays.filter((d) => d.res.id === res.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey));
+                  const wkndHrs = wkndDays.reduce((a, d) => a + d.shiftHrs, 0);
+                  const wkdayHrs = wkdayDays.reduce((a, d) => a + d.shiftHrs, 0);
+                  return (
+                    <tr key={res.id}>
+                      <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{avatar(res)}<span style={{ fontWeight: 500 }}>{res.name}</span></div></td>
+                      <td><span className="bdg bb">PGY-{res.pgy}</span></td>
+                      <td className="r"><span className="hn" style={{ color: 'var(--purple)' }}>{wkndDays.length}</span></td>
+                      <td className="r"><span className="ht" style={{ color: 'var(--purple)' }}>{wkndHrs}h</span></td>
+                      <td className="r"><span className="hn" style={{ color: 'var(--blue)' }}>{wkdayDays.length}</span></td>
+                      <td className="r"><span className="ht" style={{ color: 'var(--blue)' }}>{wkdayHrs}h</span></td>
+                      <td className="r"><span className="ht" style={{ color: 'var(--green)' }}>{wkndHrs + wkdayHrs}h</span></td>
+                    </tr>
+                  );
+                })}
+                {(() => {
+                  const totWkndD = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.res.id === r.id && (d.isWeekend || HOLIDAYS.has(d.dateKey))).length, 0);
+                  const totWkndH = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.res.id === r.id && (d.isWeekend || HOLIDAYS.has(d.dateKey))).reduce((s, d) => s + d.shiftHrs, 0), 0);
+                  const totWkdD = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).length, 0);
+                  const totWkdH = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).reduce((s, d) => s + d.shiftHrs, 0), 0);
+                  return (
+                    <tr style={{ background: 'rgba(255,255,255,.03)' }}>
+                      <td colSpan={2} style={{ fontWeight: 600, fontSize: 12, padding: '10px 12px' }}>TOTAL</td>
+                      <td className="r"><span className="hn" style={{ color: 'var(--purple)' }}>{totWkndD}</span></td>
+                      <td className="r"><span className="ht" style={{ color: 'var(--purple)' }}>{totWkndH}h</span></td>
+                      <td className="r"><span className="hn" style={{ color: 'var(--blue)' }}>{totWkdD}</span></td>
+                      <td className="r"><span className="ht" style={{ color: 'var(--blue)' }}>{totWkdH}h</span></td>
+                      <td className="r"><span className="ht" style={{ color: 'var(--gold)' }}>{totWkndH + totWkdH}h</span></td>
+                    </tr>
+                  );
+                })()}
+              </tbody>
+            </table>
+          </div>
+        </div>
         <div className="card">
           <div className="ch">
             <div className="ct">Monthly Breakdown</div>
