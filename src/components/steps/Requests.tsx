@@ -26,7 +26,8 @@ interface Props {
 function getResRequests(allRequests: Request[], resId: string) {
   const vacDays = new Set(allRequests.filter((r) => r.resident_id === resId && r.type === 'vacation').map((r) => r.date));
   const weekends = new Set(allRequests.filter((r) => r.resident_id === resId && r.type === 'weekend').map((r) => r.date));
-  return { vacDays, weekends };
+  const holidayReqs = new Set(allRequests.filter((r) => r.resident_id === resId && r.type === 'holiday').map((r) => r.date));
+  return { vacDays, weekends, holidayReqs };
 }
 
 function avatar(res: Resident, size = 26) {
@@ -71,7 +72,7 @@ export default function Requests({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [block?.start_date]);
 
-  async function toggleDay(date: string, type: 'vacation' | 'weekend', resId: string) {
+  async function toggleDay(date: string, type: 'vacation' | 'weekend' | 'holiday', resId: string) {
     try {
       const body: Record<string, string> = { date, type, residentId: resId };
       const result = await api<{ action: string; date: string; type: string }>(
@@ -84,7 +85,7 @@ export default function Requests({
       } else {
         onRequestsChanged([
           ...allRequests,
-          { id: 'local_' + Date.now(), resident_id: resId, block_id: 'block_main', date, type: type as 'vacation' | 'weekend' },
+          { id: 'local_' + Date.now(), resident_id: resId, block_id: 'block_main', date, type },
         ]);
       }
     } catch (e) {
@@ -119,7 +120,7 @@ export default function Requests({
 
   const activeResId = role === 'resident' ? (currentResId ?? '') : selectedResId;
   const activeRes = residents.find((r) => r.id === activeResId);
-  const { vacDays, weekends } = activeResId ? getResRequests(allRequests, activeResId) : { vacDays: new Set<string>(), weekends: new Set<string>() };
+  const { vacDays, weekends, holidayReqs } = activeResId ? getResRequests(allRequests, activeResId) : { vacDays: new Set<string>(), weekends: new Set<string>(), holidayReqs: new Set<string>() };
 
   const vacUsed = [...vacDays].filter((d) => {
     const dd = parseDate(d); return dd >= bStart && dd <= bEnd && !HOLIDAYS.has(d);
@@ -135,8 +136,8 @@ export default function Requests({
   if (role === 'chief') {
     const dayMap: Record<string, Resident[]> = {};
     residents.forEach((res) => {
-      const { vacDays: v, weekends: w } = getResRequests(allRequests, res.id);
-      [...v, ...w].forEach((d) => {
+      const { vacDays: v, weekends: w, holidayReqs: h } = getResRequests(allRequests, res.id);
+      [...v, ...w, ...h].forEach((d) => {
         if (!dayMap[d]) dayMap[d] = [];
         dayMap[d].push(res);
       });
@@ -152,9 +153,10 @@ export default function Requests({
     });
   }
 
-  const allDaysList: { d: string; t: 'vac' | 'wk' }[] = [
+  const allDaysList: { d: string; t: 'vac' | 'wk' | 'hol' }[] = [
     ...[...vacDays].map((d) => ({ d, t: 'vac' as const })),
     ...[...weekends].map((d) => ({ d, t: 'wk' as const })),
+    ...[...holidayReqs].map((d) => ({ d, t: 'hol' as const })),
   ].sort((a, b) => a.d.localeCompare(b.d));
 
   const sortedResidents = [...residents].sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
@@ -237,20 +239,22 @@ export default function Requests({
                 const inBlock = d >= bStart && d <= bEnd;
                 const isVac = vacDays.has(key);
                 const isWkReq = weekends.has(key);
+                const isHolReq = holidayReqs.has(key);
                 const isToday = today.getFullYear() === calYear && today.getMonth() === calMonth && today.getDate() === day;
                 let cls = 'rc';
                 if (!inBlock) cls += ' rcoff';
+                else if (isHol && isHolReq) cls += ' rcholreq';
                 else if (isHol) cls += ' rchol';
                 else if (isVac) cls += ' rcvac';
                 else if (isWkReq) cls += ' rcwk';
                 else if (isWk) cls += ' rcwe';
-                const clickable = inBlock && !isHol && activeResId;
+                const clickable = inBlock && activeResId;
                 return (
                   <div
                     key={key}
                     className={cls}
                     style={isToday ? { fontWeight: 700, color: 'var(--text)' } : {}}
-                    onClick={clickable ? () => toggleDay(key, isWk ? 'weekend' : 'vacation', activeResId) : undefined}
+                    onClick={clickable ? () => toggleDay(key, isHol ? 'holiday' : isWk ? 'weekend' : 'vacation', activeResId) : undefined}
                   >
                     {day}
                   </div>
@@ -259,9 +263,10 @@ export default function Requests({
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12, fontSize: 11, color: 'var(--muted)' }}>
               {[
-                { cls: 'rcvac', label: 'Vacation day' },
+                { cls: 'rcvac', label: 'Vacation day (counts toward 5)' },
                 { cls: 'rcwk', label: 'Weekend off' },
-                { cls: 'rchol', label: 'Holiday — 24h shift' },
+                { cls: 'rchol', label: 'Holiday (click to request off)' },
+                { cls: 'rcholreq', label: 'Holiday requested off' },
               ].map(({ cls, label }) => (
                 <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <div className={`rc ${cls}`} style={{ width: 10, height: 10, borderRadius: 2, aspectRatio: 'unset' }} />
@@ -304,8 +309,8 @@ export default function Requests({
                   <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>No days selected</div>
                 ) : allDaysList.map(({ d, t }) => (
                   <div key={d + t} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span className={`bdg ${t === 'vac' ? 'bb' : 'bp'}`} style={{ fontSize: 9 }}>
-                      {t === 'vac' ? 'VAC' : 'WKD'}
+                    <span className={`bdg ${t === 'vac' ? 'bb' : t === 'hol' ? 'bo' : 'bp'}`} style={{ fontSize: 9 }}>
+                      {t === 'vac' ? 'VAC' : t === 'hol' ? 'HOL' : 'WKD'}
                     </span>
                     <span style={{ fontSize: 11, fontFamily: "'JetBrains Mono',monospace", flex: 1 }}>
                       {fmtShort(d)} ({DOW[parseDate(d).getDay()]})
@@ -314,7 +319,7 @@ export default function Requests({
                       <button
                         className="bico"
                         style={{ width: 20, height: 20, fontSize: 10 }}
-                        onClick={() => toggleDay(d, t === 'vac' ? 'vacation' : 'weekend', activeResId)}
+                        onClick={() => toggleDay(d, t === 'vac' ? 'vacation' : t === 'hol' ? 'holiday' : 'weekend', activeResId)}
                       >
                         ✕
                       </button>
@@ -357,7 +362,7 @@ export default function Requests({
               <div className="ch"><div className="ct">All Residents</div></div>
               <div className="cb">
                 {sortedResidents.map((res) => {
-                  const { vacDays: v, weekends: w } = getResRequests(allRequests, res.id);
+                  const { vacDays: v, weekends: w, holidayReqs: h } = getResRequests(allRequests, res.id);
                   const vac = [...v].filter((d) => {
                     const dd = parseDate(d); return dd >= bStart && dd <= bEnd && !HOLIDAYS.has(d);
                   }).length;
@@ -372,6 +377,7 @@ export default function Requests({
                       {res.status === 'research' && <span className="bdg bpk" style={{ fontSize: 9 }}>Res</span>}
                       <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: 'var(--blue)' }}>{vac}/5</span>
                       <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: 'var(--purple)' }}>{w.size}wk</span>
+                      {h.size > 0 && <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: 'var(--orange)' }}>{h.size}hol</span>}
                     </div>
                   );
                 })}

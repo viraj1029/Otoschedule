@@ -486,7 +486,8 @@ select {
 }
 .rc:hover { background: var(--s3); color: var(--text); }
 .rcoff { opacity: 0.2; cursor: default; pointer-events: none; }
-.rchol { background: var(--orange-dim); color: var(--orange); cursor: default; }
+.rchol { background: var(--orange-dim); color: var(--orange); cursor: pointer; }
+.rcholreq { background: var(--orange); color: #000; font-weight: 700; border: 1px solid var(--orange); }
 .rcvac { background: var(--blue-dim); color: var(--blue); border: 1px solid rgba(96, 165, 250, 0.3); }
 .rcwk { background: var(--purple-dim); color: var(--purple); border: 1px solid rgba(167, 139, 250, 0.3); }
 .rcwe { color: var(--muted2); }
