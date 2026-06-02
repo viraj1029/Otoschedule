@@ -117,61 +117,43 @@ export function generateSchedule(
   });
 
   // ── Research backup (senior modes only) ─────────────────────────────────────
+  // Each research resident gets exactly 5 weekday backup days + 1 weekend day,
+  // spread evenly through the block, stored as single-day SeniorWeek entries.
   const resBkpWeeks: ResBkpWeek[] = [];
-  const resBkpDays: ResBkpDay[] = [];
+  const resBkpDays: ResBkpDay[] = []; // kept empty; entries now live in seniorWeeks directly
+
+  function pickSpread(dates: string[], n: number): string[] {
+    if (n <= 0 || !dates.length) return [];
+    if (dates.length <= n) return [...dates];
+    if (n === 1) return [dates[Math.floor(dates.length / 2)]];
+    const result: string[] = [];
+    for (let i = 0; i < n; i++) {
+      result.push(dates[Math.floor(i * (dates.length - 1) / (n - 1))]);
+    }
+    return result;
+  }
 
   if (needSr && resR.length) {
-    const rr = resR[0];
-    let c = new Date(bStart);
-    while (c.getDay() !== 1) c = addDays(c, 1);
-    let assigned = false;
-    while (c <= bEnd && !assigned) {
-      const wS = new Date(c);
-      const wE = addDays(c, 6);
-      const wEC = wE > bEnd ? new Date(bEnd) : new Date(wE);
-      let hasOff = false;
-      let d2 = new Date(wS);
-      while (d2 <= wEC) {
-        if (offMap[rr.id].has(dk(d2))) { hasOff = true; break; }
-        d2 = addDays(d2, 1);
+    for (const rr of resR) {
+      const availWeekdays: string[] = [];
+      const availWeekends: string[] = [];
+      let d = new Date(bStart);
+      while (d <= bEnd) {
+        const key = dk(d);
+        const dow = d.getDay();
+        if (!offMap[rr.id].has(key)) {
+          if (dow >= 1 && dow <= 5) availWeekdays.push(key);
+          else if (dow === 6 || dow === 0) availWeekends.push(key);
+        }
+        d = addDays(d, 1);
       }
-      if (!hasOff) {
-        resBkpWeeks.push({ wS: dk(wS), wE: dk(wEC), res: rr, isBackup: true });
-        assigned = true;
+      const pickedDays = [
+        ...pickSpread(availWeekdays, 5),
+        ...pickSpread(availWeekends, 1),
+      ];
+      for (const key of pickedDays) {
+        resBkpWeeks.push({ wS: key, wE: key, res: rr, isBackup: true });
       }
-      c = addDays(wE, 1);
-    }
-    if (!assigned) {
-      let fc = new Date(bStart);
-      while (fc.getDay() !== 1) fc = addDays(fc, 1);
-      const wE = addDays(fc, 6);
-      resBkpWeeks.push({
-        wS: dk(fc),
-        wE: dk(wE > bEnd ? new Date(bEnd) : wE),
-        res: rr,
-        isBackup: true,
-      });
-    }
-
-    // Build set of dates already covered by this resident's backup week
-    const thisResWeekDates = new Set<string>();
-    resBkpWeeks.filter((w) => w.res.id === rr.id).forEach((w) => {
-      let wd = parseDate(w.wS);
-      const wEnd = parseDate(w.wE);
-      while (wd <= wEnd) { thisResWeekDates.add(dk(wd)); wd = addDays(wd, 1); }
-    });
-
-    // Backup weekend day — skip if already within the assigned backup week
-    let d = new Date(bStart);
-    let bkpWk = false;
-    while (d <= bEnd && !bkpWk) {
-      const key = dk(d);
-      const dow = d.getDay();
-      if ((dow === 6 || dow === 0) && !offMap[rr.id].has(key) && !thisResWeekDates.has(key)) {
-        resBkpDays.push({ dateKey: key, res: rr, isBackup: true });
-        bkpWk = true;
-      }
-      d = addDays(d, 1);
     }
   }
 
