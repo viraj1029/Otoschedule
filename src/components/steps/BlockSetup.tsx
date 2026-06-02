@@ -5,6 +5,7 @@ import type { Block, Resident } from '@/types';
 import { HOLIDAYS, parseDate, fmtShort } from '@/lib/scheduler';
 import { api } from '../App';
 import AddResidentModal from '../modals/AddResidentModal';
+import EditResidentModal from '../modals/EditResidentModal';
 import PinDisplayModal from '../modals/PinDisplayModal';
 
 interface Props {
@@ -44,6 +45,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
   const [endDate, setEndDate] = useState(block?.end_date ?? '2026-09-30');
   const [newChiefPw, setNewChiefPw] = useState('');
   const [addModalOpen, setAddModalOpen] = useState(false);
+  const [editResident, setEditResident] = useState<Resident | null>(null);
   const [pinModal, setPinModal] = useState<{ open: boolean; title: string; name: string; pin: string }>({
     open: false, title: '', name: '', pin: '',
   });
@@ -161,7 +163,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
           <table className="ptable">
             <thead>
               <tr>
-                <th>Name</th><th>PGY</th><th>Role</th><th>Hospital</th><th>Status</th><th>PIN</th><th></th>
+                <th>Name</th><th>PGY</th><th>Role</th><th>Hospital</th><th>Status</th><th>Rotation</th><th>PIN</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -193,6 +195,15 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
                     <td><span className={`bdg ${r.hospital === 'CUH' ? 'bgr' : 'bp'}`}>{r.hospital}</span></td>
                     <td>{statusBadge}</td>
                     <td>
+                      {r.rotation_start || r.rotation_end ? (
+                        <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: "'JetBrains Mono',monospace" }}>
+                          {r.rotation_start ? fmtShort(r.rotation_start) : '…'} → {r.rotation_end ? fmtShort(r.rotation_end) : '…'}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 11, color: 'var(--muted2)', fontStyle: 'italic' }}>Full block</span>
+                      )}
+                    </td>
+                    <td>
                       <span
                         className="pin-chip"
                         title="Click to copy"
@@ -208,6 +219,13 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
                         onClick={() => revealPin(r)}
                       >
                         🔑
+                      </button>
+                      <button
+                        className="bico"
+                        style={{ fontSize: 11, width: 'auto', padding: '0 8px', color: 'var(--muted)' }}
+                        onClick={() => setEditResident(r)}
+                      >
+                        ✎
                       </button>
                       <button className="bico" onClick={() => removeResident(r.id)}>✕</button>
                     </td>
@@ -239,6 +257,12 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
         <button className="btn bg" onClick={onNext}>Continue to Requests →</button>
       </div>
 
+      <EditResidentModal
+        resident={editResident}
+        onClose={() => setEditResident(null)}
+        onSaved={onResidentsChanged}
+        showToast={showToast}
+      />
       <AddResidentModal
         open={addModalOpen}
         onClose={() => setAddModalOpen(false)}

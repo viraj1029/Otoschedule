@@ -95,25 +95,28 @@ export function generateSchedule(
   const bStart = parseDate(bStartStr);
   const bEnd = parseDate(bEndStr);
 
-  // Build off-map: residentId → Set<dateKey>
+  // Build off-map: residentId → Set<dateKey> (requests + off-rotation dates)
   const offMap: Record<string, Set<string>> = {};
+  const rotDays: Record<string, number> = {}; // effective rotation days within block
   residents.forEach((r) => {
-    const vac = new Set(
-      requests
-        .filter((req) => req.resident_id === r.id && req.type === 'vacation')
-        .map((req) => req.date),
-    );
-    const wk = new Set(
-      requests
-        .filter((req) => req.resident_id === r.id && req.type === 'weekend')
-        .map((req) => req.date),
-    );
-    const hol = new Set(
-      requests
-        .filter((req) => req.resident_id === r.id && req.type === 'holiday')
-        .map((req) => req.date),
-    );
+    const vac = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'vacation').map((req) => req.date));
+    const wk  = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'weekend').map((req) => req.date));
+    const hol = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'holiday').map((req) => req.date));
     offMap[r.id] = new Set([...vac, ...wk, ...hol]);
+
+    // Block dates outside the resident's rotation window
+    const rotStart = r.rotation_start ? parseDate(r.rotation_start) : bStart;
+    const rotEnd   = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
+    const effStart = rotStart < bStart ? bStart : rotStart;
+    const effEnd   = rotEnd   > bEnd   ? bEnd   : rotEnd;
+    let cnt = 0;
+    let dd = new Date(bStart);
+    while (dd <= bEnd) {
+      if (dd < effStart || dd > effEnd) offMap[r.id].add(dk(dd));
+      else cnt++;
+      dd = addDays(dd, 1);
+    }
+    rotDays[r.id] = Math.max(1, cnt);
   });
 
   // ── Research backup (senior modes only) ─────────────────────────────────────
@@ -194,13 +197,15 @@ export function generateSchedule(
   const srC: Record<string, number> = {};
   srs.forEach((r) => (srC[r.id] = 0));
   if (needSr) {
-  // Track days (not just weeks) for equalization; tiebreak: lower PGY (PGY4) absorbs extra days
+  // Track days per senior; targets are weighted by each resident's rotation length
   const srDays: Record<string, number> = {};
   srs.forEach((r) => (srDays[r.id] = 0));
 
   let totalBlockDays = 0;
   { let td = new Date(bStart); while (td <= bEnd) { totalBlockDays++; td = addDays(td, 1); } }
-  const targetDays = totalBlockDays / (srs.length || 1);
+  const totalSrRotDays = srs.reduce((s, r) => s + rotDays[r.id], 0) || 1;
+  const srTargetDays: Record<string, number> = {};
+  srs.forEach((r) => { srTargetDays[r.id] = totalBlockDays * rotDays[r.id] / totalSrRotDays; });
 
   let lastSrId: string | null = null;
 
@@ -214,9 +219,11 @@ export function generateSchedule(
     return true;
   }
 
-  // Sort: fewest days first; tiebreak higher PGY first so PGY4 (lowest pgy) accumulates extra
+  // Sort by days-vs-target ratio (fewest first); tiebreak higher PGY first
   function srSort(a: Resident, b: Resident) {
-    return srDays[a.id] !== srDays[b.id] ? srDays[a.id] - srDays[b.id] : b.pgy - a.pgy;
+    const ar = srDays[a.id] / srTargetDays[a.id];
+    const br = srDays[b.id] / srTargetDays[b.id];
+    return ar !== br ? ar - br : b.pgy - a.pgy;
   }
 
   function pickSr(from: Date, to: Date, excludeId: string | null): Resident | null {
@@ -232,8 +239,8 @@ export function generateSchedule(
     // Split whenever best would exceed their fair share (any overshoot triggers a split attempt).
     // idealP1: how many days best should ideally get (at least 1).
     // Find the valid split point (last day of first half ≠ Saturday) closest to idealP1.
-    if (pLen > 1 && srDays[best.id] + pLen > targetDays) {
-      const idealP1 = Math.max(1, Math.round(targetDays - srDays[best.id]));
+    if (pLen > 1 && srDays[best.id] + pLen > srTargetDays[best.id]) {
+      const idealP1 = Math.max(1, Math.round(srTargetDays[best.id] - srDays[best.id]));
       if (idealP1 < pLen) {
         let chosenSplit = -1;
         let bestDist = Infinity;
@@ -300,7 +307,7 @@ export function generateSchedule(
     const over = ranked[0];
     const under = ranked[ranked.length - 1];
     console.log(`[sched] iter ${iter}: over=${over.name}(${srDays[over.id]}) under=${under.name}(${srDays[under.id]})`);
-    if (srDays[over.id] - srDays[under.id] <= 2) { console.log('[sched] balanced'); break; }
+    if (srDays[over.id] / srTargetDays[over.id] - srDays[under.id] / srTargetDays[under.id] <= 0.05) { console.log('[sched] balanced'); break; }
 
     const gap = srDays[over.id] - srDays[under.id];
     const targetTransfer = Math.floor(gap / 2);
@@ -361,8 +368,12 @@ export function generateSchedule(
   function pickJr(key: string, ex: string | null = null): Resident {
     const candidates = jrs
       .filter((r) => r.id !== ex && !offMap[r.id].has(key))
-      .sort((a, b) => jrH[a.id] - jrH[b.id] || jrC[a.id] - jrC[b.id]);
-    return candidates[0] ?? jrs.sort((a, b) => jrH[a.id] - jrH[b.id])[0];
+      .sort((a, b) => {
+        const ar = jrH[a.id] / rotDays[a.id];
+        const br = jrH[b.id] / rotDays[b.id];
+        return ar !== br ? ar - br : jrC[a.id] - jrC[b.id];
+      });
+    return candidates[0] ?? jrs.sort((a, b) => jrH[a.id] / rotDays[a.id] - jrH[b.id] / rotDays[b.id])[0];
   }
 
   function addJD(

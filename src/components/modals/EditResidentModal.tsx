@@ -1,37 +1,38 @@
 'use client';
 
 import { useState } from 'react';
+import type { Resident } from '@/types';
 import { api } from '../App';
 
 interface Props {
-  open: boolean;
+  resident: Resident | null;
   onClose: () => void;
-  onAdded: (id: string, pin: string, name: string) => void;
+  onSaved: () => void;
   showToast: (msg: string, err?: boolean) => void;
 }
 
-export default function AddResidentModal({ open, onClose, onAdded, showToast }: Props) {
-  const [name, setName] = useState('');
-  const [pgy, setPgy] = useState('4');
-  const [hospital, setHospital] = useState('CUH');
-  const [status, setStatus] = useState('active');
-  const [rotStart, setRotStart] = useState('');
-  const [rotEnd, setRotEnd] = useState('');
+export default function EditResidentModal({ resident, onClose, onSaved, showToast }: Props) {
+  const [pgy, setPgy] = useState(String(resident?.pgy ?? '4'));
+  const [hospital, setHospital] = useState(resident?.hospital ?? 'CUH');
+  const [status, setStatus] = useState(resident?.status ?? 'active');
+  const [rotStart, setRotStart] = useState(resident?.rotation_start ?? '');
+  const [rotEnd, setRotEnd] = useState(resident?.rotation_end ?? '');
   const [loading, setLoading] = useState(false);
 
-  async function doAdd() {
-    const trimmed = name.trim();
-    if (!trimmed) { showToast('Enter a name', true); return; }
+  if (!resident) return null;
+
+  async function save() {
     setLoading(true);
     try {
-      const { id, pin } = await api<{ id: string; pin: string; name: string }>(
-        '/residents',
-        'POST',
-        { name: trimmed, pgy: parseInt(pgy), hospital, status, rotation_start: rotStart || null, rotation_end: rotEnd || null },
-      );
-      onAdded(id, pin, trimmed);
-      setName(''); setPgy('4'); setHospital('CUH'); setStatus('active');
-      setRotStart(''); setRotEnd('');
+      await api(`/residents/${resident!.id}`, 'PATCH', {
+        pgy: parseInt(pgy),
+        hospital,
+        status,
+        rotation_start: rotStart || null,
+        rotation_end: rotEnd || null,
+      });
+      onSaved();
+      showToast(`${resident!.name} updated`);
       onClose();
     } catch (e) {
       showToast((e as Error).message, true);
@@ -40,29 +41,17 @@ export default function AddResidentModal({ open, onClose, onAdded, showToast }: 
     }
   }
 
-  if (!open) return null;
-
   return (
     <div className="modal-bg open">
       <div className="modal">
         <div className="mh">
           <div>
-            <div className="mt">Add Resident to Pool</div>
-            <div className="ms">A unique PIN will be generated and shown — share it privately</div>
+            <div className="mt">Edit Resident</div>
+            <div className="ms">{resident.name}</div>
           </div>
           <button className="mx" onClick={onClose}>✕</button>
         </div>
         <div className="mb">
-          <div className="fl">
-            <label className="flb">Full Name</label>
-            <input
-              type="text"
-              placeholder="e.g. Alex Johnson"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && doAdd()}
-            />
-          </div>
           <div className="fg f3">
             <div className="fl">
               <label className="flb">PGY Level</label>
@@ -84,26 +73,29 @@ export default function AddResidentModal({ open, onClose, onAdded, showToast }: 
               <label className="flb">Status</label>
               <select value={status} onChange={(e) => setStatus(e.target.value)}>
                 <option value="active">Active</option>
-                <option value="research">Research (1 bkp wk + wknd)</option>
+                <option value="research">Research (backup)</option>
                 <option value="away">Away / Excused</option>
               </select>
             </div>
           </div>
-        </div>
           <div className="fg f2">
             <div className="fl">
               <label className="flb">Rotation Start <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span></label>
-              <input type="date" value={rotStart} onChange={(e) => setRotStart(e.target.value)} />
+              <input type="date" value={rotStart ?? ''} onChange={(e) => setRotStart(e.target.value)} />
             </div>
             <div className="fl">
               <label className="flb">Rotation End <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span></label>
-              <input type="date" value={rotEnd} onChange={(e) => setRotEnd(e.target.value)} />
+              <input type="date" value={rotEnd ?? ''} onChange={(e) => setRotEnd(e.target.value)} />
             </div>
           </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', padding: '4px 2px' }}>
+            Leave blank to use the full block period. Call hours are assigned proportionally to rotation length.
+          </div>
+        </div>
         <div className="mf">
           <button className="btn bgh" onClick={onClose}>Cancel</button>
-          <button className="btn bg" onClick={doAdd} disabled={loading}>
-            {loading ? <span className="spinner" /> : 'Add & Generate PIN'}
+          <button className="btn bg" onClick={save} disabled={loading}>
+            {loading ? <span className="spinner" /> : 'Save Changes'}
           </button>
         </div>
       </div>
