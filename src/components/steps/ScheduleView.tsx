@@ -92,11 +92,41 @@ export default function ScheduleView({
     return parseDate(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
-  // ── Calendar tab ──────────────────────────────────────────────────────────────
-  function renderCalendar() {
+  // ── Calendar rendering (shared by screen + print) ────────────────────────────
+  function buildChips(key: string, isWk: boolean, isHol: boolean): string {
+    const rc = (color: string, label: string) =>
+      `<div class="chip" style="background:${color}22;color:${color};border:1px solid ${color}44">${label}</div>`;
+    const sr = srMap[key];
+    const jr = jrMap[key];
+    const isResBkpDay = resBkpDayKeys.has(key);
+    let chips = '';
+    if (sr) chips += rc(sr.res.color, `${sr.isBackup ? '🔬' : '🔶'} ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}`);
+    if (isResBkpDay) {
+      const rb = (schedule!.resBkpDays ?? []).find((d) => d.dateKey === key);
+      if (rb) chips += rc(rb.res.color, `🔬 ${rb.res.name} (bkp)`);
+    }
+    if (jr) {
+      const label = isHol ? `🎉 ${jr.res.name} 24h`
+        : jr.type === 'saturday' ? `🟣 ${jr.res.name} 24h`
+        : jr.type === 'fri-pair' ? `🔗Fri ${jr.res.name} 12h`
+        : jr.type === 'sun-pair' ? `🔗Sun ${jr.res.name} 24h`
+        : `${jr.res.name} ${jr.shiftHrs}h`;
+      chips += rc(jr.res.color, label);
+      if ((isWk || isHol) && jr.res.hospital === 'CUH') chips += `<div class="chip ccuh">🏥 CUH</div>`;
+      if ((isWk || isHol) && jr.res.hospital === 'PMH') {
+        chips += `<div class="chip csat">🏥 PMH</div>`;
+        chips += jr.cuhRounder
+          ? rc(jr.cuhRounder.color, `CUH:${jr.cuhRounder.name}`)
+          : `<div class="chip cwrn">⚠CUH?</div>`;
+      }
+    }
+    return chips;
+  }
+
+  function renderCalendarMonth(year: number, month: number, forPrint = false): ReactElement[] {
     const today = new Date();
-    const firstDay = new Date(calYear, calMonth, 1).getDay();
-    const dim = new Date(calYear, calMonth + 1, 0).getDate();
+    const firstDay = new Date(year, month, 1).getDay();
+    const dim = new Date(year, month + 1, 0).getDate();
     const cells: (number | null)[] = [];
     for (let i = 0; i < firstDay; i++) cells.push(null);
     for (let d = 1; d <= dim; d++) cells.push(d);
@@ -105,56 +135,27 @@ export default function ScheduleView({
     let wn = 1;
     for (let i = 0; i < cells.length; i += 7) {
       const week = cells.slice(i, i + 7);
-      rows.push(
-        <div key={`wl-${i}`} className="cwl">W{wn++}</div>
-      );
+      if (!forPrint) rows.push(<div key={`wl-${i}`} className="cwl">W{wn++}</div>);
       week.forEach((day, j) => {
-        if (!day) { rows.push(<div key={`empty-${i}-${j}`} className="ccell coff" />); return; }
-        const key = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const pfx = forPrint ? 'p' : '';
+        if (!day) { rows.push(<div key={`empty-${i}-${j}${pfx}`} className="ccell coff" />); return; }
+        const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const d = parseDate(key);
         const dow = d.getDay();
         const isWk = dow === 0 || dow === 6;
         const isHol = HOLIDAYS.has(key);
-        const isToday = today.getFullYear() === calYear && today.getMonth() === calMonth && today.getDate() === day;
-        const jr = jrMap[key];
-        const sr = srMap[key];
-        const isResBkpDay = resBkpDayKeys.has(key);
-
-        let chips = '';
-        const rc = (color: string, label: string) =>
-          `<div class="chip" style="background:${color}22;color:${color};border:1px solid ${color}44">${label}</div>`;
-
-        if (sr) chips += rc(sr.res.color, `${sr.isBackup ? '🔬' : '🔶'} ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}`);
-        if (isResBkpDay) {
-          const rb = (schedule!.resBkpDays ?? []).find((d) => d.dateKey === key);
-          if (rb) chips += rc(rb.res.color, `🔬 ${rb.res.name} (bkp)`);
-        }
-        if (jr) {
-          const label = isHol ? `🎉 ${jr.res.name} 24h`
-            : jr.type === 'saturday' ? `🟣 ${jr.res.name} 24h`
-            : jr.type === 'fri-pair' ? `🔗Fri ${jr.res.name} 12h`
-            : jr.type === 'sun-pair' ? `🔗Sun ${jr.res.name} 24h`
-            : `${jr.res.name} ${jr.shiftHrs}h`;
-          chips += rc(jr.res.color, label);
-          if ((isWk || isHol) && jr.res.hospital === 'CUH') chips += `<div class="chip ccuh">🏥 CUH</div>`;
-          if ((isWk || isHol) && jr.res.hospital === 'PMH') {
-            chips += `<div class="chip csat">🏥 PMH</div>`;
-            chips += jr.cuhRounder
-              ? rc(jr.cuhRounder.color, `CUH:${jr.cuhRounder.name}`)
-              : `<div class="chip cwrn">⚠CUH?</div>`;
-          }
-        }
-
-        const isSel = selectedKeys.includes(key);
-        const handleClick = role === 'chief'
+        const isToday = !forPrint && today.getFullYear() === year && today.getMonth() === month && today.getDate() === day;
+        const isSel = !forPrint && selectedKeys.includes(key);
+        const chips = buildChips(key, isWk, isHol);
+        const handleClick = forPrint ? undefined : (role === 'chief'
           ? selectMode
             ? () => setSelectedKeys((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key])
             : () => setOverrideKeys([key])
-          : undefined;
+          : undefined);
 
         rows.push(
           <div
-            key={key}
+            key={key + pfx}
             className={`ccell${isWk ? ' cwk' : ''}${isHol ? ' chol' : ''}${isSel ? ' csel' : ''}`}
             onClick={handleClick}
           >
@@ -165,6 +166,10 @@ export default function ScheduleView({
       });
     }
     return rows;
+  }
+
+  function renderCalendar() {
+    return renderCalendarMonth(calYear, calMonth);
   }
 
   // ── Senior tab ────────────────────────────────────────────────────────────────
@@ -527,103 +532,7 @@ export default function ScheduleView({
   }
 
   function exportPDF() {
-    const bS = parseDate(schedule!.bStart);
-    const bE = parseDate(schedule!.bEnd);
-
-    // Build day-info map for the whole block
-    interface DayInfo { key: string; srLabel: string; srColor: string; jrLabel: string; jrColor: string; isHol: boolean; isWk: boolean; }
-    const days: DayInfo[] = [];
-    let d = new Date(bS);
-    while (d <= bE) {
-      const key = dk(d);
-      const isHol = HOLIDAYS.has(key);
-      const isWk = d.getDay() === 0 || d.getDay() === 6;
-      const sr = srMap[key];
-      const jr = jrMap[key];
-      const isResBkpDay = resBkpDayKeys.has(key);
-      let srLabel = sr ? `${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}` : '';
-      let srColor = sr ? sr.res.color : '';
-      if (!srLabel && isResBkpDay) {
-        const rb = (schedule!.resBkpDays ?? []).find((x) => x.dateKey === key);
-        if (rb) { srLabel = `${rb.res.name} (bkp)`; srColor = rb.res.color; }
-      }
-      const jrLabel = jr ? `${jr.res.name} ${jr.shiftHrs}h` : '';
-      const jrColor = jr ? jr.res.color : '';
-      days.push({ key, srLabel, srColor, jrLabel, jrColor, isHol, isWk });
-      d = addDays(d, 1);
-    }
-
-    // ── Calendar section: one grid per month ──
-    const monthsInBlock: { year: number; month: number }[] = [];
-    days.forEach(({ key }) => {
-      const dd = parseDate(key);
-      const y = dd.getFullYear(), m = dd.getMonth();
-      if (!monthsInBlock.find((x) => x.year === y && x.month === m)) monthsInBlock.push({ year: y, month: m });
-    });
-    const MNAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-    const calHtml = monthsInBlock.map(({ year, month }) => {
-      const firstDow = new Date(year, month, 1).getDay();
-      const dim = new Date(year, month + 1, 0).getDate();
-      let cells = '';
-      for (let i = 0; i < firstDow; i++) cells += '<td class="empty"></td>';
-      for (let day = 1; day <= dim; day++) {
-        const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        const info = days.find((x) => x.key === key);
-        const bg = info?.isHol ? '#fff7ed' : info?.isWk ? '#f1f5f9' : '#fff';
-        const srSpan = info?.srLabel ? `<div class="chip" style="background:${info.srColor}22;border:1px solid ${info.srColor}66;color:#1e293b">${info.srLabel}</div>` : '';
-        const jrSpan = info?.jrLabel ? `<div class="chip" style="background:${info.jrColor}22;border:1px solid ${info.jrColor}66;color:#1e293b">${info.jrLabel}</div>` : '';
-        const holMark = info?.isHol ? ' 🎉' : '';
-        cells += `<td style="background:${bg}"><div class="dn">${day}${holMark}</div>${srSpan}${jrSpan}</td>`;
-      }
-      return `<h2>${MNAMES[month]} ${year}</h2>
-<table class="cal"><thead><tr>${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => `<th>${d}</th>`).join('')}</tr></thead>
-<tbody><tr>${cells.replace(/<\/td><td/g, '</td><td').split('</tr>').join('</tr><tr>').replace(/<tr><\/tr>/g,'')}</tr></tbody></table>`;
-    }).join('<div class="pb"></div>');
-
-    // ── List section ──
-    const listRows = days.map(({ key, srLabel, jrLabel, isHol, isWk }) => {
-      const dd = parseDate(key);
-      const cls = isHol ? 'hol' : isWk ? 'wknd' : '';
-      return `<tr class="${cls}"><td>${key}</td><td>${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dd.getDay()]}</td><td>${isHol ? '🎉' : ''}</td><td>${srLabel}</td><td>${jrLabel}</td></tr>`;
-    }).join('');
-
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>${schedule!.blockName} — Call Schedule</title>
-<style>
-*{box-sizing:border-box}
-body{font-family:Arial,sans-serif;font-size:11px;margin:20px;color:#1e293b}
-h1{font-size:17px;margin:0 0 2px}
-.sub{color:#64748b;font-size:11px;margin-bottom:20px}
-h2{font-size:13px;margin:20px 0 6px;color:#1e293b}
-/* Calendar */
-table.cal{width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:8px}
-table.cal th{background:#1e293b;color:#fff;padding:4px;text-align:center;font-size:10px}
-table.cal td{border:1px solid #cbd5e1;vertical-align:top;padding:4px;height:72px;width:14.28%}
-table.cal td.empty{background:#f8fafc}
-.dn{font-weight:700;font-size:11px;margin-bottom:3px}
-.chip{font-size:9px;padding:1px 4px;border-radius:3px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* List */
-table.lst{width:100%;border-collapse:collapse;margin-top:8px}
-table.lst th{background:#1e293b;color:#fff;padding:5px 8px;text-align:left;font-size:10px}
-table.lst td{padding:4px 8px;border-bottom:1px solid #e2e8f0;font-size:10px}
-tr.wknd td{background:#f8fafc}
-tr.hol td{background:#fff7ed}
-.pb{page-break-after:always;height:1px}
-.sec{font-size:14px;font-weight:700;margin:24px 0 8px;padding-bottom:4px;border-bottom:2px solid #1e293b}
-@media print{body{margin:10px}.pb{page-break-after:always}}
-</style></head><body>
-<h1>${schedule!.blockName} — Call Schedule</h1>
-<div class="sub">${fmtDate(schedule!.bStart)} → ${fmtDate(schedule!.bEnd)}</div>
-<div class="sec">Calendar View</div>
-${calHtml}
-<div class="pb"></div>
-<div class="sec">Daily List</div>
-<table class="lst"><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th>Senior on Call</th><th>Junior on Call</th></tr></thead>
-<tbody>${listRows}</tbody></table>
-<script>window.onload=()=>{window.print()}<\/script>
-</body></html>`;
-    const w = window.open('', '_blank');
-    if (w) { w.document.write(html); w.document.close(); }
+    window.print();
   }
 
   function exportICS() {
@@ -745,6 +654,21 @@ ${calHtml}
 
       {tab === 'hours' && renderHoursTab()}
       {tab === 'equity' && renderEquityTab()}
+
+      {/* Print-only calendar */}
+      <div className="print-cal">
+        {getBlockMonths().map(({ year, month }) => (
+          <div key={`${year}-${month}`} className="print-month">
+            <div className="print-month-title">{MONTHS[month]} {year}</div>
+            <div className="calgrid no-wl">
+              {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => (
+                <div key={d} className="cdow">{d}</div>
+              ))}
+              {renderCalendarMonth(year, month, true)}
+            </div>
+          </div>
+        ))}
+      </div>
 
       {/* Override modal */}
       {role === 'chief' && (

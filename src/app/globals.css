@@ -679,3 +679,23 @@ select {
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+/* ── Print / PDF ── */
+.print-cal { display: none; }
+@media print {
+  *, *::before, *::after { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  body * { visibility: hidden; }
+  .print-cal, .print-cal * { visibility: visible; }
+  .print-cal {
+    display: block !important;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%;
+    background: var(--bg);
+    padding: 24px;
+    overflow: visible;
+  }
+  .print-month { margin-bottom: 36px; page-break-inside: avoid; }
+  .print-month-title { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 700; margin-bottom: 10px; color: var(--text); }
+  .calgrid.no-wl { grid-template-columns: repeat(7, 1fr); }
+}
