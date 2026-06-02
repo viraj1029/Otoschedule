@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { getSession } from '@/lib/session';
+import { initDb } from '@/lib/init-db';
 
 const DEFAULT_BLOCK_ID = 'block_main';
 
 export async function POST(req: Request) {
+  await initDb();
   const { password } = await req.json();
 
   const { rows } = await sql`SELECT chief_password FROM blocks WHERE id = ${DEFAULT_BLOCK_ID}`;
