@@ -67,6 +67,8 @@ export function shiftHours(key: string): number {
 
 // ─── Main generator ───────────────────────────────────────────────────────────
 
+export type ScheduleMode = 'merged' | 'senior' | 'junior';
+
 export function generateSchedule(
   residents: Resident[],
   requests: Request[],
@@ -74,6 +76,7 @@ export function generateSchedule(
   bStartStr: string,
   bEndStr: string,
   blockPublished: boolean,
+  mode: ScheduleMode = 'merged',
 ): ScheduleData {
   const srs = residents
     .filter((r) => r.pgy >= 4 && r.status === 'active')
@@ -83,9 +86,11 @@ export function generateSchedule(
     .filter((r) => r.pgy <= 3 && r.status === 'active')
     .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
 
-  if (!srs.length || !jrs.length) {
-    throw new Error('Need at least 1 active senior and 1 active junior');
-  }
+  const needSr = mode === 'merged' || mode === 'senior';
+  const needJr = mode === 'merged' || mode === 'junior';
+
+  if (needSr && !srs.length) throw new Error('Need at least 1 active senior (PGY 4+) to generate a senior schedule');
+  if (needJr && !jrs.length) throw new Error('Need at least 1 active junior (PGY 1–3) to generate a junior schedule');
 
   const bStart = parseDate(bStartStr);
   const bEnd = parseDate(bEndStr);
@@ -111,11 +116,11 @@ export function generateSchedule(
     offMap[r.id] = new Set([...vac, ...wk, ...hol]);
   });
 
-  // ── Research backup ──────────────────────────────────────────────────────────
+  // ── Research backup (senior modes only) ─────────────────────────────────────
   const resBkpWeeks: ResBkpWeek[] = [];
   const resBkpDays: ResBkpDay[] = [];
 
-  if (resR.length) {
+  if (needSr && resR.length) {
     const rr = resR[0];
     let c = new Date(bStart);
     while (c.getDay() !== 1) c = addDays(c, 1);
@@ -174,6 +179,7 @@ export function generateSchedule(
   const seniorWeeks: SeniorWeek[] = [];
   const srC: Record<string, number> = {};
   srs.forEach((r) => (srC[r.id] = 0));
+  if (needSr) {
   let srI = 0;
   let lastSrId: string | null = null;
   let cur = new Date(bStart);
@@ -230,11 +236,13 @@ export function generateSchedule(
   }
   resBkpWeeks.forEach((w) => seniorWeeks.push({ ...w, override: false }));
   seniorWeeks.sort((a, b) => a.wS.localeCompare(b.wS));
+  } // end needSr
 
   // ── Junior days ──────────────────────────────────────────────────────────────
   const juniorDays: JuniorDay[] = [];
   const jrC: Record<string, number> = {};
   const jrH: Record<string, number> = {};
+  if (needJr) {
   jrs.forEach((r) => { jrC[r.id] = 0; jrH[r.id] = 0; });
   const processed = new Set<string>();
 
@@ -345,6 +353,7 @@ export function generateSchedule(
   });
 
   juniorDays.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+  } // end needJr
 
   return {
     bStart: bStartStr,
