@@ -215,35 +215,30 @@ export function generateSchedule(
     let best = pickSr(wS, wEC, lastSrId) ?? pickSr(wS, wEC, null);
     if (!best) best = [...srs].sort(srSort)[0]; // fallback: ignore conflicts
 
-    // Try to split if this candidate would overshoot target noticeably
-    if (pLen > 1 && srDays[best.id] + pLen - targetDays > 1.5) {
-      const idealP1 = Math.round(targetDays - srDays[best.id]);
-      if (idealP1 >= 1 && idealP1 < pLen) {
-        let bestSplitIdx = -1;
-        let bestScore = Infinity;
+    // Split whenever best would exceed their fair share (any overshoot triggers a split attempt).
+    // idealP1: how many days best should ideally get (at least 1).
+    // Find the valid split point (last day of first half ≠ Saturday) closest to idealP1.
+    if (pLen > 1 && srDays[best.id] + pLen > targetDays) {
+      const idealP1 = Math.max(1, Math.round(targetDays - srDays[best.id]));
+      if (idealP1 < pLen) {
+        let chosenSplit = -1;
+        let bestDist = Infinity;
         let d = new Date(wS);
         for (let i = 0; i < pLen - 1; i++) {
-          // Valid split: last day of first half must NOT be Saturday (would separate Sat from Sun)
+          // Valid: last day of first half must NOT be Saturday (keeps Sat+Sun together)
           if (d.getDay() !== 6) {
-            const p1Len = i + 1;
-            const p2Len = pLen - p1Len;
-            const p2Start = addDays(d, 1);
-            const nextCand = pickSr(p2Start, wEC, null) ?? best;
-            const score = Math.abs(srDays[best.id] + p1Len - targetDays)
-                        + Math.abs(srDays[nextCand.id] + p2Len - targetDays);
-            if (score < bestScore) { bestScore = score; bestSplitIdx = i; }
+            const dist = Math.abs((i + 1) - idealP1);
+            if (dist < bestDist) { bestDist = dist; chosenSplit = i; }
           }
           d = addDays(d, 1);
         }
 
-        // Only split if it meaningfully improves balance vs. assigning whole period
-        const noSplitScore = Math.abs(srDays[best.id] + pLen - targetDays);
-        if (bestSplitIdx >= 0 && bestScore < noSplitScore - 0.5) {
+        if (chosenSplit >= 0) {
           let p1End = new Date(wS);
-          for (let i = 0; i < bestSplitIdx; i++) p1End = addDays(p1End, 1);
+          for (let i = 0; i < chosenSplit; i++) p1End = addDays(p1End, 1);
           const p2Start = addDays(p1End, 1);
 
-          srDays[best.id] += bestSplitIdx + 1;
+          srDays[best.id] += chosenSplit + 1;
           srC[best.id]++;
           lastSrId = best.id;
           seniorWeeks.push({ wS: dk(wS), wE: dk(p1End), res: best, isBackup: false, override: false });
