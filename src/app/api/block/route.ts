@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { getSession } from '@/lib/session';
+import { initDb } from '@/lib/init-db';
 
 const DEFAULT_BLOCK_ID = 'block_main';
 
 export async function GET() {
+  await initDb();
   const { rows } = await sql`SELECT * FROM blocks WHERE id = ${DEFAULT_BLOCK_ID}`;
   if (!rows[0]) return NextResponse.json(null);
 
