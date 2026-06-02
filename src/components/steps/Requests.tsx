@@ -53,7 +53,7 @@ export default function Requests({
   const [calMonth, setCalMonth] = useState(bStart.getMonth());
   const [selectedResId, setSelectedResId] = useState<string>(
     role === 'resident' ? (currentResId ?? '') :
-    residents.length > 0 ? residents[0].id : ''
+    residents.length > 0 ? '__all__' : ''
   );
 
   // If resident and schedule is published, show schedule view instead
@@ -118,7 +118,8 @@ export default function Requests({
     );
   }
 
-  const activeResId = role === 'resident' ? (currentResId ?? '') : selectedResId;
+  const isAllView = role === 'chief' && selectedResId === '__all__';
+  const activeResId = role === 'resident' ? (currentResId ?? '') : (isAllView ? '' : selectedResId);
   const activeRes = residents.find((r) => r.id === activeResId);
   const { vacDays, weekends, holidayReqs } = activeResId ? getResRequests(allRequests, activeResId) : { vacDays: new Set<string>(), weekends: new Set<string>(), holidayReqs: new Set<string>() };
 
@@ -126,32 +127,22 @@ export default function Requests({
     const dd = parseDate(d); return dd >= bStart && dd <= bEnd && !HOLIDAYS.has(d);
   }).length;
 
+  // Build all-residents request map for chief "all" view
+  const allResMap: Record<string, Resident[]> = {};
+  if (isAllView) {
+    residents.forEach((res) => {
+      const { vacDays: v, weekends: w, holidayReqs: h } = getResRequests(allRequests, res.id);
+      [...v, ...w, ...h].forEach((d) => {
+        if (!allResMap[d]) allResMap[d] = [];
+        if (!allResMap[d].find((x) => x.id === res.id)) allResMap[d].push(res);
+      });
+    });
+  }
+
   // Request calendar cells
   const firstDay = new Date(calYear, calMonth, 1).getDay();
   const dim = new Date(calYear, calMonth + 1, 0).getDate();
   const today = new Date();
-
-  // Conflicts (chief only)
-  const conflictDays: { day: string; pgy: number; resNames: string[] }[] = [];
-  if (role === 'chief') {
-    const dayMap: Record<string, Resident[]> = {};
-    residents.forEach((res) => {
-      const { vacDays: v, weekends: w, holidayReqs: h } = getResRequests(allRequests, res.id);
-      [...v, ...w, ...h].forEach((d) => {
-        if (!dayMap[d]) dayMap[d] = [];
-        dayMap[d].push(res);
-      });
-    });
-    Object.entries(dayMap).forEach(([day, rl]) => {
-      if (rl.length < 2) return;
-      const byP: Record<number, Resident[]> = {};
-      rl.forEach((r) => { if (!byP[r.pgy]) byP[r.pgy] = []; byP[r.pgy].push(r); });
-      Object.entries(byP).forEach(([pgy, l]) => {
-        if (l.length >= 2)
-          conflictDays.push({ day, pgy: parseInt(pgy), resNames: l.map((r) => r.name) });
-      });
-    });
-  }
 
   const allDaysList: { d: string; t: 'vac' | 'wk' | 'hol' }[] = [
     ...[...vacDays].map((d) => ({ d, t: 'vac' as const })),
@@ -176,9 +167,10 @@ export default function Requests({
       {/* Chief resident selector */}
       {role === 'chief' && (
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 18 }}>
-          <div className="fl" style={{ flex: '0 0 240px' }}>
+          <div className="fl" style={{ flex: '0 0 260px' }}>
             <label className="flb">Viewing requests for</label>
             <select value={selectedResId} onChange={(e) => setSelectedResId(e.target.value)}>
+              <option value="__all__">— All Residents —</option>
               {sortedResidents.map((r) => (
                 <option key={r.id} value={r.id}>
                   PGY-{r.pgy} — {r.name}{r.status === 'research' ? ' [Research]' : ''}
@@ -213,7 +205,7 @@ export default function Requests({
         {/* Calendar */}
         <div className="card">
           <div className="ch">
-            <div className="ct">{MONTHS[calMonth]} {calYear}{activeRes ? ` — ${activeRes.name}` : ''}</div>
+            <div className="ct">{MONTHS[calMonth]} {calYear}{isAllView ? ' — All Residents' : activeRes ? ` — ${activeRes.name}` : ''}</div>
             <div style={{ display: 'flex', gap: 4 }}>
               <button className="bico" onClick={() => navCal(-1)}>‹</button>
               <button className="bico" onClick={() => navCal(1)}>›</button>
@@ -237,10 +229,33 @@ export default function Requests({
                 const isWk = dow === 0 || dow === 6;
                 const isHol = HOLIDAYS.has(key);
                 const inBlock = d >= bStart && d <= bEnd;
+                const isToday = today.getFullYear() === calYear && today.getMonth() === calMonth && today.getDate() === day;
+
+                if (isAllView) {
+                  const rList = allResMap[key] ?? [];
+                  let cls = 'rc';
+                  if (!inBlock) cls += ' rcoff';
+                  else if (isHol) cls += ' rchol';
+                  else if (isWk) cls += ' rcwe';
+                  return (
+                    <div key={key} className={cls} style={{ position: 'relative' }}>
+                      <span style={isToday ? { fontWeight: 700, color: 'var(--text)' } : {}}>{day}</span>
+                      {rList.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, marginTop: 2, justifyContent: 'center' }}>
+                          {rList.map((r) => (
+                            <div key={r.id} title={r.name} style={{
+                              width: 6, height: 6, borderRadius: '50%', background: r.color, flexShrink: 0,
+                            }} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+
                 const isVac = vacDays.has(key);
                 const isWkReq = weekends.has(key);
                 const isHolReq = holidayReqs.has(key);
-                const isToday = today.getFullYear() === calYear && today.getMonth() === calMonth && today.getDate() === day;
                 let cls = 'rc';
                 if (!inBlock) cls += ' rcoff';
                 else if (isHol && isHolReq) cls += ' rcholreq';
@@ -329,32 +344,6 @@ export default function Requests({
               </div>
             </div>
           </div>
-
-          {/* Conflicts (chief only) */}
-          {role === 'chief' && (
-            <div className="card">
-              <div className="ch">
-                <div className="ct">Conflicts</div>
-                {conflictDays.length > 0 && (
-                  <span className="bdg br">{conflictDays.length}</span>
-                )}
-              </div>
-              <div className="cb">
-                {conflictDays.length === 0
-                  ? <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>No conflicts detected.</div>
-                  : conflictDays.map((c, i) => (
-                    <div key={i} className="confl">
-                      <span>⚠</span>
-                      <div>
-                        <div style={{ fontWeight: 600 }}>{fmtShort(c.day)} — PGY-{c.pgy} conflict</div>
-                        <div>{c.resNames.join(' & ')} both requested off</div>
-                      </div>
-                    </div>
-                  ))
-                }
-              </div>
-            </div>
-          )}
 
           {/* All residents summary (chief only) */}
           {role === 'chief' && (

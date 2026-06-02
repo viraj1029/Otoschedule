@@ -507,9 +507,7 @@ select {
   cursor: pointer;
   transition: all 0.15s;
   display: inline-block;
-  filter: blur(4px);
 }
-.pin-chip:hover { filter: blur(0); }
 .pin-big {
   font-family: 'JetBrains Mono', monospace;
   font-size: 42px;

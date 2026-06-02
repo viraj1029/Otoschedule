@@ -79,10 +79,6 @@ export default function ScheduleView({
   });
   const resBkpDayKeys = new Set(schedule.resBkpDayKeys ?? []);
 
-  // Stats
-  const s24 = schedule.juniorDays.filter((d) => d.shiftHrs === 24).length;
-  const s12 = schedule.juniorDays.filter((d) => d.shiftHrs === 12).length;
-
   async function togglePublish() {
     const next = !published;
     setPublished(next);
@@ -553,6 +549,54 @@ export default function ScheduleView({
     showToast('CSV exported');
   }
 
+  function exportPDF() {
+    const bS = parseDate(schedule!.bStart);
+    const bE = parseDate(schedule!.bEnd);
+    const rows: string[] = [];
+    let d = new Date(bS);
+    while (d <= bE) {
+      const key = dk(d);
+      const dow = DOW[d.getDay()];
+      const isHol = HOLIDAYS.has(key);
+      const sr = srMap[key];
+      const jr = jrMap[key];
+      const isResBkpDay = resBkpDayKeys.has(key);
+      let srLabel = sr ? `${sr.res.name}${sr.isBackup ? ' (Research bkp)' : ''}` : '';
+      if (!srLabel && isResBkpDay) {
+        const rb = (schedule!.resBkpDays ?? []).find((x) => x.dateKey === key);
+        if (rb) srLabel = `${rb.res.name} (Research bkp)`;
+      }
+      const jrLabel = jr ? `${jr.res.name} ${jr.shiftHrs}h${isHol ? ' 🎉' : ''}` : '';
+      rows.push(
+        `<tr class="${isHol ? 'hol' : d.getDay() === 0 || d.getDay() === 6 ? 'wknd' : ''}">` +
+        `<td>${key}</td><td>${dow}</td>` +
+        `<td>${isHol ? '🎉 Holiday' : ''}</td>` +
+        `<td>${srLabel}</td><td>${jrLabel}</td></tr>`,
+      );
+      d = addDays(d, 1);
+    }
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${schedule!.blockName} — Call Schedule</title>
+<style>
+body{font-family:Arial,sans-serif;font-size:12px;margin:24px}
+h1{font-size:16px;margin-bottom:4px}
+p{color:#666;margin-bottom:16px;font-size:11px}
+table{width:100%;border-collapse:collapse}
+th{background:#1e293b;color:#fff;padding:6px 8px;text-align:left;font-size:11px}
+td{padding:5px 8px;border-bottom:1px solid #e2e8f0;font-size:11px}
+tr.wknd{background:#f8fafc}
+tr.hol{background:#fff7ed}
+@media print{body{margin:12px}h1{font-size:14px}}
+</style></head><body>
+<h1>${schedule!.blockName} — Call Schedule</h1>
+<p>${fmtDate(schedule!.bStart)} → ${fmtDate(schedule!.bEnd)}</p>
+<table><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th>Senior on Call</th><th>Junior on Call</th></tr></thead>
+<tbody>${rows.join('')}</tbody></table>
+<script>window.onload=()=>{window.print()}<\/script>
+</body></html>`;
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); }
+  }
+
   function exportICS() {
     let ics = 'BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//OTO Scheduler//UTSW//EN\n';
     schedule!.juniorDays.forEach((jd) => {
@@ -582,8 +626,6 @@ export default function ScheduleView({
 
   const TABS: { id: Tab; label: string }[] = [
     { id: 'calendar', label: '📅 Calendar' },
-    { id: 'senior', label: '🔶 Senior Call' },
-    { id: 'junior', label: '🔷 Junior Call' },
     ...(role === 'chief' ? [
       { id: 'hours' as Tab, label: '⏱ Hours' },
       { id: 'equity' as Tab, label: '📊 Equity' },
@@ -604,47 +646,14 @@ export default function ScheduleView({
               {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
             </button>
             <button className="btn bgh bsm" onClick={exportCSV}>↓ CSV</button>
-            <button className="btn bg bsm" onClick={exportICS}>📅 iCal</button>
+            <button className="btn bgh bsm" onClick={exportICS}>📅 iCal</button>
+            <button className="btn bg bsm" onClick={exportPDF}>🖨 PDF</button>
           </div>
         )}
       </div>
 
       <div className="page-sub">
         {fmtDate(schedule.bStart)} → {fmtDate(schedule.bEnd)}
-      </div>
-
-      {/* Stats */}
-      <div className="srow" style={{ gridTemplateColumns: 'repeat(5,1fr)' }}>
-        {[
-          { l: 'Senior Weeks', v: schedule.seniorWeeks.filter((w) => !w.isBackup).length, c: 'var(--gold)' },
-          { l: 'Research Backup', v: `${(schedule.resBkpWeeks ?? []).length}+${(schedule.resBkpDays ?? []).length}`, c: 'var(--pink)' },
-          { l: 'Junior Days', v: schedule.juniorDays.length, c: 'var(--blue)' },
-          { l: '12h Shifts', v: s12, c: 'var(--teal)' },
-          { l: '24h Shifts', v: s24, c: 'var(--purple)' },
-        ].map((s) => (
-          <div key={s.l} className="sc">
-            <div className="sn" style={{ color: s.c }}>{s.v}</div>
-            <div className="sl">{s.l}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Legend */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11, color: 'var(--muted)', marginBottom: 16 }}>
-        {[
-          { cls: 'csr', label: 'Senior on call' },
-          { cls: 'cjr', label: 'Junior weekday (12h)' },
-          { cls: 'csun', label: 'Fri+Sun pair' },
-          { cls: 'csat', label: 'Saturday (24h)' },
-          { cls: 'chc', label: 'Holiday (24h)' },
-          { cls: 'ccuh', label: 'CUH weekend rounder' },
-          { cls: 'cres', label: 'Research backup' },
-        ].map(({ cls, label }) => (
-          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <div style={{ width: 10, height: 10, borderRadius: 2 }} className={`chip ${cls}`} />
-            {label}
-          </div>
-        ))}
       </div>
 
       {/* Tabs */}
@@ -703,20 +712,6 @@ export default function ScheduleView({
             ))}
             {renderCalendar()}
           </div>
-        </div>
-      )}
-
-      {tab === 'senior' && (
-        <div className="card">
-          <div className="ch"><div className="ct">Senior Call — Weekly Blocks</div></div>
-          <div className="cb">{renderSeniorTab()}</div>
-        </div>
-      )}
-
-      {tab === 'junior' && (
-        <div className="card">
-          <div className="ch"><div className="ct">Junior Call — Daily Rotation</div></div>
-          <div className="cb">{renderJuniorTab()}</div>
         </div>
       )}
 
