@@ -117,42 +117,66 @@ export function generateSchedule(
   });
 
   // ── Research backup (senior modes only) ─────────────────────────────────────
-  // Each research resident gets exactly 5 weekday backup days + 1 weekend day,
-  // spread evenly through the block, stored as single-day SeniorWeek entries.
+  // Ideal: one full Mon–Sun week with no time-off conflicts.
+  // Fallback: longest consecutive available run (cap 7 days, anchor to a Monday
+  // inside the run when possible).
   const resBkpWeeks: ResBkpWeek[] = [];
-  const resBkpDays: ResBkpDay[] = []; // kept empty; entries now live in seniorWeeks directly
-
-  function pickSpread(dates: string[], n: number): string[] {
-    if (n <= 0 || !dates.length) return [];
-    if (dates.length <= n) return [...dates];
-    if (n === 1) return [dates[Math.floor(dates.length / 2)]];
-    const result: string[] = [];
-    for (let i = 0; i < n; i++) {
-      result.push(dates[Math.floor(i * (dates.length - 1) / (n - 1))]);
-    }
-    return result;
-  }
+  const resBkpDays: ResBkpDay[] = []; // unused; kept for ScheduleData compat
 
   if (needSr && resR.length) {
     for (const rr of resR) {
-      const availWeekdays: string[] = [];
-      const availWeekends: string[] = [];
-      let d = new Date(bStart);
-      while (d <= bEnd) {
-        const key = dk(d);
-        const dow = d.getDay();
-        if (!offMap[rr.id].has(key)) {
-          if (dow >= 1 && dow <= 5) availWeekdays.push(key);
-          else if (dow === 6 || dow === 0) availWeekends.push(key);
+      // 1. Try every Monday for a conflict-free Mon–Sun week
+      let assigned = false;
+      let c = new Date(bStart);
+      while (c.getDay() !== 1) c = addDays(c, 1);
+      while (c <= bEnd && !assigned) {
+        const wS = new Date(c);
+        const wE = addDays(c, 6);
+        const wEC = wE > bEnd ? new Date(bEnd) : new Date(wE);
+        let ok = true;
+        let d2 = new Date(wS);
+        while (d2 <= wEC) { if (offMap[rr.id].has(dk(d2))) { ok = false; break; } d2 = addDays(d2, 1); }
+        if (ok) {
+          resBkpWeeks.push({ wS: dk(wS), wE: dk(wEC), res: rr, isBackup: true });
+          assigned = true;
         }
-        d = addDays(d, 1);
+        c = addDays(wE, 1);
       }
-      const pickedDays = [
-        ...pickSpread(availWeekdays, 5),
-        ...pickSpread(availWeekends, 1),
-      ];
-      for (const key of pickedDays) {
-        resBkpWeeks.push({ wS: key, wE: key, res: rr, isBackup: true });
+
+      // 2. Fallback: find the longest consecutive run of available days
+      if (!assigned) {
+        const runs: { wS: string; wE: string; len: number }[] = [];
+        let runStart: Date | null = null;
+        let d = new Date(bStart);
+        while (d <= bEnd) {
+          if (!offMap[rr.id].has(dk(d))) {
+            if (!runStart) runStart = new Date(d);
+          } else if (runStart) {
+            const runEnd = addDays(d, -1);
+            runs.push({ wS: dk(runStart), wE: dk(runEnd), len: Math.round((runEnd.getTime() - runStart.getTime()) / 86400000) + 1 });
+            runStart = null;
+          }
+          d = addDays(d, 1);
+        }
+        if (runStart) runs.push({ wS: dk(runStart), wE: dk(bEnd), len: Math.round((bEnd.getTime() - runStart.getTime()) / 86400000) + 1 });
+
+        runs.sort((a, b) => b.len - a.len);
+        if (runs.length) {
+          let { wS: rS, wE: rE, len } = runs[0];
+          if (len >= 7) {
+            // Try to anchor to a Monday inside the run
+            let mon = parseDate(rS);
+            const runEnd = parseDate(rE);
+            while (mon <= runEnd && mon.getDay() !== 1) mon = addDays(mon, 1);
+            if (mon <= runEnd) {
+              const sun = addDays(mon, 6);
+              rS = dk(mon); rE = dk(sun > runEnd ? runEnd : sun);
+            } else {
+              rE = dk(addDays(parseDate(rS), 6) > parseDate(rE) ? parseDate(rE) : addDays(parseDate(rS), 6));
+            }
+          }
+          resBkpWeeks.push({ wS: rS, wE: rE, res: rr, isBackup: true });
+        }
       }
     }
   }
