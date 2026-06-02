@@ -10,21 +10,22 @@
     "migrate": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/migrate.ts"
   },
   "dependencies": {
+    "@vercel/postgres": "^0.10",
+    "bcryptjs": "^2",
+    "iron-session": "^8",
     "next": "^15",
     "react": "^19",
     "react-dom": "^19",
-    "@vercel/postgres": "^0.10",
-    "iron-session": "^8",
-    "bcryptjs": "^2",
-    "uuid": "^11"
+    "uuid": "^11",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "typescript": "^5",
     "@types/bcryptjs": "^2",
-    "@types/uuid": "^10",
+    "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/node": "^22",
-    "ts-node": "^10"
+    "@types/uuid": "^10",
+    "ts-node": "^10",
+    "typescript": "^5"
   }
 }

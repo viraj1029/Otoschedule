@@ -17,6 +17,33 @@ interface Props {
   showToast: (msg: string, err?: boolean) => void;
 }
 
+function removeSeniorDays(updated: ScheduleData, keys: string[]) {
+  const sorted = [...keys].sort();
+  const ranges: { start: string; end: string }[] = [];
+  let rStart = sorted[0], rEnd = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = parseDate(sorted[i - 1]);
+    const curr = parseDate(sorted[i]);
+    if ((curr.getTime() - prev.getTime()) / 86400000 === 1) {
+      rEnd = sorted[i];
+    } else {
+      ranges.push({ start: rStart, end: rEnd });
+      rStart = rEnd = sorted[i];
+    }
+  }
+  ranges.push({ start: rStart, end: rEnd });
+
+  for (const range of ranges) {
+    const newWeeks: ScheduleData['seniorWeeks'] = [];
+    for (const w of updated.seniorWeeks) {
+      if (w.wE < range.start || w.wS > range.end) { newWeeks.push(w); continue; }
+      if (w.wS < range.start) newWeeks.push({ ...w, wE: dk(addDays(parseDate(range.start), -1)) });
+      if (w.wE > range.end) newWeeks.push({ ...w, wS: dk(addDays(parseDate(range.end), 1)) });
+    }
+    updated.seniorWeeks = newWeeks.sort((a, b) => a.wS.localeCompare(b.wS));
+  }
+}
+
 function applyMultiDayOverride(updated: ScheduleData, keys: string[], newRes: Resident) {
   const sorted = [...keys].sort();
 
@@ -73,11 +100,15 @@ export default function OverrideModal({ open, dateKeys, schedule, residents, onS
     if (!dateKeys.length || !schedule) return;
     const updated = JSON.parse(JSON.stringify(schedule)) as ScheduleData;
 
-    if (srId) {
+    if (srId === '__remove__') {
+      removeSeniorDays(updated, dateKeys);
+    } else if (srId) {
       const res = residents.find((r) => r.id === srId);
       if (res) applyMultiDayOverride(updated, dateKeys, res);
     }
-    if (jrId) {
+    if (jrId === '__remove__') {
+      updated.juniorDays = updated.juniorDays.filter((d) => !dateKeys.includes(d.dateKey));
+    } else if (jrId) {
       const res = residents.find((r) => r.id === jrId);
       if (res) {
         dateKeys.forEach((key) => {
@@ -121,6 +152,7 @@ export default function OverrideModal({ open, dateKeys, schedule, residents, onS
               <label className="flb">Senior on Call</label>
               <select value={srId} onChange={(e) => setSrId(e.target.value)}>
                 <option value="">— no change —</option>
+                <option value="__remove__">✕ Remove (no coverage)</option>
                 {srs.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.name} (PGY-{r.pgy})
@@ -132,6 +164,7 @@ export default function OverrideModal({ open, dateKeys, schedule, residents, onS
               <label className="flb">Junior on Call</label>
               <select value={jrId} onChange={(e) => setJrId(e.target.value)}>
                 <option value="">— no change —</option>
+                <option value="__remove__">✕ Remove (no coverage)</option>
                 {jrs.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.name} (PGY-{r.pgy})

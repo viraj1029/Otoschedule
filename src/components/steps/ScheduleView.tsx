@@ -531,8 +531,52 @@ export default function ScheduleView({
     );
   }
 
-  function exportPDF() {
-    window.print();
+  function exportExcel() {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const XLSX = require('xlsx') as typeof import('xlsx');
+    const wb = XLSX.utils.book_new();
+
+    getBlockMonths().forEach(({ year, month }) => {
+      const monthName = MONTHS[month];
+      const firstDay = new Date(year, month, 1).getDay();
+      const dim = new Date(year, month + 1, 0).getDate();
+
+      const aoa: (string | null)[][] = [];
+      aoa.push([`${monthName} ${year}`, null, null, null, null, null, null]);
+      aoa.push(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
+
+      let row: (string | null)[] = Array(firstDay).fill(null);
+      for (let day = 1; day <= dim; day++) {
+        const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const d = parseDate(key);
+        const isHol = HOLIDAYS.has(key);
+        const parts: string[] = [`${day}${isHol ? ' 🎉' : ''}`];
+        const sr = srMap[key];
+        if (sr) parts.push(`Sr: ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}`);
+        if (resBkpDayKeys.has(key)) {
+          const rb = (schedule!.resBkpDays ?? []).find((x) => x.dateKey === key);
+          if (rb) parts.push(`Bkp: ${rb.res.name}`);
+        }
+        const jr = jrMap[key];
+        if (jr) parts.push(`Jr: ${jr.res.name} (${jr.shiftHrs}h)`);
+        row.push(parts.join('\n'));
+
+        if (d.getDay() === 6 || day === dim) {
+          while (row.length < 7) row.push(null);
+          aoa.push(row);
+          row = [];
+        }
+      }
+
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = Array(7).fill({ wch: 22 });
+      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }];
+      ws['!rows'] = [{ hpt: 20 }, { hpt: 16 }, ...Array(6).fill({ hpt: 60 })];
+      XLSX.utils.book_append_sheet(wb, ws, monthName.slice(0, 3));
+    });
+
+    XLSX.writeFile(wb, `${schedule!.blockName.replace(/[^a-z0-9]/gi, '_')}_schedule.xlsx`);
+    showToast('Excel exported');
   }
 
   function exportICS() {
@@ -584,7 +628,7 @@ export default function ScheduleView({
               {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
             </button>
             <button className="btn bgh bsm" onClick={exportICS}>📅 iCal</button>
-            <button className="btn bg bsm" onClick={exportPDF}>🖨 PDF</button>
+            <button className="btn bg bsm" onClick={exportExcel}>📊 Excel</button>
           </div>
         )}
       </div>
