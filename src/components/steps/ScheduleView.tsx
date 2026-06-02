@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactElement } from 'react';
 import type { Block, Resident, Request, ScheduleData, Tab, Role } from '@/types';
 import { HOLIDAYS, parseDate, fmtShort, dk, addDays } from '@/lib/scheduler';
 import { api } from '../App';
@@ -103,7 +103,7 @@ export default function ScheduleView({
     for (let i = 0; i < firstDay; i++) cells.push(null);
     for (let d = 1; d <= dim; d++) cells.push(d);
 
-    const rows: JSX.Element[] = [];
+    const rows: ReactElement[] = [];
     let wn = 1;
     for (let i = 0; i < cells.length; i += 7) {
       const week = cells.slice(i, i + 7);
@@ -197,7 +197,7 @@ export default function ScheduleView({
       if (jd.paired) rc += ' jpair';
       else if (jd.type === 'saturday') rc += ' jsat';
       if (isHol) rc += ' jhol';
-      let ri: JSX.Element | null = null;
+      let ri: ReactElement | null = null;
       if (jd.isWeekend || isHol) {
         if (jd.res.hospital === 'CUH') ri = <span style={{ color: 'var(--green)', fontSize: 11 }}>🟢 CUH</span>;
         else {
