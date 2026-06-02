@@ -125,7 +125,7 @@ export default function ScheduleView({
         let chips = '';
         if (sr) chips += `<div class="chip ${sr.isBackup ? 'cres' : 'csr'}">${sr.isBackup ? '🔬' : '🔶'} ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}</div>`;
         if (isResBkpDay) {
-          const rb = (schedule.resBkpDays ?? []).find((d) => d.dateKey === key);
+          const rb = (schedule!.resBkpDays ?? []).find((d) => d.dateKey === key);
           if (rb) chips += `<div class="chip cres">🔬 ${rb.res.name} (bkp)</div>`;
         }
         if (jr) {
