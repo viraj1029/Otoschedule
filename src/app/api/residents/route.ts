@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { v4 as uuidv4 } from 'uuid';
+import { initDb } from '@/lib/init-db';
 
 const DEFAULT_BLOCK_ID = 'block_main';
 
@@ -12,23 +13,22 @@ const COLORS = [
 ];
 
 export async function GET() {
+  await initDb();
   const session = await getSession();
-  if (!session.role) {
-    return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-  }
 
   const { rows } = await sql`
     SELECT * FROM residents WHERE block_id = ${DEFAULT_BLOCK_ID}
     ORDER BY pgy DESC, name ASC
   `;
 
+  // Unauthenticated: return only enough for the login dropdown (no PINs)
+  if (!session.role) {
+    return NextResponse.json(rows.map((r) => ({ id: r.id, name: r.name, pgy: r.pgy, color: r.color, hospital: r.hospital, status: r.status })));
+  }
+
   if (session.role === 'resident') {
     const myId = session.residentId;
-    const safe = rows.map((r) => ({
-      ...r,
-      pin: r.id === myId ? r.pin : undefined,
-    }));
-    return NextResponse.json(safe);
+    return NextResponse.json(rows.map((r) => ({ ...r, pin: r.id === myId ? r.pin : undefined })));
   }
 
   return NextResponse.json(rows);
