@@ -526,71 +526,100 @@ export default function ScheduleView({
     );
   }
 
-  // ── CSV export ────────────────────────────────────────────────────────────────
-  function exportCSV() {
-    const rows = [['Date','Day','Holiday','Senior','Sr PGY','Junior','Jr PGY','Jr Hospital','Shift Type','Shift Hours','CUH Rounder','Override']];
-    schedule!.juniorDays.forEach((jd) => {
-      const d = parseDate(jd.dateKey);
-      const sr = srMap[jd.dateKey];
-      rows.push([
-        jd.dateKey, DOW[d.getDay()], HOLIDAYS.has(jd.dateKey) ? 'Yes' : 'No',
-        sr ? sr.res.name : '', sr ? `PGY-${sr.res.pgy}` : '',
-        jd.res.name, `PGY-${jd.res.pgy}`, jd.res.hospital,
-        jd.type, `${jd.shiftHrs}h`, jd.cuhRounder ? jd.cuhRounder.name : '',
-        jd.override ? 'Yes' : 'No',
-      ]);
-    });
-    const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'oto_call_schedule.csv'; a.click();
-    URL.revokeObjectURL(url);
-    showToast('CSV exported');
-  }
-
   function exportPDF() {
     const bS = parseDate(schedule!.bStart);
     const bE = parseDate(schedule!.bEnd);
-    const rows: string[] = [];
+
+    // Build day-info map for the whole block
+    interface DayInfo { key: string; srLabel: string; srColor: string; jrLabel: string; jrColor: string; isHol: boolean; isWk: boolean; }
+    const days: DayInfo[] = [];
     let d = new Date(bS);
     while (d <= bE) {
       const key = dk(d);
-      const dow = DOW[d.getDay()];
       const isHol = HOLIDAYS.has(key);
+      const isWk = d.getDay() === 0 || d.getDay() === 6;
       const sr = srMap[key];
       const jr = jrMap[key];
       const isResBkpDay = resBkpDayKeys.has(key);
-      let srLabel = sr ? `${sr.res.name}${sr.isBackup ? ' (Research bkp)' : ''}` : '';
+      let srLabel = sr ? `${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}` : '';
+      let srColor = sr ? sr.res.color : '';
       if (!srLabel && isResBkpDay) {
         const rb = (schedule!.resBkpDays ?? []).find((x) => x.dateKey === key);
-        if (rb) srLabel = `${rb.res.name} (Research bkp)`;
+        if (rb) { srLabel = `${rb.res.name} (bkp)`; srColor = rb.res.color; }
       }
-      const jrLabel = jr ? `${jr.res.name} ${jr.shiftHrs}h${isHol ? ' 🎉' : ''}` : '';
-      rows.push(
-        `<tr class="${isHol ? 'hol' : d.getDay() === 0 || d.getDay() === 6 ? 'wknd' : ''}">` +
-        `<td>${key}</td><td>${dow}</td>` +
-        `<td>${isHol ? '🎉 Holiday' : ''}</td>` +
-        `<td>${srLabel}</td><td>${jrLabel}</td></tr>`,
-      );
+      const jrLabel = jr ? `${jr.res.name} ${jr.shiftHrs}h` : '';
+      const jrColor = jr ? jr.res.color : '';
+      days.push({ key, srLabel, srColor, jrLabel, jrColor, isHol, isWk });
       d = addDays(d, 1);
     }
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${schedule!.blockName} — Call Schedule</title>
+
+    // ── Calendar section: one grid per month ──
+    const monthsInBlock: { year: number; month: number }[] = [];
+    days.forEach(({ key }) => {
+      const dd = parseDate(key);
+      const y = dd.getFullYear(), m = dd.getMonth();
+      if (!monthsInBlock.find((x) => x.year === y && x.month === m)) monthsInBlock.push({ year: y, month: m });
+    });
+    const MNAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const calHtml = monthsInBlock.map(({ year, month }) => {
+      const firstDow = new Date(year, month, 1).getDay();
+      const dim = new Date(year, month + 1, 0).getDate();
+      let cells = '';
+      for (let i = 0; i < firstDow; i++) cells += '<td class="empty"></td>';
+      for (let day = 1; day <= dim; day++) {
+        const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const info = days.find((x) => x.key === key);
+        const bg = info?.isHol ? '#fff7ed' : info?.isWk ? '#f1f5f9' : '#fff';
+        const srSpan = info?.srLabel ? `<div class="chip" style="background:${info.srColor}22;border:1px solid ${info.srColor}66;color:#1e293b">${info.srLabel}</div>` : '';
+        const jrSpan = info?.jrLabel ? `<div class="chip" style="background:${info.jrColor}22;border:1px solid ${info.jrColor}66;color:#1e293b">${info.jrLabel}</div>` : '';
+        const holMark = info?.isHol ? ' 🎉' : '';
+        cells += `<td style="background:${bg}"><div class="dn">${day}${holMark}</div>${srSpan}${jrSpan}</td>`;
+      }
+      return `<h2>${MNAMES[month]} ${year}</h2>
+<table class="cal"><thead><tr>${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => `<th>${d}</th>`).join('')}</tr></thead>
+<tbody><tr>${cells.replace(/<\/td><td/g, '</td><td').split('</tr>').join('</tr><tr>').replace(/<tr><\/tr>/g,'')}</tr></tbody></table>`;
+    }).join('<div class="pb"></div>');
+
+    // ── List section ──
+    const listRows = days.map(({ key, srLabel, jrLabel, isHol, isWk }) => {
+      const dd = parseDate(key);
+      const cls = isHol ? 'hol' : isWk ? 'wknd' : '';
+      return `<tr class="${cls}"><td>${key}</td><td>${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dd.getDay()]}</td><td>${isHol ? '🎉' : ''}</td><td>${srLabel}</td><td>${jrLabel}</td></tr>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>${schedule!.blockName} — Call Schedule</title>
 <style>
-body{font-family:Arial,sans-serif;font-size:12px;margin:24px}
-h1{font-size:16px;margin-bottom:4px}
-p{color:#666;margin-bottom:16px;font-size:11px}
-table{width:100%;border-collapse:collapse}
-th{background:#1e293b;color:#fff;padding:6px 8px;text-align:left;font-size:11px}
-td{padding:5px 8px;border-bottom:1px solid #e2e8f0;font-size:11px}
-tr.wknd{background:#f8fafc}
-tr.hol{background:#fff7ed}
-@media print{body{margin:12px}h1{font-size:14px}}
+*{box-sizing:border-box}
+body{font-family:Arial,sans-serif;font-size:11px;margin:20px;color:#1e293b}
+h1{font-size:17px;margin:0 0 2px}
+.sub{color:#64748b;font-size:11px;margin-bottom:20px}
+h2{font-size:13px;margin:20px 0 6px;color:#1e293b}
+/* Calendar */
+table.cal{width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:8px}
+table.cal th{background:#1e293b;color:#fff;padding:4px;text-align:center;font-size:10px}
+table.cal td{border:1px solid #cbd5e1;vertical-align:top;padding:4px;height:72px;width:14.28%}
+table.cal td.empty{background:#f8fafc}
+.dn{font-weight:700;font-size:11px;margin-bottom:3px}
+.chip{font-size:9px;padding:1px 4px;border-radius:3px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* List */
+table.lst{width:100%;border-collapse:collapse;margin-top:8px}
+table.lst th{background:#1e293b;color:#fff;padding:5px 8px;text-align:left;font-size:10px}
+table.lst td{padding:4px 8px;border-bottom:1px solid #e2e8f0;font-size:10px}
+tr.wknd td{background:#f8fafc}
+tr.hol td{background:#fff7ed}
+.pb{page-break-after:always;height:1px}
+.sec{font-size:14px;font-weight:700;margin:24px 0 8px;padding-bottom:4px;border-bottom:2px solid #1e293b}
+@media print{body{margin:10px}.pb{page-break-after:always}}
 </style></head><body>
 <h1>${schedule!.blockName} — Call Schedule</h1>
-<p>${fmtDate(schedule!.bStart)} → ${fmtDate(schedule!.bEnd)}</p>
-<table><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th>Senior on Call</th><th>Junior on Call</th></tr></thead>
-<tbody>${rows.join('')}</tbody></table>
+<div class="sub">${fmtDate(schedule!.bStart)} → ${fmtDate(schedule!.bEnd)}</div>
+<div class="sec">Calendar View</div>
+${calHtml}
+<div class="pb"></div>
+<div class="sec">Daily List</div>
+<table class="lst"><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th>Senior on Call</th><th>Junior on Call</th></tr></thead>
+<tbody>${listRows}</tbody></table>
 <script>window.onload=()=>{window.print()}<\/script>
 </body></html>`;
     const w = window.open('', '_blank');
@@ -645,7 +674,6 @@ tr.hol{background:#fff7ed}
             >
               {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
             </button>
-            <button className="btn bgh bsm" onClick={exportCSV}>↓ CSV</button>
             <button className="btn bgh bsm" onClick={exportICS}>📅 iCal</button>
             <button className="btn bg bsm" onClick={exportPDF}>🖨 PDF</button>
           </div>

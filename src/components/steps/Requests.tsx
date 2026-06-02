@@ -244,8 +244,11 @@ export default function Requests({
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, marginTop: 2, justifyContent: 'center' }}>
                           {rList.map((r) => (
                             <div key={r.id} title={r.name} style={{
-                              width: 6, height: 6, borderRadius: '50%', background: r.color, flexShrink: 0,
-                            }} />
+                              background: r.color, color: '#000', borderRadius: 2,
+                              fontSize: 7, fontWeight: 700, padding: '1px 2px', lineHeight: 1.2, flexShrink: 0,
+                            }}>
+                              {r.name.slice(0, 2).toUpperCase()}
+                            </div>
                           ))}
                         </div>
                       )}
