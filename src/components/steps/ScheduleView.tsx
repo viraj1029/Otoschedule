@@ -542,7 +542,6 @@ export default function ScheduleView({
       const dim = new Date(year, month + 1, 0).getDate();
 
       const aoa: (string | null)[][] = [];
-      // Header rows
       aoa.push([`${monthName} ${year}`, null, null, null, null, null, null]);
       aoa.push(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
 
@@ -570,13 +569,9 @@ export default function ScheduleView({
       }
 
       const ws = XLSX.utils.aoa_to_sheet(aoa);
-      // Column widths
       ws['!cols'] = Array(7).fill({ wch: 22 });
-      // Merge month title across all 7 columns
       ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }];
-      // Row heights — taller for data rows
       ws['!rows'] = [{ hpt: 20 }, { hpt: 16 }, ...Array(6).fill({ hpt: 60 })];
-
       XLSX.utils.book_append_sheet(wb, ws, monthName.slice(0, 3));
     });
 
@@ -703,6 +698,21 @@ export default function ScheduleView({
 
       {tab === 'hours' && renderHoursTab()}
       {tab === 'equity' && renderEquityTab()}
+
+      {/* Print-only calendar */}
+      <div className="print-cal">
+        {getBlockMonths().map(({ year, month }) => (
+          <div key={`${year}-${month}`} className="print-month">
+            <div className="print-month-title">{MONTHS[month]} {year}</div>
+            <div className="calgrid no-wl">
+              {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => (
+                <div key={d} className="cdow">{d}</div>
+              ))}
+              {renderCalendarMonth(year, month, true)}
+            </div>
+          </div>
+        ))}
+      </div>
 
       {/* Override modal */}
       {role === 'chief' && (
