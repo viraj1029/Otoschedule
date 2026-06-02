@@ -20,6 +20,8 @@ export interface Resident {
   pin: string;
   color: string;
   sort_order: number;
+  rotation_start?: string | null;
+  rotation_end?: string | null;
 }
 
 export interface Request {

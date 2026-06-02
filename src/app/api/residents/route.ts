@@ -40,18 +40,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Chief access required' }, { status: 401 });
   }
 
-  const { name, pgy, hospital, status } = await req.json();
+  const { name, pgy, hospital, status, rotation_start, rotation_end } = await req.json();
 
   const id = 'res_' + uuidv4().slice(0, 8);
   const pin = String(Math.floor(1000 + Math.random() * 9000));
 
-  // Count existing residents to pick color
   const { rows: existing } = await sql`
     SELECT id FROM residents WHERE block_id = ${DEFAULT_BLOCK_ID}
   `;
   const color = COLORS[existing.length % COLORS.length];
 
-  // Ensure block exists
   const { rows: blockRows } = await sql`SELECT id FROM blocks WHERE id = ${DEFAULT_BLOCK_ID}`;
   if (!blockRows[0]) {
     await sql`
@@ -61,9 +59,12 @@ export async function POST(req: Request) {
     `;
   }
 
+  const rStart = rotation_start || null;
+  const rEnd = rotation_end || null;
+
   await sql`
-    INSERT INTO residents (id, block_id, name, pgy, hospital, status, pin, color, sort_order)
-    VALUES (${id}, ${DEFAULT_BLOCK_ID}, ${name}, ${pgy}, ${hospital}, ${status}, ${pin}, ${color}, ${existing.length})
+    INSERT INTO residents (id, block_id, name, pgy, hospital, status, pin, color, sort_order, rotation_start, rotation_end)
+    VALUES (${id}, ${DEFAULT_BLOCK_ID}, ${name}, ${pgy}, ${hospital}, ${status}, ${pin}, ${color}, ${existing.length}, ${rStart}, ${rEnd})
   `;
 
   return NextResponse.json({ id, pin, name });

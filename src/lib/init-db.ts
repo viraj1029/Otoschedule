@@ -44,6 +44,10 @@ export async function initDb() {
     )
   `;
 
+  // Idempotent migrations
+  await sql`ALTER TABLE residents ADD COLUMN IF NOT EXISTS rotation_start TEXT`;
+  await sql`ALTER TABLE residents ADD COLUMN IF NOT EXISTS rotation_end   TEXT`;
+
   await sql`
     CREATE TABLE IF NOT EXISTS schedules (
       id           TEXT PRIMARY KEY,
