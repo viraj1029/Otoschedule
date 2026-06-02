@@ -273,6 +273,63 @@ export function generateSchedule(
     cur = addDays(wE, 1);
   }
 
+  // ── Post-processing rebalance ────────────────────────────────────────────────
+  // After the greedy pass some residents may still have >2 day gap due to
+  // vacation conflicts. Iteratively find the most-over and most-under resident,
+  // then split one of the over-resident's periods and give the tail to the
+  // under-resident (if they have no conflict there, and the split doesn't land
+  // on a Saturday boundary). Repeats until the gap is ≤ 2 or no valid split
+  // can be found.
+  for (let iter = 0; iter < 60; iter++) {
+    const ranked = [...srs].sort((a, b) => srDays[b.id] - srDays[a.id]);
+    const over = ranked[0];
+    const under = ranked[ranked.length - 1];
+    if (srDays[over.id] - srDays[under.id] <= 2) break;
+
+    const gap = srDays[over.id] - srDays[under.id];
+    const targetTransfer = Math.floor(gap / 2);
+
+    let bestInfo: { idx: number; splitDay: number; p2Len: number } | null = null;
+    let bestDiff = Infinity;
+
+    seniorWeeks.forEach((w, idx) => {
+      if (w.res.id !== over.id || w.isBackup) return;
+      const wS2 = parseDate(w.wS);
+      const wEC2 = parseDate(w.wE);
+      const pLen2 = countPeriodDays(wS2, wEC2);
+      if (pLen2 <= 1) return;
+
+      let d2 = new Date(wS2);
+      for (let i = 0; i < pLen2 - 1; i++) {
+        if (d2.getDay() !== 6) { // valid: don't land between Sat and Sun
+          const p2Start = addDays(d2, 1);
+          const p2Len = pLen2 - (i + 1);
+          // Only consider transfers that don't flip who is over-assigned
+          if (p2Len <= gap && noConflict(under, p2Start, wEC2)) {
+            const diff = Math.abs(p2Len - targetTransfer);
+            if (diff < bestDiff) { bestDiff = diff; bestInfo = { idx, splitDay: i, p2Len }; }
+          }
+        }
+        d2 = addDays(d2, 1);
+      }
+    });
+
+    if (!bestInfo) break;
+
+    const { idx, splitDay, p2Len: transferLen } = bestInfo;
+    const week = seniorWeeks[idx];
+    const wS2 = parseDate(week.wS);
+    let p1End = new Date(wS2);
+    for (let i = 0; i < splitDay; i++) p1End = addDays(p1End, 1);
+    const p2Start = addDays(p1End, 1);
+
+    seniorWeeks[idx] = { ...week, wE: dk(p1End) };
+    seniorWeeks.splice(idx + 1, 0, { wS: dk(p2Start), wE: week.wE, res: under, isBackup: false, override: false });
+    srDays[over.id] -= transferLen;
+    srDays[under.id] += transferLen;
+    srC[under.id]++;
+  }
+
   resBkpWeeks.forEach((w) => seniorWeeks.push({ ...w, override: false }));
   seniorWeeks.sort((a, b) => a.wS.localeCompare(b.wS));
   } // end needSr
