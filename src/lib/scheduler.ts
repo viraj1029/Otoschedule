@@ -180,40 +180,78 @@ export function generateSchedule(
   const srC: Record<string, number> = {};
   srs.forEach((r) => (srC[r.id] = 0));
   if (needSr) {
-  let srI = 0;
+  // Track days (not just weeks) for equalization; tiebreak: lower PGY (PGY4) absorbs extra days
+  const srDays: Record<string, number> = {};
+  srs.forEach((r) => (srDays[r.id] = 0));
+
+  let totalBlockDays = 0;
+  { let td = new Date(bStart); while (td <= bEnd) { totalBlockDays++; td = addDays(td, 1); } }
+  const targetDays = totalBlockDays / (srs.length || 1);
+
   let lastSrId: string | null = null;
 
-  function assignWeek(wS: Date, wEC: Date) {
-    function hasConflict(r: Resident): boolean {
-      let d2 = new Date(wS);
-      while (d2 <= wEC) {
-        if (offMap[r.id].has(dk(d2))) return true;
-        d2 = addDays(d2, 1);
+  function countPeriodDays(from: Date, to: Date): number {
+    let n = 0; let d = new Date(from); while (d <= to) { n++; d = addDays(d, 1); } return n;
+  }
+
+  function noConflict(r: Resident, from: Date, to: Date): boolean {
+    let d2 = new Date(from);
+    while (d2 <= to) { if (offMap[r.id].has(dk(d2))) return false; d2 = addDays(d2, 1); }
+    return true;
+  }
+
+  // Sort: fewest days first; tiebreak higher PGY first so PGY4 (lowest pgy) accumulates extra
+  function srSort(a: Resident, b: Resident) {
+    return srDays[a.id] !== srDays[b.id] ? srDays[a.id] - srDays[b.id] : b.pgy - a.pgy;
+  }
+
+  function pickSr(from: Date, to: Date, excludeId: string | null): Resident | null {
+    return [...srs].filter((r) => r.id !== excludeId && noConflict(r, from, to)).sort(srSort)[0] ?? null;
+  }
+
+  function assignPeriod(wS: Date, wEC: Date) {
+    const pLen = countPeriodDays(wS, wEC);
+
+    let best = pickSr(wS, wEC, lastSrId) ?? pickSr(wS, wEC, null);
+    if (!best) best = [...srs].sort(srSort)[0]; // fallback: ignore conflicts
+
+    // Split whenever best would exceed their fair share (any overshoot triggers a split attempt).
+    // idealP1: how many days best should ideally get (at least 1).
+    // Find the valid split point (last day of first half ≠ Saturday) closest to idealP1.
+    if (pLen > 1 && srDays[best.id] + pLen > targetDays) {
+      const idealP1 = Math.max(1, Math.round(targetDays - srDays[best.id]));
+      if (idealP1 < pLen) {
+        let chosenSplit = -1;
+        let bestDist = Infinity;
+        let d = new Date(wS);
+        for (let i = 0; i < pLen - 1; i++) {
+          // Valid: last day of first half must NOT be Saturday (keeps Sat+Sun together)
+          if (d.getDay() !== 6) {
+            const dist = Math.abs((i + 1) - idealP1);
+            if (dist < bestDist) { bestDist = dist; chosenSplit = i; }
+          }
+          d = addDays(d, 1);
+        }
+
+        if (chosenSplit >= 0) {
+          let p1End = new Date(wS);
+          for (let i = 0; i < chosenSplit; i++) p1End = addDays(p1End, 1);
+          const p2Start = addDays(p1End, 1);
+
+          srDays[best.id] += chosenSplit + 1;
+          srC[best.id]++;
+          lastSrId = best.id;
+          seniorWeeks.push({ wS: dk(wS), wE: dk(p1End), res: best, isBackup: false, override: false });
+          assignPeriod(p2Start, wEC);
+          return;
+        }
       }
-      return false;
     }
-    const cands = [...srs].sort((a, b) => {
-      const aLast = a.id === lastSrId ? 1 : 0;
-      const bLast = b.id === lastSrId ? 1 : 0;
-      if (aLast !== bLast) return aLast - bLast;
-      return srC[a.id] - srC[b.id];
-    });
-    let assigned: Resident | null = null;
-    for (const c of cands) {
-      if (c.id !== lastSrId && !hasConflict(c)) { assigned = c; break; }
-    }
-    if (!assigned) {
-      for (const c of cands) {
-        if (!hasConflict(c)) { assigned = c; break; }
-      }
-    }
-    if (!assigned) {
-      assigned = cands.find((c) => c.id !== lastSrId) ?? srs[srI % srs.length];
-    }
-    srC[assigned.id]++;
-    srI++;
-    lastSrId = assigned.id;
-    seniorWeeks.push({ wS: dk(wS), wE: dk(wEC), res: assigned, isBackup: false, override: false });
+
+    srDays[best.id] += pLen;
+    srC[best.id]++;
+    lastSrId = best.id;
+    seniorWeeks.push({ wS: dk(wS), wE: dk(wEC), res: best, isBackup: false, override: false });
   }
 
   // Cover any partial days before the first Monday
@@ -222,7 +260,7 @@ export function generateSchedule(
     const partialEnd = new Date(cur);
     while (partialEnd.getDay() !== 0) partialEnd.setDate(partialEnd.getDate() + 1);
     const pEC = partialEnd > bEnd ? new Date(bEnd) : new Date(partialEnd);
-    assignWeek(cur, pEC);
+    assignPeriod(cur, pEC);
     cur = addDays(partialEnd, 1);
   }
 
@@ -231,8 +269,65 @@ export function generateSchedule(
     const wS = new Date(cur);
     const wE = addDays(cur, 6);
     const wEC = wE > bEnd ? new Date(bEnd) : new Date(wE);
-    assignWeek(wS, wEC);
+    assignPeriod(wS, wEC);
     cur = addDays(wE, 1);
+  }
+
+  // ── Post-processing rebalance ────────────────────────────────────────────────
+  // After the greedy pass some residents may still have >2 day gap due to
+  // vacation conflicts. Iteratively find the most-over and most-under resident,
+  // then split one of the over-resident's periods and give the tail to the
+  // under-resident (if they have no conflict there, and the split doesn't land
+  // on a Saturday boundary). Repeats until the gap is ≤ 2 or no valid split
+  // can be found.
+  for (let iter = 0; iter < 60; iter++) {
+    const ranked = [...srs].sort((a, b) => srDays[b.id] - srDays[a.id]);
+    const over = ranked[0];
+    const under = ranked[ranked.length - 1];
+    if (srDays[over.id] - srDays[under.id] <= 2) break;
+
+    const gap = srDays[over.id] - srDays[under.id];
+    const targetTransfer = Math.floor(gap / 2);
+
+    let bestInfo: { idx: number; splitDay: number; p2Len: number } | null = null;
+    let bestDiff = Infinity;
+
+    seniorWeeks.forEach((w, idx) => {
+      if (w.res.id !== over.id || w.isBackup) return;
+      const wS2 = parseDate(w.wS);
+      const wEC2 = parseDate(w.wE);
+      const pLen2 = countPeriodDays(wS2, wEC2);
+      if (pLen2 <= 1) return;
+
+      let d2 = new Date(wS2);
+      for (let i = 0; i < pLen2 - 1; i++) {
+        if (d2.getDay() !== 6) { // valid: don't land between Sat and Sun
+          const p2Start = addDays(d2, 1);
+          const p2Len = pLen2 - (i + 1);
+          // Only consider transfers that don't flip who is over-assigned
+          if (p2Len <= gap && noConflict(under, p2Start, wEC2)) {
+            const diff = Math.abs(p2Len - targetTransfer);
+            if (diff < bestDiff) { bestDiff = diff; bestInfo = { idx, splitDay: i, p2Len }; }
+          }
+        }
+        d2 = addDays(d2, 1);
+      }
+    });
+
+    if (!bestInfo) break;
+
+    const { idx, splitDay, p2Len: transferLen } = bestInfo;
+    const week = seniorWeeks[idx];
+    const wS2 = parseDate(week.wS);
+    let p1End = new Date(wS2);
+    for (let i = 0; i < splitDay; i++) p1End = addDays(p1End, 1);
+    const p2Start = addDays(p1End, 1);
+
+    seniorWeeks[idx] = { ...week, wE: dk(p1End) };
+    seniorWeeks.splice(idx + 1, 0, { wS: dk(p2Start), wE: week.wE, res: under, isBackup: false, override: false });
+    srDays[over.id] -= transferLen;
+    srDays[under.id] += transferLen;
+    srC[under.id]++;
   }
 
   resBkpWeeks.forEach((w) => seniorWeeks.push({ ...w, override: false }));
