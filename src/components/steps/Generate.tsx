@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { Block, Resident, Request, ScheduleData } from '@/types';
-import { HOLIDAYS, parseDate, generateSchedule } from '@/lib/scheduler';
+import { parseDate, generateSchedule } from '@/lib/scheduler';
 import type { ScheduleMode } from '@/lib/scheduler';
 import { api } from '../App';
 
@@ -28,11 +28,6 @@ function avatar(res: Resident, size = 26) {
   );
 }
 
-function getResRequests(allRequests: Request[], resId: string) {
-  const vacDays = new Set(allRequests.filter((r) => r.resident_id === resId && r.type === 'vacation').map((r) => r.date));
-  const weekends = new Set(allRequests.filter((r) => r.resident_id === resId && r.type === 'weekend').map((r) => r.date));
-  return { vacDays, weekends };
-}
 
 export default function Generate({ block, residents, allRequests, onScheduleGenerated, onBack, showToast }: Props) {
   const [generating, setGenerating] = useState(false);
@@ -85,8 +80,6 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
     }
   }
 
-  const sortedAll = [...residents].sort((a, b) => b.pgy - a.pgy);
-
   return (
     <div>
       <div className="page-title">Generate Schedule</div>
@@ -116,35 +109,6 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
             <span className="bdg bb">{jrs.length} residents</span>
           </div>
           <div className="cb">{poolList(jrs)}</div>
-        </div>
-      </div>
-
-      <div className="card" style={{ marginBottom: 18 }}>
-        <div className="ch"><div className="ct">Request Summary</div></div>
-        <div className="cb">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px,1fr))', gap: 8 }}>
-            {sortedAll.map((r) => {
-              const { vacDays, weekends } = getResRequests(allRequests, r.id);
-              const vac = [...vacDays].filter((d) => {
-                const dd = parseDate(d); return dd >= bStart && dd <= bEnd && !HOLIDAYS.has(d);
-              }).length;
-              return (
-                <div key={r.id} style={{
-                  background: 'var(--s2)', border: '1px solid var(--border)',
-                  borderRadius: 'var(--r)', padding: 10,
-                }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3 }}>{r.name}</div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: "'JetBrains Mono',monospace", marginBottom: 6 }}>
-                    PGY-{r.pgy} · {r.hospital}
-                  </div>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    <span className="bdg bb" style={{ fontSize: 9 }}>{vac} vac</span>
-                    <span className="bdg bp" style={{ fontSize: 9 }}>{weekends.size} wkd</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
         </div>
       </div>
 

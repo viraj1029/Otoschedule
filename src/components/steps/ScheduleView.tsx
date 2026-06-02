@@ -79,10 +79,6 @@ export default function ScheduleView({
   });
   const resBkpDayKeys = new Set(schedule.resBkpDayKeys ?? []);
 
-  // Stats
-  const s24 = schedule.juniorDays.filter((d) => d.shiftHrs === 24).length;
-  const s12 = schedule.juniorDays.filter((d) => d.shiftHrs === 12).length;
-
   async function togglePublish() {
     const next = !published;
     setPublished(next);
@@ -96,11 +92,41 @@ export default function ScheduleView({
     return parseDate(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
-  // ── Calendar tab ──────────────────────────────────────────────────────────────
-  function renderCalendar() {
+  // ── Calendar rendering (shared by screen + print) ────────────────────────────
+  function buildChips(key: string, isWk: boolean, isHol: boolean): string {
+    const rc = (color: string, label: string) =>
+      `<div class="chip" style="background:${color}22;color:${color};border:1px solid ${color}44">${label}</div>`;
+    const sr = srMap[key];
+    const jr = jrMap[key];
+    const isResBkpDay = resBkpDayKeys.has(key);
+    let chips = '';
+    if (sr) chips += rc(sr.res.color, `${sr.isBackup ? '🔬' : '🔶'} ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}`);
+    if (isResBkpDay) {
+      const rb = (schedule!.resBkpDays ?? []).find((d) => d.dateKey === key);
+      if (rb) chips += rc(rb.res.color, `🔬 ${rb.res.name} (bkp)`);
+    }
+    if (jr) {
+      const label = isHol ? `🎉 ${jr.res.name} 24h`
+        : jr.type === 'saturday' ? `🟣 ${jr.res.name} 24h`
+        : jr.type === 'fri-pair' ? `🔗Fri ${jr.res.name} 12h`
+        : jr.type === 'sun-pair' ? `🔗Sun ${jr.res.name} 24h`
+        : `${jr.res.name} ${jr.shiftHrs}h`;
+      chips += rc(jr.res.color, label);
+      if ((isWk || isHol) && jr.res.hospital === 'CUH') chips += `<div class="chip ccuh">🏥 CUH</div>`;
+      if ((isWk || isHol) && jr.res.hospital === 'PMH') {
+        chips += `<div class="chip csat">🏥 PMH</div>`;
+        chips += jr.cuhRounder
+          ? rc(jr.cuhRounder.color, `CUH:${jr.cuhRounder.name}`)
+          : `<div class="chip cwrn">⚠CUH?</div>`;
+      }
+    }
+    return chips;
+  }
+
+  function renderCalendarMonth(year: number, month: number, forPrint = false): ReactElement[] {
     const today = new Date();
-    const firstDay = new Date(calYear, calMonth, 1).getDay();
-    const dim = new Date(calYear, calMonth + 1, 0).getDate();
+    const firstDay = new Date(year, month, 1).getDay();
+    const dim = new Date(year, month + 1, 0).getDate();
     const cells: (number | null)[] = [];
     for (let i = 0; i < firstDay; i++) cells.push(null);
     for (let d = 1; d <= dim; d++) cells.push(d);
@@ -109,56 +135,27 @@ export default function ScheduleView({
     let wn = 1;
     for (let i = 0; i < cells.length; i += 7) {
       const week = cells.slice(i, i + 7);
-      rows.push(
-        <div key={`wl-${i}`} className="cwl">W{wn++}</div>
-      );
+      if (!forPrint) rows.push(<div key={`wl-${i}`} className="cwl">W{wn++}</div>);
       week.forEach((day, j) => {
-        if (!day) { rows.push(<div key={`empty-${i}-${j}`} className="ccell coff" />); return; }
-        const key = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const pfx = forPrint ? 'p' : '';
+        if (!day) { rows.push(<div key={`empty-${i}-${j}${pfx}`} className="ccell coff" />); return; }
+        const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const d = parseDate(key);
         const dow = d.getDay();
         const isWk = dow === 0 || dow === 6;
         const isHol = HOLIDAYS.has(key);
-        const isToday = today.getFullYear() === calYear && today.getMonth() === calMonth && today.getDate() === day;
-        const jr = jrMap[key];
-        const sr = srMap[key];
-        const isResBkpDay = resBkpDayKeys.has(key);
-
-        let chips = '';
-        const rc = (color: string, label: string) =>
-          `<div class="chip" style="background:${color}22;color:${color};border:1px solid ${color}44">${label}</div>`;
-
-        if (sr) chips += rc(sr.res.color, `${sr.isBackup ? '🔬' : '🔶'} ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}`);
-        if (isResBkpDay) {
-          const rb = (schedule!.resBkpDays ?? []).find((d) => d.dateKey === key);
-          if (rb) chips += rc(rb.res.color, `🔬 ${rb.res.name} (bkp)`);
-        }
-        if (jr) {
-          const label = isHol ? `🎉 ${jr.res.name} 24h`
-            : jr.type === 'saturday' ? `🟣 ${jr.res.name} 24h`
-            : jr.type === 'fri-pair' ? `🔗Fri ${jr.res.name} 12h`
-            : jr.type === 'sun-pair' ? `🔗Sun ${jr.res.name} 24h`
-            : `${jr.res.name} ${jr.shiftHrs}h`;
-          chips += rc(jr.res.color, label);
-          if ((isWk || isHol) && jr.res.hospital === 'CUH') chips += `<div class="chip ccuh">🏥 CUH</div>`;
-          if ((isWk || isHol) && jr.res.hospital === 'PMH') {
-            chips += `<div class="chip csat">🏥 PMH</div>`;
-            chips += jr.cuhRounder
-              ? rc(jr.cuhRounder.color, `CUH:${jr.cuhRounder.name}`)
-              : `<div class="chip cwrn">⚠CUH?</div>`;
-          }
-        }
-
-        const isSel = selectedKeys.includes(key);
-        const handleClick = role === 'chief'
+        const isToday = !forPrint && today.getFullYear() === year && today.getMonth() === month && today.getDate() === day;
+        const isSel = !forPrint && selectedKeys.includes(key);
+        const chips = buildChips(key, isWk, isHol);
+        const handleClick = forPrint ? undefined : (role === 'chief'
           ? selectMode
             ? () => setSelectedKeys((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key])
             : () => setOverrideKeys([key])
-          : undefined;
+          : undefined);
 
         rows.push(
           <div
-            key={key}
+            key={key + pfx}
             className={`ccell${isWk ? ' cwk' : ''}${isHol ? ' chol' : ''}${isSel ? ' csel' : ''}`}
             onClick={handleClick}
           >
@@ -169,6 +166,10 @@ export default function ScheduleView({
       });
     }
     return rows;
+  }
+
+  function renderCalendar() {
+    return renderCalendarMonth(calYear, calMonth);
   }
 
   // ── Senior tab ────────────────────────────────────────────────────────────────
@@ -530,27 +531,8 @@ export default function ScheduleView({
     );
   }
 
-  // ── CSV export ────────────────────────────────────────────────────────────────
-  function exportCSV() {
-    const rows = [['Date','Day','Holiday','Senior','Sr PGY','Junior','Jr PGY','Jr Hospital','Shift Type','Shift Hours','CUH Rounder','Override']];
-    schedule!.juniorDays.forEach((jd) => {
-      const d = parseDate(jd.dateKey);
-      const sr = srMap[jd.dateKey];
-      rows.push([
-        jd.dateKey, DOW[d.getDay()], HOLIDAYS.has(jd.dateKey) ? 'Yes' : 'No',
-        sr ? sr.res.name : '', sr ? `PGY-${sr.res.pgy}` : '',
-        jd.res.name, `PGY-${jd.res.pgy}`, jd.res.hospital,
-        jd.type, `${jd.shiftHrs}h`, jd.cuhRounder ? jd.cuhRounder.name : '',
-        jd.override ? 'Yes' : 'No',
-      ]);
-    });
-    const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'oto_call_schedule.csv'; a.click();
-    URL.revokeObjectURL(url);
-    showToast('CSV exported');
+  function exportPDF() {
+    window.print();
   }
 
   function exportICS() {
@@ -582,8 +564,6 @@ export default function ScheduleView({
 
   const TABS: { id: Tab; label: string }[] = [
     { id: 'calendar', label: '📅 Calendar' },
-    { id: 'senior', label: '🔶 Senior Call' },
-    { id: 'junior', label: '🔷 Junior Call' },
     ...(role === 'chief' ? [
       { id: 'hours' as Tab, label: '⏱ Hours' },
       { id: 'equity' as Tab, label: '📊 Equity' },
@@ -603,48 +583,14 @@ export default function ScheduleView({
             >
               {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
             </button>
-            <button className="btn bgh bsm" onClick={exportCSV}>↓ CSV</button>
-            <button className="btn bg bsm" onClick={exportICS}>📅 iCal</button>
+            <button className="btn bgh bsm" onClick={exportICS}>📅 iCal</button>
+            <button className="btn bg bsm" onClick={exportPDF}>🖨 PDF</button>
           </div>
         )}
       </div>
 
       <div className="page-sub">
         {fmtDate(schedule.bStart)} → {fmtDate(schedule.bEnd)}
-      </div>
-
-      {/* Stats */}
-      <div className="srow" style={{ gridTemplateColumns: 'repeat(5,1fr)' }}>
-        {[
-          { l: 'Senior Weeks', v: schedule.seniorWeeks.filter((w) => !w.isBackup).length, c: 'var(--gold)' },
-          { l: 'Research Backup', v: `${(schedule.resBkpWeeks ?? []).length}+${(schedule.resBkpDays ?? []).length}`, c: 'var(--pink)' },
-          { l: 'Junior Days', v: schedule.juniorDays.length, c: 'var(--blue)' },
-          { l: '12h Shifts', v: s12, c: 'var(--teal)' },
-          { l: '24h Shifts', v: s24, c: 'var(--purple)' },
-        ].map((s) => (
-          <div key={s.l} className="sc">
-            <div className="sn" style={{ color: s.c }}>{s.v}</div>
-            <div className="sl">{s.l}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Legend */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11, color: 'var(--muted)', marginBottom: 16 }}>
-        {[
-          { cls: 'csr', label: 'Senior on call' },
-          { cls: 'cjr', label: 'Junior weekday (12h)' },
-          { cls: 'csun', label: 'Fri+Sun pair' },
-          { cls: 'csat', label: 'Saturday (24h)' },
-          { cls: 'chc', label: 'Holiday (24h)' },
-          { cls: 'ccuh', label: 'CUH weekend rounder' },
-          { cls: 'cres', label: 'Research backup' },
-        ].map(({ cls, label }) => (
-          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <div style={{ width: 10, height: 10, borderRadius: 2 }} className={`chip ${cls}`} />
-            {label}
-          </div>
-        ))}
       </div>
 
       {/* Tabs */}
@@ -706,22 +652,23 @@ export default function ScheduleView({
         </div>
       )}
 
-      {tab === 'senior' && (
-        <div className="card">
-          <div className="ch"><div className="ct">Senior Call — Weekly Blocks</div></div>
-          <div className="cb">{renderSeniorTab()}</div>
-        </div>
-      )}
-
-      {tab === 'junior' && (
-        <div className="card">
-          <div className="ch"><div className="ct">Junior Call — Daily Rotation</div></div>
-          <div className="cb">{renderJuniorTab()}</div>
-        </div>
-      )}
-
       {tab === 'hours' && renderHoursTab()}
       {tab === 'equity' && renderEquityTab()}
+
+      {/* Print-only calendar */}
+      <div className="print-cal">
+        {getBlockMonths().map(({ year, month }) => (
+          <div key={`${year}-${month}`} className="print-month">
+            <div className="print-month-title">{MONTHS[month]} {year}</div>
+            <div className="calgrid no-wl">
+              {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => (
+                <div key={d} className="cdow">{d}</div>
+              ))}
+              {renderCalendarMonth(year, month, true)}
+            </div>
+          </div>
+        ))}
+      </div>
 
       {/* Override modal */}
       {role === 'chief' && (

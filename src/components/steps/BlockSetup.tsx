@@ -102,7 +102,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
         request submission. Changes are saved to the database automatically.
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginBottom: 18 }}>
+      <div style={{ marginBottom: 18 }}>
         {/* Block config card */}
         <div className="card">
           <div className="ch">
@@ -146,32 +146,6 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
             </div>
           </div>
         </div>
-
-        {/* Shift structure card */}
-        <div className="card">
-          <div className="ch"><div className="ct">Shift Structure</div></div>
-          <div className="cb">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
-              {[
-                { badge: 'bb', dur: '12h', title: 'Mon–Thu non-holiday', sub: '5:00 PM → 5:00 AM' },
-                { badge: 'bt', dur: '12h', title: 'Friday night non-holiday', sub: 'Same resident covers Sunday' },
-                { badge: 'bp', dur: '24h', title: 'Saturday', sub: 'Separate resident from Fri/Sun pair' },
-                { badge: 'bt', dur: '24h', title: 'Sunday', sub: 'Same resident as Friday' },
-                { badge: 'bo', dur: '24h', title: 'Any Holiday', sub: 'Always 24h regardless of day' },
-                { badge: 'bpk', dur: '1+1', title: 'Research Senior', sub: '1 backup week + 1 backup weekend only' },
-              ].map((row, i) => (
-                <div key={i} style={{ display: 'grid', gridTemplateColumns: '32px 1fr', gap: 8, alignItems: 'start' }}>
-                  <span className={`bdg ${row.badge}`} style={{ fontSize: 9 }}>{row.dur}</span>
-                  <div>
-                    <strong>{row.title}</strong>
-                    <br />
-                    <span style={{ color: 'var(--muted)', fontSize: 12 }}>{row.sub}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Call pool */}
@@ -179,7 +153,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
         <div className="ch">
           <div className="ct">Call Pool</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Hover PIN to reveal · Click to copy</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Click PIN to copy</span>
             <button className="btn bg bsm" onClick={() => setAddModalOpen(true)}>＋ Add Resident</button>
           </div>
         </div>
@@ -221,7 +195,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
                     <td>
                       <span
                         className="pin-chip"
-                        title="Hover to reveal · Click to copy"
+                        title="Click to copy"
                         onClick={() => navigator.clipboard.writeText(r.pin).then(() => showToast('PIN copied!'))}
                       >
                         {r.pin}
