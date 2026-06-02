@@ -13,8 +13,8 @@ interface Props {
 
 export default function EditResidentModal({ resident, onClose, onSaved, showToast }: Props) {
   const [pgy, setPgy] = useState(String(resident?.pgy ?? '4'));
-  const [hospital, setHospital] = useState(resident?.hospital ?? 'CUH');
-  const [status, setStatus] = useState(resident?.status ?? 'active');
+  const [hospital, setHospital] = useState<'CUH' | 'PMH'>(resident?.hospital ?? 'CUH');
+  const [status, setStatus] = useState<'active' | 'research' | 'away'>(resident?.status ?? 'active');
   const [rotStart, setRotStart] = useState(resident?.rotation_start ?? '');
   const [rotEnd, setRotEnd] = useState(resident?.rotation_end ?? '');
   const [loading, setLoading] = useState(false);
@@ -64,14 +64,14 @@ export default function EditResidentModal({ resident, onClose, onSaved, showToas
             </div>
             <div className="fl">
               <label className="flb">Hospital</label>
-              <select value={hospital} onChange={(e) => setHospital(e.target.value)}>
+              <select value={hospital} onChange={(e) => setHospital(e.target.value as 'CUH' | 'PMH')}>
                 <option value="CUH">CUH</option>
                 <option value="PMH">PMH</option>
               </select>
             </div>
             <div className="fl">
               <label className="flb">Status</label>
-              <select value={status} onChange={(e) => setStatus(e.target.value)}>
+              <select value={status} onChange={(e) => setStatus(e.target.value as 'active' | 'research' | 'away')}>
                 <option value="active">Active</option>
                 <option value="research">Research (backup)</option>
                 <option value="away">Away / Excused</option>
