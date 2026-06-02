@@ -280,13 +280,11 @@ export function generateSchedule(
   // under-resident (if they have no conflict there, and the split doesn't land
   // on a Saturday boundary). Repeats until the gap is ≤ 2 or no valid split
   // can be found.
-  console.log('[sched] pre-rebalance:', JSON.stringify(Object.fromEntries(srs.map(r => [r.name, srDays[r.id]]))));
   for (let iter = 0; iter < 60; iter++) {
     const ranked = [...srs].sort((a, b) => srDays[b.id] - srDays[a.id]);
     const over = ranked[0];
     const under = ranked[ranked.length - 1];
-    console.log(`[sched] iter ${iter}: over=${over.name}(${srDays[over.id]}) under=${under.name}(${srDays[under.id]})`);
-    if (srDays[over.id] - srDays[under.id] <= 2) { console.log('[sched] balanced'); break; }
+    if (srDays[over.id] - srDays[under.id] <= 2) break;
 
     const gap = srDays[over.id] - srDays[under.id];
     const targetTransfer = Math.floor(gap / 2);
