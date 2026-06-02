@@ -103,7 +103,12 @@ export function generateSchedule(
         .filter((req) => req.resident_id === r.id && req.type === 'weekend')
         .map((req) => req.date),
     );
-    offMap[r.id] = new Set([...vac, ...wk]);
+    const hol = new Set(
+      requests
+        .filter((req) => req.resident_id === r.id && req.type === 'holiday')
+        .map((req) => req.date),
+    );
+    offMap[r.id] = new Set([...vac, ...wk, ...hol]);
   });
 
   // ── Research backup ──────────────────────────────────────────────────────────
@@ -170,26 +175,50 @@ export function generateSchedule(
   const srC: Record<string, number> = {};
   srs.forEach((r) => (srC[r.id] = 0));
   let srI = 0;
+  let lastSrId: string | null = null;
   let cur = new Date(bStart);
   while (cur.getDay() !== 1) cur = addDays(cur, 1);
   while (cur <= bEnd) {
     const wS = new Date(cur);
     const wE = addDays(cur, 6);
     const wEC = wE > bEnd ? new Date(bEnd) : new Date(wE);
-    const cands = [...srs].sort((a, b) => srC[a.id] - srC[b.id]);
-    let assigned: Resident | null = null;
-    for (const c of cands) {
-      let hasOff = false;
+
+    function hasConflict(r: Resident): boolean {
       let d2 = new Date(wS);
       while (d2 <= wEC) {
-        if (offMap[c.id].has(dk(d2))) { hasOff = true; break; }
+        if (offMap[r.id].has(dk(d2))) return true;
         d2 = addDays(d2, 1);
       }
-      if (!hasOff) { assigned = c; break; }
+      return false;
     }
-    if (!assigned) assigned = srs[srI % srs.length];
+
+    // Sort by fewest weeks assigned; deprioritize whoever worked last week
+    const cands = [...srs].sort((a, b) => {
+      const aLast = a.id === lastSrId ? 1 : 0;
+      const bLast = b.id === lastSrId ? 1 : 0;
+      if (aLast !== bLast) return aLast - bLast;
+      return srC[a.id] - srC[b.id];
+    });
+
+    // Pass 1: no conflict, not consecutive
+    let assigned: Resident | null = null;
+    for (const c of cands) {
+      if (c.id !== lastSrId && !hasConflict(c)) { assigned = c; break; }
+    }
+    // Pass 2: allow consecutive if needed (everyone else has a conflict)
+    if (!assigned) {
+      for (const c of cands) {
+        if (!hasConflict(c)) { assigned = c; break; }
+      }
+    }
+    // Pass 3: all have conflicts — fall back to round-robin, still avoid consecutive
+    if (!assigned) {
+      assigned = cands.find((c) => c.id !== lastSrId) ?? srs[srI % srs.length];
+    }
+
     srC[assigned.id]++;
     srI++;
+    lastSrId = assigned.id;
     seniorWeeks.push({
       wS: dk(wS),
       wE: dk(wEC),
