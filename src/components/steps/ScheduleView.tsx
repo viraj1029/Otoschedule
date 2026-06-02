@@ -288,27 +288,60 @@ export default function ScheduleView({
 
     const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active')
       .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
-    const srStats = srs.map((res) => {
-      const weeks = schedule!.seniorWeeks.filter((w) => w.res.id === res.id && !w.isBackup);
+    const resRs = residents.filter((r) => r.pgy >= 4 && r.status === 'research')
+      .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
+
+    function countWeekDays(weeks: ScheduleData['seniorWeeks']) {
       let totalDays = 0, weekendDays = 0, holidayDays = 0;
       weeks.forEach((w) => {
         let d = parseDate(w.wS);
         const end = parseDate(w.wE);
         while (d <= end) {
-          const key = dk(d);
-          totalDays++;
+          const key = dk(d); totalDays++;
           const dow = d.getDay();
           if (dow === 0 || dow === 6) weekendDays++;
           if (HOLIDAYS.has(key)) holidayDays++;
           d = addDays(d, 1);
         }
       });
-      return { res, weeks: weeks.length, totalDays, weekendDays, holidayDays };
+      return { totalDays, weekendDays, holidayDays };
+    }
+
+    const srStats = srs.map((res) => {
+      const weeks = schedule!.seniorWeeks.filter((w) => w.res.id === res.id && !w.isBackup);
+      const { totalDays, weekendDays, holidayDays } = countWeekDays(weeks);
+      return { res, weeks: weeks.length, totalDays, weekendDays, holidayDays, isResearch: false };
     });
+
+    const resStats = resRs.map((res) => {
+      const weeks = schedule!.seniorWeeks.filter((w) => w.res.id === res.id && w.isBackup);
+      const { totalDays: wkDays, weekendDays: wkWkEnd, holidayDays: wkHol } = countWeekDays(weeks);
+      // Include individual backup days not already covered by a backup week
+      let extraDays = 0, extraWkEnd = 0, extraHol = 0;
+      (schedule!.resBkpDays ?? []).filter((bd) => bd.res.id === res.id).forEach((bd) => {
+        const inWeek = weeks.some((w) => bd.dateKey >= w.wS && bd.dateKey <= w.wE);
+        if (!inWeek) {
+          extraDays++;
+          const dow = parseDate(bd.dateKey).getDay();
+          if (dow === 0 || dow === 6) extraWkEnd++;
+          if (HOLIDAYS.has(bd.dateKey)) extraHol++;
+        }
+      });
+      return {
+        res,
+        weeks: weeks.length,
+        totalDays: wkDays + extraDays,
+        weekendDays: wkWkEnd + extraWkEnd,
+        holidayDays: wkHol + extraHol,
+        isResearch: true,
+      };
+    });
+
+    const allSrStats = [...srStats, ...resStats];
 
     return (
       <div>
-        {srStats.length > 0 && (
+        {allSrStats.length > 0 && (
           <div className="card" style={{ marginBottom: 18 }}>
             <div className="ch"><div className="ct">Senior Call Summary</div></div>
             <div className="cbt">
@@ -323,9 +356,15 @@ export default function ScheduleView({
                   </tr>
                 </thead>
                 <tbody>
-                  {srStats.map(({ res, weeks, totalDays, weekendDays, holidayDays }) => (
+                  {allSrStats.map(({ res, weeks, totalDays, weekendDays, holidayDays, isResearch }) => (
                     <tr key={res.id}>
-                      <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{avatar(res)}<span style={{ fontWeight: 500 }}>{res.name}</span></div></td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {avatar(res)}
+                          <span style={{ fontWeight: 500 }}>{res.name}</span>
+                          {isResearch && <span className="bdg bpk" style={{ fontSize: 9 }}>Research</span>}
+                        </div>
+                      </td>
                       <td><span className="bdg bg2">PGY-{res.pgy}</span></td>
                       <td className="r"><span className="hn">{weeks}</span></td>
                       <td className="r"><span className="ht" style={{ color: 'var(--gold)' }}>{totalDays}</span></td>
@@ -335,10 +374,10 @@ export default function ScheduleView({
                   ))}
                   <tr style={{ background: 'rgba(255,255,255,.03)' }}>
                     <td colSpan={2} style={{ fontWeight: 600, fontSize: 12, padding: '10px 12px' }}>TOTAL</td>
-                    <td className="r"><span className="hn">{srStats.reduce((a, s) => a + s.weeks, 0)}</span></td>
-                    <td className="r"><span className="ht" style={{ color: 'var(--gold)' }}>{srStats.reduce((a, s) => a + s.totalDays, 0)}</span></td>
-                    <td className="r"><span className="ht" style={{ color: 'var(--purple)' }}>{srStats.reduce((a, s) => a + s.weekendDays, 0)}</span></td>
-                    <td className="r"><span className="ht" style={{ color: 'var(--orange)' }}>{srStats.reduce((a, s) => a + s.holidayDays, 0)}</span></td>
+                    <td className="r"><span className="hn">{allSrStats.reduce((a, s) => a + s.weeks, 0)}</span></td>
+                    <td className="r"><span className="ht" style={{ color: 'var(--gold)' }}>{allSrStats.reduce((a, s) => a + s.totalDays, 0)}</span></td>
+                    <td className="r"><span className="ht" style={{ color: 'var(--purple)' }}>{allSrStats.reduce((a, s) => a + s.weekendDays, 0)}</span></td>
+                    <td className="r"><span className="ht" style={{ color: 'var(--orange)' }}>{allSrStats.reduce((a, s) => a + s.holidayDays, 0)}</span></td>
                   </tr>
                 </tbody>
               </table>
