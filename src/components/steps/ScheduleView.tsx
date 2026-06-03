@@ -416,7 +416,7 @@ export default function ScheduleView({
                       <td className="r"><span className="ht" style={{ color: 'var(--orange)' }}>{holidayDays}</span></td>
                     </tr>
                   ))}
-                  <tr style={{ background: 'rgba(0,0,0,.04)' }}>
+                  <tr style={{ background: 'rgba(255,255,255,.03)' }}>
                     <td colSpan={2} style={{ fontWeight: 600, fontSize: 12, padding: '10px 12px' }}>TOTAL</td>
                     <td className="r"><span className="hn">{allSrStats.reduce((a, s) => a + s.weeks, 0)}</span></td>
                     <td className="r"><span className="ht" style={{ color: 'var(--gold)' }}>{allSrStats.reduce((a, s) => a + s.totalDays, 0)}</span></td>
@@ -444,7 +444,7 @@ export default function ScheduleView({
                       <td className="r"><span className="ht" style={{ color: 'var(--green)' }}>{total}h</span></td>
                     </tr>
                   ))}
-                  <tr style={{ background: 'rgba(0,0,0,.04)' }}>
+                  <tr style={{ background: 'rgba(255,255,255,.03)' }}>
                     <td colSpan={2} style={{ fontWeight: 600, fontSize: 12, padding: '10px 12px' }}>TOTAL</td>
                     <td className="r"><span className="hn">{bd.reduce((a, d) => a + d.s12, 0)}</span></td>
                     <td className="r"><span className="hn">{bd.reduce((a, d) => a + d.s24, 0)}</span></td>
@@ -463,7 +463,7 @@ export default function ScheduleView({
                 { l: 'Sunday (24h)', v: tSun, c: 'var(--teal)' },
                 { l: 'Holiday (24h)', v: tHol, c: 'var(--orange)' },
               ].map((s) => (
-                <div key={s.l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid rgba(0,0,0,.05)' }}>
+                <div key={s.l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid rgba(255,255,255,.04)' }}>
                   <span style={{ fontSize: 12, color: 'var(--muted)' }}>{s.l}</span>
                   <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 15, fontWeight: 700, color: s.c }}>{s.v}h</span>
                 </div>
@@ -513,7 +513,7 @@ export default function ScheduleView({
                   const totWkdH = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).reduce((s, d) => s + d.shiftHrs, 0), 0);
                   const totRounding = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.cuhRounder?.id === r.id).length, 0);
                   return (
-                    <tr style={{ background: 'rgba(0,0,0,.04)' }}>
+                    <tr style={{ background: 'rgba(255,255,255,.03)' }}>
                       <td colSpan={2} style={{ fontWeight: 600, fontSize: 12, padding: '10px 12px' }}>TOTAL</td>
                       <td className="r"><span className="hn" style={{ color: 'var(--purple)' }}>{totWkndD}</span></td>
                       <td className="r"><span className="ht" style={{ color: 'var(--purple)' }}>{totWkndH}h</span></td>
@@ -558,7 +558,7 @@ export default function ScheduleView({
                     <td className="r"><span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: 'var(--muted)' }}>{wks > 0 ? Math.round(total / wks) : 0}h/wk</span></td>
                   </tr>
                 ))}
-                <tr style={{ background: 'rgba(0,0,0,.04)' }}>
+                <tr style={{ background: 'rgba(255,255,255,.03)' }}>
                   <td colSpan={3} style={{ fontWeight: 600, fontSize: 12, padding: '10px 12px' }}>MONTH TOTAL</td>
                   <td className="r"><span className="hn">{ms12}</span></td>
                   <td className="r"><span className="hn">{ms24}</span></td>
@@ -796,7 +796,7 @@ export default function ScheduleView({
             <button className="btn bgh bsm" onClick={() => navCal(1)}>Next ›</button>
           </div>
           {selectMode && (
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, padding: '6px 10px', background: 'rgba(0,0,0,0.05)', borderRadius: 6 }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, padding: '6px 10px', background: 'rgba(255,255,255,0.04)', borderRadius: 6 }}>
               Click days to select · {selectedKeys.length} selected
             </div>
           )}

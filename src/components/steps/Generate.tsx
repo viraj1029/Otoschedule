@@ -47,7 +47,7 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
     return pool.map((r) => (
       <div key={r.id} style={{
         display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0',
-        borderBottom: '1px solid rgba(0,0,0,.05)',
+        borderBottom: '1px solid rgba(255,255,255,.04)',
       }}>
         {avatar(r)}
         <div>
