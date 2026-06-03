@@ -134,8 +134,8 @@ export function generateSchedule(
   });
 
   // ── Research backup (senior modes only) ─────────────────────────────────────
-  // Ideal: one full Mon–Sun week with no time-off conflicts.
-  // Fallback: longest consecutive available run (cap 7 days, anchor to a Monday
+  // Ideal: one full Mon–Sat week (6 days) with no time-off conflicts.
+  // Fallback: longest consecutive available run (cap 6 days, anchor to a Monday
   // inside the run when possible).
   const resBkpWeeks: ResBkpWeek[] = [];
   const resBkpDays: ResBkpDay[] = []; // unused; kept for ScheduleData compat
@@ -148,7 +148,7 @@ export function generateSchedule(
       while (c.getDay() !== 1) c = addDays(c, 1);
       while (c <= bEnd && !assigned) {
         const wS = new Date(c);
-        const wE = addDays(c, 6);
+        const wE = addDays(c, 5);
         const wEC = wE > bEnd ? new Date(bEnd) : new Date(wE);
         let ok = true;
         let d2 = new Date(wS);
@@ -180,16 +180,16 @@ export function generateSchedule(
         runs.sort((a, b) => b.len - a.len);
         if (runs.length) {
           let { wS: rS, wE: rE, len } = runs[0];
-          if (len >= 7) {
+          if (len >= 6) {
             // Try to anchor to a Monday inside the run
             let mon = parseDate(rS);
             const runEnd = parseDate(rE);
             while (mon <= runEnd && mon.getDay() !== 1) mon = addDays(mon, 1);
             if (mon <= runEnd) {
-              const sun = addDays(mon, 6);
-              rS = dk(mon); rE = dk(sun > runEnd ? runEnd : sun);
+              const sat = addDays(mon, 5);
+              rS = dk(mon); rE = dk(sat > runEnd ? runEnd : sat);
             } else {
-              rE = dk(addDays(parseDate(rS), 6) > parseDate(rE) ? parseDate(rE) : addDays(parseDate(rS), 6));
+              rE = dk(addDays(parseDate(rS), 5) > parseDate(rE) ? parseDate(rE) : addDays(parseDate(rS), 5));
             }
           }
           resBkpWeeks.push({ wS: rS, wE: rE, res: rr, isBackup: true });
@@ -451,8 +451,8 @@ export function generateSchedule(
       return Math.round((d.getTime() - parseDate(lastWeekendKey[r.id]).getTime()) / 86400000);
     }
 
-    // Progressive gap relaxation: prefer ≥2 days, fallback to ≥1 (no back-to-back), then any
-    const minGaps = skipGap ? [0] : [2, 1, 0];
+    // Progressive gap relaxation: prefer ≥3 days (q4+), fallback to ≥2 (q3), ≥1, then any
+    const minGaps = skipGap ? [0] : [3, 2, 1, 0];
     for (const minGap of minGaps) {
       const eligible = jrs.filter((r) => r.id !== ex && !offMap[r.id].has(key) && daysSince(r) >= minGap);
       if (!eligible.length) continue;

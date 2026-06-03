@@ -49,6 +49,7 @@ export default function ScheduleView({
   const [overrideKeys, setOverrideKeys] = useState<string[]>([]);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [editingRounding, setEditingRounding] = useState<string | null>(null);
 
   useEffect(() => {
     if (schedule) {
@@ -110,32 +111,61 @@ export default function ScheduleView({
       chips += rc(jr.res.color, label);
 
       if (isWk || isHol) {
+        const ov = (schedule!.roundingOverrides ?? {})[key];
         if (dow === 6) {
           // Saturday
           const friJr = jrMap[dk(addDays(parseDate(key), -1))];
-          // CUH rounding: Sat call if CUH, else Fri call post-call
-          if (jr.res.hospital === 'CUH') {
+          // CUH rounding: override takes priority, else Sat call if CUH, else Fri call post-call
+          if (ov?.cuhResId !== undefined) {
+            if (ov.cuhResId) {
+              const ovRes = residents.find(r => r.id === ov.cuhResId);
+              if (ovRes) chips += rc(ovRes.color, `CUH: ${ovRes.name}`);
+            }
+          } else if (jr.res.hospital === 'CUH') {
             chips += rc(jr.res.color, `CUH: ${jr.res.name}`);
           } else if (friJr?.res.hospital === 'CUH') {
             chips += rc(friJr.res.color, `CUH: ${friJr.res.name}`);
           }
-          // PMH rounding: Sat call if PMH, else Parkland intern
-          chips += jr.res.hospital === 'PMH'
-            ? rc(jr.res.color, `PMH: ${jr.res.name}`)
-            : `<div class="chip csat">PMH: Parkland intern</div>`;
+          // PMH rounding: override takes priority, else Sat call if PMH, else Parkland intern
+          if (ov?.pmhResId !== undefined) {
+            if (ov.pmhResId === '__intern__') {
+              chips += `<div class="chip csat">PMH: Parkland intern</div>`;
+            } else if (ov.pmhResId) {
+              const ovRes = residents.find(r => r.id === ov.pmhResId);
+              if (ovRes) chips += rc(ovRes.color, `PMH: ${ovRes.name}`);
+            }
+          } else {
+            chips += jr.res.hospital === 'PMH'
+              ? rc(jr.res.color, `PMH: ${jr.res.name}`)
+              : `<div class="chip csat">PMH: Parkland intern</div>`;
+          }
         } else if (dow === 0) {
           // Sunday
           const satJr = jrMap[dk(addDays(parseDate(key), -1))];
-          // CUH rounding: Sun call if CUH, else Sat call post-call
-          if (jr.res.hospital === 'CUH') {
+          // CUH rounding: override takes priority, else Sun call if CUH, else Sat call post-call
+          if (ov?.cuhResId !== undefined) {
+            if (ov.cuhResId) {
+              const ovRes = residents.find(r => r.id === ov.cuhResId);
+              if (ovRes) chips += rc(ovRes.color, `CUH: ${ovRes.name}`);
+            }
+          } else if (jr.res.hospital === 'CUH') {
             chips += rc(jr.res.color, `CUH: ${jr.res.name}`);
           } else if (satJr?.res.hospital === 'CUH') {
             chips += rc(satJr.res.color, `CUH: ${satJr.res.name}`);
           }
-          // PMH rounding: Sun call if PMH, else Parkland intern
-          chips += jr.res.hospital === 'PMH'
-            ? rc(jr.res.color, `PMH: ${jr.res.name}`)
-            : `<div class="chip csat">PMH: Parkland intern</div>`;
+          // PMH rounding: override takes priority, else Sun call if PMH, else Parkland intern
+          if (ov?.pmhResId !== undefined) {
+            if (ov.pmhResId === '__intern__') {
+              chips += `<div class="chip csat">PMH: Parkland intern</div>`;
+            } else if (ov.pmhResId) {
+              const ovRes = residents.find(r => r.id === ov.pmhResId);
+              if (ovRes) chips += rc(ovRes.color, `PMH: ${ovRes.name}`);
+            }
+          } else {
+            chips += jr.res.hospital === 'PMH'
+              ? rc(jr.res.color, `PMH: ${jr.res.name}`)
+              : `<div class="chip csat">PMH: Parkland intern</div>`;
+          }
         } else {
           // Holiday on a weekday
           if (jr.res.hospital === 'CUH') chips += rc(jr.res.color, `CUH: ${jr.res.name}`);
@@ -198,6 +228,27 @@ export default function ScheduleView({
               {isHol && <span style={{ marginLeft: 4, color: 'var(--orange)', fontFamily: 'Inter, sans-serif', fontWeight: 600, letterSpacing: 0 }}>🎉 {HOLIDAY_NAMES[key] ?? 'Holiday'}</span>}
             </div>
             <div className="cchips" dangerouslySetInnerHTML={{ __html: chips }} />
+            {role === 'chief' && (isWk || isHol) && (
+              <button
+                className="bico"
+                style={{ fontSize: 9, padding: '1px 4px', marginTop: 2, width: '100%', opacity: 0.6 }}
+                onClick={(e) => { e.stopPropagation(); setEditingRounding(editingRounding === key ? null : key); }}
+              >
+                {editingRounding === key ? '✕ close' : '✎ rounding'}
+              </button>
+            )}
+            {role === 'chief' && editingRounding === key && (
+              <RoundingEditor
+                dateKey={key}
+                residents={residents}
+                currentOverride={(schedule!.roundingOverrides ?? {})[key]}
+                onSave={async (cuhResId, pmhResId) => {
+                  await api('/schedule/rounding', 'POST', { dateKey: key, cuhResId, pmhResId });
+                  onScheduleChanged({ ...schedule!, roundingOverrides: { ...(schedule!.roundingOverrides ?? {}), [key]: { cuhResId, pmhResId } } });
+                  setEditingRounding(null);
+                }}
+              />
+            )}
           </div>
         );
       });
@@ -865,6 +916,64 @@ export default function ScheduleView({
           showToast={showToast}
         />
       )}
+    </div>
+  );
+}
+
+function RoundingEditor({ dateKey, residents, currentOverride, onSave }: {
+  dateKey: string;
+  residents: Resident[];
+  currentOverride?: { cuhResId?: string | null; pmhResId?: string | null };
+  onSave: (cuhResId: string | null, pmhResId: string | null) => Promise<void>;
+}) {
+  const [cuhId, setCuhId] = useState<string>(
+    currentOverride?.cuhResId !== undefined
+      ? (currentOverride.cuhResId === null ? '__none__' : currentOverride.cuhResId)
+      : '__infer__'
+  );
+  const [pmhId, setPmhId] = useState<string>(
+    currentOverride?.pmhResId !== undefined
+      ? (currentOverride.pmhResId === null ? '__none__' : currentOverride.pmhResId)
+      : '__infer__'
+  );
+  const [saving, setSaving] = useState(false);
+  const cuhResidents = residents.filter(r => r.hospital === 'CUH' && r.status !== 'away');
+  const pmhResidents = residents.filter(r => r.hospital === 'PMH' && r.status !== 'away');
+  void dateKey;
+  return (
+    <div style={{ background: 'var(--s2)', border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginTop: 4, fontSize: 11 }}>
+      <div style={{ marginBottom: 6, fontWeight: 600 }}>Override Rounding</div>
+      <div style={{ marginBottom: 4 }}>
+        <label style={{ color: 'var(--muted)', display: 'block', marginBottom: 2 }}>CUH Rounder</label>
+        <select style={{ width: '100%', fontSize: 11 }} value={cuhId} onChange={e => setCuhId(e.target.value)}>
+          <option value="__infer__">— Auto (from schedule) —</option>
+          <option value="__none__">None</option>
+          {cuhResidents.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
+      </div>
+      <div style={{ marginBottom: 6 }}>
+        <label style={{ color: 'var(--muted)', display: 'block', marginBottom: 2 }}>PMH Rounder</label>
+        <select style={{ width: '100%', fontSize: 11 }} value={pmhId} onChange={e => setPmhId(e.target.value)}>
+          <option value="__infer__">— Auto (from schedule) —</option>
+          <option value="__intern__">Parkland intern</option>
+          <option value="__none__">None</option>
+          {pmhResidents.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
+      </div>
+      <button
+        className="btn bg bsm"
+        style={{ width: '100%', fontSize: 10 }}
+        disabled={saving}
+        onClick={async () => {
+          setSaving(true);
+          const resolvedCuh = cuhId === '__infer__' ? undefined : cuhId === '__none__' ? null : cuhId;
+          const resolvedPmh = pmhId === '__infer__' ? undefined : pmhId === '__intern__' ? '__intern__' : pmhId === '__none__' ? null : pmhId;
+          await onSave(resolvedCuh ?? null, resolvedPmh ?? null);
+          setSaving(false);
+        }}
+      >
+        {saving ? '...' : 'Save'}
+      </button>
     </div>
   );
 }

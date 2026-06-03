@@ -88,6 +88,7 @@ export interface ScheduleData {
   jrC: Record<string, number>;
   jrH: Record<string, number>;
   published: boolean;
+  roundingOverrides?: Record<string, { cuhResId?: string | null; pmhResId?: string | null }>;
 }
 
 // ─── Session / auth ───────────────────────────────────────────────────────────
