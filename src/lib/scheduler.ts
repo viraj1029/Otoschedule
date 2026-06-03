@@ -365,7 +365,8 @@ export function generateSchedule(
   const jrHwkday: Record<string, number> = {};  // weekday hours
   const jrDwknd: Record<string, number> = {};   // weekend + holiday shift count
   const jrDwkday: Record<string, number> = {};  // weekday shift count
-  const lastCallKey: Record<string, string> = {}; // last assigned date per resident
+  const lastCallKey: Record<string, string> = {};    // last assigned date per resident
+  const lastWeekendKey: Record<string, string> = {}; // last weekend/holiday call date per resident
 
   if (needJr) {
   jrs.forEach((r) => { jrC[r.id] = 0; jrH[r.id] = 0; jrHwknd[r.id] = 0; jrHwkday[r.id] = 0; jrDwknd[r.id] = 0; jrDwkday[r.id] = 0; });
@@ -410,13 +411,22 @@ export function generateSchedule(
       return Math.round((d.getTime() - parseDate(lastCallKey[r.id]).getTime()) / 86400000);
     }
 
+    function daysSinceLastWeekend(r: Resident): number {
+      if (!lastWeekendKey[r.id]) return 999;
+      return Math.round((d.getTime() - parseDate(lastWeekendKey[r.id]).getTime()) / 86400000);
+    }
+
     // Progressive gap relaxation: prefer ≥2 days, fallback to ≥1 (no back-to-back), then any
     const minGaps = skipGap ? [0] : [2, 1, 0];
     for (const minGap of minGaps) {
-      const candidates = jrs
-        .filter((r) => r.id !== ex && !offMap[r.id].has(key) && daysSince(r) >= minGap)
-        .sort(sortFn);
-      if (candidates.length) return candidates[0];
+      const eligible = jrs.filter((r) => r.id !== ex && !offMap[r.id].has(key) && daysSince(r) >= minGap);
+      if (!eligible.length) continue;
+      if (isWeekendSlot) {
+        // Prefer residents who haven't worked a weekend in the last 7 days (no consecutive weekends)
+        const noConsec = eligible.filter((r) => daysSinceLastWeekend(r) >= 7);
+        if (noConsec.length) return noConsec.sort(sortFn)[0];
+      }
+      return eligible.sort(sortFn)[0];
     }
     return jrs.sort(sortFn)[0]; // absolute fallback
   }
@@ -428,7 +438,7 @@ export function generateSchedule(
     const isWkndSlot = isWk || HOLIDAYS.has(key);
     jrC[res.id]++;
     jrH[res.id] += hrs;
-    if (isWkndSlot) { jrHwknd[res.id] += hrs; jrDwknd[res.id]++; }
+    if (isWkndSlot) { jrHwknd[res.id] += hrs; jrDwknd[res.id]++; lastWeekendKey[res.id] = key; }
     else             { jrHwkday[res.id] += hrs; jrDwkday[res.id]++; }
     lastCallKey[res.id] = key;
     juniorDays.push({ dateKey: key, res, shiftHrs: hrs, type, paired, cuhRounder: cuhR, isWeekend: isWk, override: false });
@@ -458,9 +468,11 @@ export function generateSchedule(
         jrH[friRes.id] += hrs;
         jrHwknd[friRes.id] += hrs; // Sunday is a weekend day
         jrDwknd[friRes.id]++;
-        lastCallKey[friRes.id] = sunKey; // gap tracking: last call = Sunday
+        lastCallKey[friRes.id] = sunKey;
+        lastWeekendKey[friRes.id] = sunKey; // gap tracking: last weekend = Sunday
         const cuhR = friRes.hospital === 'PMH'
-          ? jrs.find((r) => r.hospital === 'CUH' && r.id !== friRes.id && !offMap[r.id].has(sunKey)) ?? null
+          ? jrs.filter((r) => r.hospital === 'CUH' && r.id !== friRes.id && !offMap[r.id].has(sunKey))
+              .sort((a, b) => b.pgy - a.pgy)[0] ?? null
           : null;
         juniorDays.push({ dateKey: sunKey, res: friRes, shiftHrs: hrs, type: 'sun-pair', paired: true, cuhRounder: cuhR, isWeekend: true, override: false });
         processed.add(sunKey);
@@ -469,7 +481,8 @@ export function generateSchedule(
       // Saturday — weekend slot
       const satRes = pickJr(key, null, true);
       const cuhR = satRes.hospital === 'PMH'
-        ? jrs.find((r) => r.hospital === 'CUH' && r.id !== satRes.id && !offMap[r.id].has(key)) ?? null
+        ? jrs.filter((r) => r.hospital === 'CUH' && r.id !== satRes.id && !offMap[r.id].has(key))
+            .sort((a, b) => b.pgy - a.pgy)[0] ?? null
         : null;
       addJD(key, satRes, 'saturday', false, cuhR);
     } else {
@@ -484,7 +497,9 @@ export function generateSchedule(
   juniorDays.forEach((jd) => {
     if (!jd.isWeekend && !HOLIDAYS.has(jd.dateKey)) return;
     if (jd.res.hospital === 'PMH' && !jd.cuhRounder) {
-      jd.cuhRounder = jrs.find((r) => r.hospital === 'CUH' && r.id !== jd.res.id && !offMap[r.id].has(jd.dateKey)) ?? null;
+      jd.cuhRounder = jrs
+        .filter((r) => r.hospital === 'CUH' && r.id !== jd.res.id && !offMap[r.id].has(jd.dateKey))
+        .sort((a, b) => b.pgy - a.pgy)[0] ?? null;
     }
   });
 

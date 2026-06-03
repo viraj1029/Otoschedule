@@ -448,6 +448,7 @@ export default function ScheduleView({
                   <th className="r" style={{ color: 'var(--purple)' }}>Wknd Hrs</th>
                   <th className="r" style={{ color: 'var(--blue)' }}>Wkday Days</th>
                   <th className="r" style={{ color: 'var(--blue)' }}>Wkday Hrs</th>
+                  <th className="r" style={{ color: 'var(--teal)' }}>Rounding Wknds</th>
                   <th className="r">Total Hrs</th>
                 </tr>
               </thead>
@@ -457,6 +458,7 @@ export default function ScheduleView({
                   const wkdayDays = schedule!.juniorDays.filter((d) => d.res.id === res.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey));
                   const wkndHrs = wkndDays.reduce((a, d) => a + d.shiftHrs, 0);
                   const wkdayHrs = wkdayDays.reduce((a, d) => a + d.shiftHrs, 0);
+                  const roundingWknds = schedule!.juniorDays.filter((d) => d.cuhRounder?.id === res.id).length;
                   return (
                     <tr key={res.id}>
                       <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{avatar(res)}<span style={{ fontWeight: 500 }}>{res.name}</span></div></td>
@@ -465,6 +467,7 @@ export default function ScheduleView({
                       <td className="r"><span className="ht" style={{ color: 'var(--purple)' }}>{wkndHrs}h</span></td>
                       <td className="r"><span className="hn" style={{ color: 'var(--blue)' }}>{wkdayDays.length}</span></td>
                       <td className="r"><span className="ht" style={{ color: 'var(--blue)' }}>{wkdayHrs}h</span></td>
+                      <td className="r"><span className="hn" style={{ color: 'var(--teal)' }}>{roundingWknds}</span></td>
                       <td className="r"><span className="ht" style={{ color: 'var(--green)' }}>{wkndHrs + wkdayHrs}h</span></td>
                     </tr>
                   );
@@ -474,6 +477,7 @@ export default function ScheduleView({
                   const totWkndH = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.res.id === r.id && (d.isWeekend || HOLIDAYS.has(d.dateKey))).reduce((s, d) => s + d.shiftHrs, 0), 0);
                   const totWkdD = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).length, 0);
                   const totWkdH = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).reduce((s, d) => s + d.shiftHrs, 0), 0);
+                  const totRounding = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.cuhRounder?.id === r.id).length, 0);
                   return (
                     <tr style={{ background: 'rgba(255,255,255,.03)' }}>
                       <td colSpan={2} style={{ fontWeight: 600, fontSize: 12, padding: '10px 12px' }}>TOTAL</td>
@@ -481,6 +485,7 @@ export default function ScheduleView({
                       <td className="r"><span className="ht" style={{ color: 'var(--purple)' }}>{totWkndH}h</span></td>
                       <td className="r"><span className="hn" style={{ color: 'var(--blue)' }}>{totWkdD}</span></td>
                       <td className="r"><span className="ht" style={{ color: 'var(--blue)' }}>{totWkdH}h</span></td>
+                      <td className="r"><span className="hn" style={{ color: 'var(--teal)' }}>{totRounding}</span></td>
                       <td className="r"><span className="ht" style={{ color: 'var(--gold)' }}>{totWkndH + totWkdH}h</span></td>
                     </tr>
                   );
