@@ -2,7 +2,7 @@
 
 import { useState, useEffect, type ReactElement } from 'react';
 import type { Block, Resident, Request, ScheduleData, Tab, Role } from '@/types';
-import { HOLIDAYS, parseDate, fmtShort, dk, addDays } from '@/lib/scheduler';
+import { HOLIDAYS, HOLIDAY_NAMES, parseDate, fmtShort, dk, addDays } from '@/lib/scheduler';
 import { api } from '../App';
 import OverrideModal from '../modals/OverrideModal';
 
@@ -193,7 +193,10 @@ export default function ScheduleView({
             className={`ccell${isWk ? ' cwk' : ''}${isHol ? ' chol' : ''}${isSel ? ' csel' : ''}`}
             onClick={handleClick}
           >
-            <div className={`cdate${isToday ? ' tod' : ''}`}>{day}{isHol ? ' 🎉' : ''}{isSel ? ' ✓' : ''}</div>
+            <div className={`cdate${isToday ? ' tod' : ''}`}>
+              {day}{isSel ? ' ✓' : ''}
+              {isHol && <span style={{ marginLeft: 4, color: 'var(--orange)', fontFamily: 'Inter, sans-serif', fontWeight: 600, letterSpacing: 0 }}>🎉 {HOLIDAY_NAMES[key] ?? 'Holiday'}</span>}
+            </div>
             <div className="cchips" dangerouslySetInnerHTML={{ __html: chips }} />
           </div>
         );
