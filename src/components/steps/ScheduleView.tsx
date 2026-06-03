@@ -384,9 +384,8 @@ export default function ScheduleView({
     const ms12 = mAll.filter((d) => d.shiftHrs === 12).length;
     const ms24 = mAll.filter((d) => d.shiftHrs === 24).length;
 
-    const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active')
-      .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
-    const resRs = residents.filter((r) => r.pgy >= 4 && r.status === 'research')
+    // All senior residents (active + research) treated as one pool
+    const srs = residents.filter((r) => r.pgy >= 4 && (r.status === 'active' || r.status === 'research'))
       .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
 
     function countWeekDays(weeks: ScheduleData['seniorWeeks']) {
@@ -405,37 +404,11 @@ export default function ScheduleView({
       return { totalDays, weekendDays, holidayDays };
     }
 
-    const srStats = srs.map((res) => {
-      const weeks = schedule!.seniorWeeks.filter((w) => w.res.id === res.id && !w.isBackup);
+    const allSrStats = srs.map((res) => {
+      const weeks = schedule!.seniorWeeks.filter((w) => w.res.id === res.id);
       const { totalDays, weekendDays, holidayDays } = countWeekDays(weeks);
-      return { res, weeks: weeks.length, totalDays, weekendDays, holidayDays, isResearch: false };
+      return { res, weeks: weeks.length, totalDays, weekendDays, holidayDays, isResearch: res.status === 'research' };
     });
-
-    const resStats = resRs.map((res) => {
-      const weeks = schedule!.seniorWeeks.filter((w) => w.res.id === res.id && w.isBackup);
-      const { totalDays: wkDays, weekendDays: wkWkEnd, holidayDays: wkHol } = countWeekDays(weeks);
-      // Include individual backup days not already covered by a backup week
-      let extraDays = 0, extraWkEnd = 0, extraHol = 0;
-      (schedule!.resBkpDays ?? []).filter((bd) => bd.res.id === res.id).forEach((bd) => {
-        const inWeek = weeks.some((w) => bd.dateKey >= w.wS && bd.dateKey <= w.wE);
-        if (!inWeek) {
-          extraDays++;
-          const dow = parseDate(bd.dateKey).getDay();
-          if (dow === 0 || dow === 6) extraWkEnd++;
-          if (HOLIDAYS.has(bd.dateKey)) extraHol++;
-        }
-      });
-      return {
-        res,
-        weeks: weeks.length,
-        totalDays: wkDays + extraDays,
-        weekendDays: wkWkEnd + extraWkEnd,
-        holidayDays: wkHol + extraHol,
-        isResearch: true,
-      };
-    });
-
-    const allSrStats = [...srStats, ...resStats];
 
     return (
       <div>
@@ -642,7 +615,7 @@ export default function ScheduleView({
   }
 
   function renderEquityTab() {
-    const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active');
+    const srs = residents.filter((r) => r.pgy >= 4 && (r.status === 'active' || r.status === 'research'));
     const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
     const bStart = parseDate(schedule!.bStart);
     const bEnd = parseDate(schedule!.bEnd);
@@ -650,7 +623,8 @@ export default function ScheduleView({
     const srWkdays: Record<string, number> = {};
     const srWkends: Record<string, number> = {};
     srs.forEach((r) => { srWkdays[r.id] = 0; srWkends[r.id] = 0; });
-    schedule!.seniorWeeks.filter((w) => !w.isBackup).forEach((w) => {
+    schedule!.seniorWeeks.forEach((w) => {
+      if (!srs.find((r) => r.id === w.res.id)) return;
       let d = parseDate(w.wS); const end = parseDate(w.wE);
       while (d <= end) {
         const dow = d.getDay();

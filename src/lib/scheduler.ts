@@ -133,34 +133,32 @@ export function generateSchedule(
     rotDays[r.id] = Math.max(1, cnt);
   });
 
-  // ── Research backup (senior modes only) ─────────────────────────────────────
-  // Ideal: one full Mon–Sat week (6 days) with no time-off conflicts.
-  // Fallback: longest consecutive available run (cap 6 days, anchor to a Monday
-  // inside the run when possible).
+  // ── Research resident call week (senior modes only) ─────────────────────────
+  // Research residents are full seniors for ONE Mon–Sun week (5 weekdays + Sat/Sun).
+  // They own that week as primary call; active seniors skip it entirely.
+  // Ideal: conflict-free Mon–Sun; fallback: longest run anchored to Monday.
   const resBkpWeeks: ResBkpWeek[] = [];
-  const resBkpDays: ResBkpDay[] = []; // unused; kept for ScheduleData compat
+  const resBkpDays: ResBkpDay[] = []; // kept for ScheduleData compat
 
   if (needSr && resR.length) {
     for (const rr of resR) {
-      // 1. Try every Monday for a conflict-free Mon–Sun week
       let assigned = false;
       let c = new Date(bStart);
       while (c.getDay() !== 1) c = addDays(c, 1);
       while (c <= bEnd && !assigned) {
         const wS = new Date(c);
-        const wE = addDays(c, 5);
+        const wE = addDays(c, 6); // Mon–Sun (7 days)
         const wEC = wE > bEnd ? new Date(bEnd) : new Date(wE);
         let ok = true;
         let d2 = new Date(wS);
         while (d2 <= wEC) { if (offMap[rr.id].has(dk(d2))) { ok = false; break; } d2 = addDays(d2, 1); }
         if (ok) {
-          resBkpWeeks.push({ wS: dk(wS), wE: dk(wEC), res: rr, isBackup: true });
+          resBkpWeeks.push({ wS: dk(wS), wE: dk(wEC), res: rr, isBackup: false });
           assigned = true;
         }
         c = addDays(wE, 1);
       }
 
-      // 2. Fallback: find the longest consecutive run of available days
       if (!assigned) {
         const runs: { wS: string; wE: string; len: number }[] = [];
         let runStart: Date | null = null;
@@ -180,31 +178,32 @@ export function generateSchedule(
         runs.sort((a, b) => b.len - a.len);
         if (runs.length) {
           let { wS: rS, wE: rE, len } = runs[0];
-          if (len >= 6) {
-            // Try to anchor to a Monday inside the run
+          if (len >= 7) {
             let mon = parseDate(rS);
             const runEnd = parseDate(rE);
             while (mon <= runEnd && mon.getDay() !== 1) mon = addDays(mon, 1);
             if (mon <= runEnd) {
-              const sat = addDays(mon, 5);
-              rS = dk(mon); rE = dk(sat > runEnd ? runEnd : sat);
+              const sun = addDays(mon, 6);
+              rS = dk(mon); rE = dk(sun > runEnd ? runEnd : sun);
             } else {
-              rE = dk(addDays(parseDate(rS), 5) > parseDate(rE) ? parseDate(rE) : addDays(parseDate(rS), 5));
+              rE = dk(addDays(parseDate(rS), 6) > parseDate(rE) ? parseDate(rE) : addDays(parseDate(rS), 6));
             }
           }
-          resBkpWeeks.push({ wS: rS, wE: rE, res: rr, isBackup: true });
+          resBkpWeeks.push({ wS: rS, wE: rE, res: rr, isBackup: false });
         }
       }
     }
   }
 
-  const resBkpWeekDatesSet = new Set<string>();
+  // Build set of dates already covered by research residents (active seniors skip these)
+  const resWeekDatesSet = new Set<string>();
   resBkpWeeks.forEach((w) => {
-    let d = parseDate(w.wS);
-    const end = parseDate(w.wE);
-    while (d <= end) { resBkpWeekDatesSet.add(dk(d)); d = addDays(d, 1); }
+    let d = parseDate(w.wS); const end = parseDate(w.wE);
+    while (d <= end) { resWeekDatesSet.add(dk(d)); d = addDays(d, 1); }
   });
-  const resBkpDayKeysSet = new Set(resBkpDays.map((d) => d.dateKey));
+
+  const resBkpWeekDatesSet = resWeekDatesSet; // alias kept for ScheduleData compat
+  const resBkpDayKeysSet = new Set<string>();
 
   // ── Senior weeks ─────────────────────────────────────────────────────────────
   const seniorWeeks: SeniorWeek[] = [];
@@ -313,16 +312,16 @@ export function generateSchedule(
     const partialEnd = new Date(cur);
     while (partialEnd.getDay() !== 0) partialEnd.setDate(partialEnd.getDate() + 1);
     const pEC = partialEnd > bEnd ? new Date(bEnd) : new Date(partialEnd);
-    assignPeriod(cur, pEC);
+    if (!resWeekDatesSet.has(dk(cur))) assignPeriod(cur, pEC);
     cur = addDays(partialEnd, 1);
   }
 
-  // Full Monday-to-Sunday weeks
+  // Full Monday-to-Sunday weeks — skip weeks owned by a research resident
   while (cur <= bEnd) {
     const wS = new Date(cur);
     const wE = addDays(cur, 6);
     const wEC = wE > bEnd ? new Date(bEnd) : new Date(wE);
-    assignPeriod(wS, wEC);
+    if (!resWeekDatesSet.has(dk(wS))) assignPeriod(wS, wEC);
     cur = addDays(wE, 1);
   }
 
