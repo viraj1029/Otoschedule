@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Inter:wght@300;400;500;600&display=swap');
 
 :root {
+  color-scheme: dark;
   --bg: #09090b;
   --s1: #111113;
   --s2: #18181b;
