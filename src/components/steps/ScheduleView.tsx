@@ -551,15 +551,33 @@ export default function ScheduleView({
   function renderEquityTab() {
     const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active');
     const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
+    const bStart = parseDate(schedule!.bStart);
+    const bEnd = parseDate(schedule!.bEnd);
+
     const srW: Record<string, number> = {};
     srs.forEach((r) => (srW[r.id] = 0));
     schedule!.seniorWeeks.filter((w) => !w.isBackup).forEach((w) => { srW[w.res.id] = (srW[w.res.id] ?? 0) + 1; });
+
     const jrH: Record<string, number> = {};
     jrs.forEach((r) => { jrH[r.id] = schedule!.juniorDays.filter((d) => d.res.id === r.id).reduce((a, d) => a + d.shiftHrs, 0); });
+
     const jrH24: Record<string, number> = {};
     jrs.forEach((r) => { jrH24[r.id] = schedule!.juniorDays.filter((d) => d.res.id === r.id && d.shiftHrs === 24).length; });
-    const wkOff: Record<string, number> = {};
-    residents.forEach((r) => { const { weekends } = getResRequests(allRequests, r.id); wkOff[r.id] = weekends.size; });
+
+    // Hours per rotation-day: normalises for residents on shorter rotations
+    const jrRotDays: Record<string, number> = {};
+    jrs.forEach((r) => {
+      const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
+      const rE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
+      const effS = rS < bStart ? bStart : rS;
+      const effE = rE > bEnd   ? bEnd   : rE;
+      let cnt = 0; let d = new Date(effS);
+      while (d <= effE) { cnt++; d = addDays(d, 1); }
+      jrRotDays[r.id] = Math.max(1, cnt);
+    });
+    // Express as hours per 30 rotation days for a legible number
+    const jrHper30: Record<string, number> = {};
+    jrs.forEach((r) => { jrHper30[r.id] = Math.round((jrH[r.id] / jrRotDays[r.id]) * 30 * 10) / 10; });
 
     return (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
@@ -568,7 +586,7 @@ export default function ScheduleView({
           <div className="cb">{eqBars(srs.map((r) => ({ name: r.name, val: srW[r.id] ?? 0, color: r.color })), 'wks')}</div>
         </div>
         <div className="card">
-          <div className="ch"><div className="ct">Junior Call Hours</div></div>
+          <div className="ch"><div className="ct">Junior Call Hours (total)</div></div>
           <div className="cb">{eqBars(jrs.map((r) => ({ name: r.name, val: jrH[r.id] ?? 0, color: r.color })), 'h')}</div>
         </div>
         <div className="card">
@@ -576,8 +594,13 @@ export default function ScheduleView({
           <div className="cb">{eqBars(jrs.map((r) => ({ name: r.name, val: jrH24[r.id] ?? 0, color: r.color })), 'shifts')}</div>
         </div>
         <div className="card">
-          <div className="ch"><div className="ct">Weekend Requests</div></div>
-          <div className="cb">{eqBars([...residents].sort((a, b) => b.pgy - a.pgy).map((r) => ({ name: r.name, val: wkOff[r.id] ?? 0, color: r.color })), 'days')}</div>
+          <div className="ch">
+            <div>
+              <div className="ct">Hours per 30 Rotation Days</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Normalised for rotation length — fair distribution shows equal bars</div>
+            </div>
+          </div>
+          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name} (${jrRotDays[r.id]}d)`, val: jrHper30[r.id] ?? 0, color: r.color })), 'h')}</div>
         </div>
       </div>
     );
