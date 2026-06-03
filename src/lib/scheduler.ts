@@ -213,13 +213,25 @@ export function generateSchedule(
   if (needSr) {
   // Track days per senior; targets are weighted by each resident's rotation length
   const srDays: Record<string, number> = {};
-  srs.forEach((r) => (srDays[r.id] = 0));
+  const srWkndDays: Record<string, number> = {};
+  srs.forEach((r) => { srDays[r.id] = 0; srWkndDays[r.id] = 0; });
 
   let totalBlockDays = 0;
-  { let td = new Date(bStart); while (td <= bEnd) { totalBlockDays++; td = addDays(td, 1); } }
+  let totalBlockWkndDays = 0;
+  { let td = new Date(bStart); while (td <= bEnd) { totalBlockDays++; if (td.getDay() === 0 || td.getDay() === 6) totalBlockWkndDays++; td = addDays(td, 1); } }
   const totalSrRotDays = srs.reduce((s, r) => s + rotDays[r.id], 0) || 1;
   const srTargetDays: Record<string, number> = {};
-  srs.forEach((r) => { srTargetDays[r.id] = totalBlockDays * rotDays[r.id] / totalSrRotDays; });
+  const srTargetWkndDays: Record<string, number> = {};
+  srs.forEach((r) => {
+    srTargetDays[r.id] = totalBlockDays * rotDays[r.id] / totalSrRotDays;
+    srTargetWkndDays[r.id] = Math.max(1, totalBlockWkndDays * rotDays[r.id] / totalSrRotDays);
+  });
+
+  function countPeriodWknd(from: Date, to: Date): number {
+    let n = 0; let d = new Date(from);
+    while (d <= to) { if (d.getDay() === 0 || d.getDay() === 6) n++; d = addDays(d, 1); }
+    return n;
+  }
 
   let lastSrId: string | null = null;
 
@@ -233,11 +245,15 @@ export function generateSchedule(
     return true;
   }
 
-  // Sort by days-vs-target ratio (fewest first); tiebreak higher PGY first
+  // Sort by days-vs-target ratio; tiebreak by weekend-day ratio, then higher PGY
   function srSort(a: Resident, b: Resident) {
     const ar = srDays[a.id] / srTargetDays[a.id];
     const br = srDays[b.id] / srTargetDays[b.id];
-    return ar !== br ? ar - br : b.pgy - a.pgy;
+    if (Math.abs(ar - br) > 0.05) return ar - br;
+    const awr = srWkndDays[a.id] / srTargetWkndDays[a.id];
+    const bwr = srWkndDays[b.id] / srTargetWkndDays[b.id];
+    if (Math.abs(awr - bwr) > 0.05) return awr - bwr;
+    return b.pgy - a.pgy;
   }
 
   function pickSr(from: Date, to: Date, excludeId: string | null): Resident | null {
@@ -274,6 +290,7 @@ export function generateSchedule(
           const p2Start = addDays(p1End, 1);
 
           srDays[best.id] += chosenSplit + 1;
+          srWkndDays[best.id] += countPeriodWknd(wS, p1End);
           srC[best.id]++;
           lastSrId = best.id;
           seniorWeeks.push({ wS: dk(wS), wE: dk(p1End), res: best, isBackup: false, override: false });
@@ -284,6 +301,7 @@ export function generateSchedule(
     }
 
     srDays[best.id] += pLen;
+    srWkndDays[best.id] += countPeriodWknd(wS, wEC);
     srC[best.id]++;
     lastSrId = best.id;
     seniorWeeks.push({ wS: dk(wS), wE: dk(wEC), res: best, isBackup: false, override: false });
@@ -360,10 +378,13 @@ export function generateSchedule(
     for (let i = 0; i < splitDay; i++) p1End = addDays(p1End, 1);
     const p2Start = addDays(p1End, 1);
 
+    const transferWknd = countPeriodWknd(p2Start, parseDate(week.wE));
     seniorWeeks[idx] = { ...week, wE: dk(p1End) };
     seniorWeeks.splice(idx + 1, 0, { wS: dk(p2Start), wE: week.wE, res: under, isBackup: false, override: false });
     srDays[over.id] -= transferLen;
     srDays[under.id] += transferLen;
+    srWkndDays[over.id] -= transferWknd;
+    srWkndDays[under.id] += transferWknd;
     srC[under.id]++;
   }
 

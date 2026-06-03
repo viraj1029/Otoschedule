@@ -596,9 +596,18 @@ export default function ScheduleView({
     const bStart = parseDate(schedule!.bStart);
     const bEnd = parseDate(schedule!.bEnd);
 
-    const srW: Record<string, number> = {};
-    srs.forEach((r) => (srW[r.id] = 0));
-    schedule!.seniorWeeks.filter((w) => !w.isBackup).forEach((w) => { srW[w.res.id] = (srW[w.res.id] ?? 0) + 1; });
+    const srWkdays: Record<string, number> = {};
+    const srWkends: Record<string, number> = {};
+    srs.forEach((r) => { srWkdays[r.id] = 0; srWkends[r.id] = 0; });
+    schedule!.seniorWeeks.filter((w) => !w.isBackup).forEach((w) => {
+      let d = parseDate(w.wS); const end = parseDate(w.wE);
+      while (d <= end) {
+        const dow = d.getDay();
+        if (dow === 0 || dow === 6) srWkends[w.res.id]++;
+        else srWkdays[w.res.id]++;
+        d = addDays(d, 1);
+      }
+    });
 
     const jrH: Record<string, number> = {};
     jrs.forEach((r) => { jrH[r.id] = schedule!.juniorDays.filter((d) => d.res.id === r.id).reduce((a, d) => a + d.shiftHrs, 0); });
@@ -624,8 +633,12 @@ export default function ScheduleView({
     return (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
         <div className="card">
-          <div className="ch"><div className="ct">Senior Call Weeks</div></div>
-          <div className="cb">{eqBars(srs.map((r) => ({ name: r.name, val: srW[r.id] ?? 0, color: r.color })), 'wks')}</div>
+          <div className="ch"><div className="ct">Senior Weekday Call Days</div></div>
+          <div className="cb">{eqBars(srs.map((r) => ({ name: r.name, val: srWkdays[r.id] ?? 0, color: r.color })), 'd')}</div>
+        </div>
+        <div className="card">
+          <div className="ch"><div className="ct">Senior Weekend Call Days</div></div>
+          <div className="cb">{eqBars(srs.map((r) => ({ name: r.name, val: srWkends[r.id] ?? 0, color: r.color })), 'd')}</div>
         </div>
         <div className="card">
           <div className="ch"><div className="ct">Junior Call Hours (total)</div></div>
@@ -635,10 +648,10 @@ export default function ScheduleView({
           <div className="ch"><div className="ct">24h Shifts</div></div>
           <div className="cb">{eqBars(jrs.map((r) => ({ name: r.name, val: jrH24[r.id] ?? 0, color: r.color })), 'shifts')}</div>
         </div>
-        <div className="card">
+        <div className="card" style={{ gridColumn: 'span 2' }}>
           <div className="ch">
             <div>
-              <div className="ct">Hours per 30 Rotation Days</div>
+              <div className="ct">Junior Hours per 30 Rotation Days</div>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Normalised for rotation length — fair distribution shows equal bars</div>
             </div>
           </div>
