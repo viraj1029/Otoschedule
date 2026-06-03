@@ -30,6 +30,12 @@ function getResRequests(allRequests: Request[], resId: string) {
   return { vacDays, weekends, holidayReqs };
 }
 
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 function avatar(res: Resident, size = 26) {
   return (
     <div style={{
@@ -37,7 +43,7 @@ function avatar(res: Resident, size = 26) {
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       fontSize: Math.round(size * 0.38), fontWeight: 700, color: '#000', flexShrink: 0,
     }}>
-      {res.name.slice(0, 2).toUpperCase()}
+      {initials(res.name)}
     </div>
   );
 }
@@ -55,6 +61,7 @@ export default function Requests({
     role === 'resident' ? (currentResId ?? '') :
     residents.length > 0 ? '__all__' : ''
   );
+  const [resFilter, setResFilter] = useState<'all' | 'senior' | 'junior'>('all');
 
   // If resident and schedule is published, show schedule view instead
   const isResidentWithPublishedSchedule =
@@ -166,10 +173,10 @@ export default function Requests({
 
       {/* Chief resident selector */}
       {role === 'chief' && (
-        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 18 }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 18, flexWrap: 'wrap' }}>
           <div className="fl" style={{ flex: '0 0 260px' }}>
             <label className="flb">Viewing requests for</label>
-            <select value={selectedResId} onChange={(e) => setSelectedResId(e.target.value)}>
+            <select value={selectedResId} onChange={(e) => { setSelectedResId(e.target.value); setResFilter('all'); }}>
               <option value="__all__">— All Residents —</option>
               {sortedResidents.map((r) => (
                 <option key={r.id} value={r.id}>
@@ -178,6 +185,19 @@ export default function Requests({
               ))}
             </select>
           </div>
+          {isAllView && (
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              {(['all', 'senior', 'junior'] as const).map((f) => (
+                <button
+                  key={f}
+                  className={`btn bsm${resFilter === f ? ' bg' : ' bgh'}`}
+                  onClick={() => setResFilter(f)}
+                >
+                  {f === 'all' ? 'All' : f === 'senior' ? 'Senior (PGY4/5)' : 'Junior (PGY2/3)'}
+                </button>
+              ))}
+            </div>
+          )}
           <div style={{ flex: 1 }} />
           <span className="bdg bgr" style={{ padding: '6px 12px', fontSize: 11 }}>● Saved to server</span>
         </div>
@@ -232,7 +252,11 @@ export default function Requests({
                 const isToday = today.getFullYear() === calYear && today.getMonth() === calMonth && today.getDate() === day;
 
                 if (isAllView) {
-                  const rList = allResMap[key] ?? [];
+                  const allForDay = allResMap[key] ?? [];
+                  const rList = allForDay.filter((r) =>
+                    resFilter === 'senior' ? r.pgy >= 4 :
+                    resFilter === 'junior' ? r.pgy <= 3 : true
+                  );
                   let cls = 'rc';
                   if (!inBlock) cls += ' rcoff';
                   else if (isHol) cls += ' rchol';
@@ -244,10 +268,10 @@ export default function Requests({
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, marginTop: 2, justifyContent: 'center' }}>
                           {rList.map((r) => (
                             <div key={r.id} title={r.name} style={{
-                              background: r.color, color: '#000', borderRadius: 2,
-                              fontSize: 7, fontWeight: 700, padding: '1px 2px', lineHeight: 1.2, flexShrink: 0,
+                              background: r.color, color: '#000', borderRadius: 3,
+                              fontSize: 10, fontWeight: 700, padding: '1px 3px', lineHeight: 1.3, flexShrink: 0,
                             }}>
-                              {r.name.slice(0, 2).toUpperCase()}
+                              {initials(r.name)}
                             </div>
                           ))}
                         </div>
