@@ -100,8 +100,6 @@ export default function ScheduleView({
     const jr = jrMap[key];
     const isResBkpDay = resBkpDayKeys.has(key);
     let chips = '';
-    // Non-backup senior first
-    if (sr && !sr.isBackup) chips += rc(sr.res.color, `🔶 ${sr.res.name}`);
     if (jr) {
       const label = isHol ? `🎉 ${jr.res.name}`
         : jr.type === 'saturday' ? `🟣 ${jr.res.name}`
@@ -116,8 +114,7 @@ export default function ScheduleView({
           : `<div class="chip cwrn">⚠CUH?</div>`;
       }
     }
-    // Backup senior last
-    if (sr && sr.isBackup) chips += rc(sr.res.color, `🔬 ${sr.res.name} (bkp)`);
+    if (sr) chips += rc(sr.res.color, `${sr.isBackup ? '🔬' : '🔶'} ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}`);
     if (isResBkpDay) {
       const rb = (schedule!.resBkpDays ?? []).find((d) => d.dateKey === key);
       if (rb) chips += rc(rb.res.color, `🔬 ${rb.res.name} (bkp)`);
