@@ -167,8 +167,8 @@ export default function Requests({
           : 'Vacation & Time-Off Requests'}
       </div>
       <div className="page-sub">
-        Submit vacation days (max 5 per block, holidays excluded) and weekend-off requests.
-        Requests are saved immediately to the server.
+        Select days you prefer not to be on call (vacation / unavailable) and weekend-off requests.
+        These block those days from the generated schedule. Requests are saved immediately to the server.
       </div>
 
       {/* Chief resident selector */}
@@ -305,7 +305,7 @@ export default function Requests({
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12, fontSize: 11, color: 'var(--muted)' }}>
               {[
-                { cls: 'rcvac', label: 'Vacation day (counts toward 5)' },
+                { cls: 'rcvac', label: 'Day off / unavailable' },
                 { cls: 'rcwk', label: 'Weekend off' },
                 { cls: 'rchol', label: 'Holiday (click to request off)' },
                 { cls: 'rcholreq', label: 'Holiday requested off' },
@@ -321,23 +321,13 @@ export default function Requests({
 
         {/* Right sidebar */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Allowance */}
+          {/* Requests summary */}
           <div className="card">
-            <div className="ch"><div className="ct">Allowance</div></div>
+            <div className="ch"><div className="ct">My Requests</div></div>
             <div className="cb" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>Vacation days used</span>
-                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12 }}>{vacUsed} / 5</span>
-                </div>
-                <div style={{ height: 5, background: 'var(--s3)', borderRadius: 3, overflow: 'hidden' }}>
-                  <div style={{
-                    height: '100%', borderRadius: 3,
-                    background: vacUsed > 5 ? 'var(--red)' : 'var(--blue)',
-                    width: Math.min(100, vacUsed / 5 * 100) + '%',
-                    transition: 'width .3s',
-                  }} />
-                </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>Days off requested</span>
+                <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12 }}>{vacUsed}</span>
               </div>
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -391,7 +381,7 @@ export default function Requests({
                       <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{res.name}</span>
                       <span className="bdg bm">PGY-{res.pgy}</span>
                       {res.status === 'research' && <span className="bdg bpk" style={{ fontSize: 9 }}>Res</span>}
-                      <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: 'var(--blue)' }}>{vac}/5</span>
+                      <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: 'var(--blue)' }}>{vac}d</span>
                       <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: 'var(--purple)' }}>{w.size}wk</span>
                       {h.size > 0 && <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: 'var(--orange)' }}>{h.size}hol</span>}
                     </div>
