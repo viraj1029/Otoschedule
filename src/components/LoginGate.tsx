@@ -104,12 +104,6 @@ export default function LoginGate({ residents, onLogin, showToast }: Props) {
                   onChange={(e) => setChiefPw(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && doLogin()}
                 />
-                <div className="hint">
-                  Default:{' '}
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--gold)' }}>
-                    chief2026
-                  </span>
-                </div>
               </div>
               <button className="btn bg" style={{ width: '100%' }} onClick={doLogin} disabled={loading}>
                 {loading ? <span className="spinner" /> : 'Sign In as Chief →'}
