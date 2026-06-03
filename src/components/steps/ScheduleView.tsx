@@ -99,21 +99,56 @@ export default function ScheduleView({
     const sr = srMap[key];
     const jr = jrMap[key];
     const isResBkpDay = resBkpDayKeys.has(key);
+    const dow = parseDate(key).getDay();
     let chips = '';
+
     if (jr) {
       const label = isHol ? `🎉 ${jr.res.name}`
         : jr.type === 'saturday' ? `🟣 ${jr.res.name}`
         : (jr.type === 'fri-pair' || jr.type === 'sun-pair') ? `🔗 ${jr.res.name}`
         : jr.res.name;
       chips += rc(jr.res.color, label);
-      if ((isWk || isHol) && jr.res.hospital === 'CUH') chips += `<div class="chip ccuh">🏥 CUH</div>`;
-      if ((isWk || isHol) && jr.res.hospital === 'PMH') {
-        chips += `<div class="chip csat">🏥 PMH</div>`;
-        chips += jr.cuhRounder
-          ? rc(jr.cuhRounder.color, `CUH:${jr.cuhRounder.name}`)
-          : `<div class="chip cwrn">⚠CUH?</div>`;
+
+      if (isWk || isHol) {
+        if (dow === 6) {
+          // Saturday
+          // CUH: Sat call if CUH, else Fri call (post-call) if CUH
+          const friJr = jrMap[dk(addDays(parseDate(key), -1))];
+          if (jr.res.hospital === 'CUH') {
+            chips += `<div class="chip ccuh">🏥 CUH</div>`;
+          } else if (friJr?.res.hospital === 'CUH') {
+            chips += rc(friJr.res.color, `CUH: ${friJr.res.name}`);
+          }
+          // PMH: Sat call if PMH, else Parkland intern
+          chips += jr.res.hospital === 'PMH'
+            ? `<div class="chip csat">🏥 PMH</div>`
+            : `<div class="chip csat">Parkland intern</div>`;
+        } else if (dow === 0) {
+          // Sunday
+          // CUH: Sun call if CUH, else Sat call (post-call) if CUH
+          const satJr = jrMap[dk(addDays(parseDate(key), -1))];
+          if (jr.res.hospital === 'CUH') {
+            chips += `<div class="chip ccuh">🏥 CUH</div>`;
+          } else if (satJr?.res.hospital === 'CUH') {
+            chips += rc(satJr.res.color, `CUH: ${satJr.res.name}`);
+          }
+          // PMH: Sun call if PMH, else Parkland intern
+          chips += jr.res.hospital === 'PMH'
+            ? `<div class="chip csat">🏥 PMH</div>`
+            : `<div class="chip csat">Parkland intern</div>`;
+        } else {
+          // Holiday on a weekday — keep simple hospital badge + CUH rounder
+          if (jr.res.hospital === 'CUH') chips += `<div class="chip ccuh">🏥 CUH</div>`;
+          if (jr.res.hospital === 'PMH') {
+            chips += `<div class="chip csat">🏥 PMH</div>`;
+            chips += jr.cuhRounder
+              ? rc(jr.cuhRounder.color, `CUH: ${jr.cuhRounder.name}`)
+              : `<div class="chip cwrn">⚠CUH?</div>`;
+          }
+        }
       }
     }
+
     if (sr) chips += rc(sr.res.color, `${sr.isBackup ? '🔬' : '🔶'} ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}`);
     if (isResBkpDay) {
       const rb = (schedule!.resBkpDays ?? []).find((d) => d.dateKey === key);
