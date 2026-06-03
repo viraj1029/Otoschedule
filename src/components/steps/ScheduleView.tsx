@@ -100,11 +100,6 @@ export default function ScheduleView({
     const jr = jrMap[key];
     const isResBkpDay = resBkpDayKeys.has(key);
     let chips = '';
-    if (sr) chips += rc(sr.res.color, `${sr.isBackup ? '🔬' : '🔶'} ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}`);
-    if (isResBkpDay) {
-      const rb = (schedule!.resBkpDays ?? []).find((d) => d.dateKey === key);
-      if (rb) chips += rc(rb.res.color, `🔬 ${rb.res.name} (bkp)`);
-    }
     if (jr) {
       const label = isHol ? `🎉 ${jr.res.name}`
         : jr.type === 'saturday' ? `🟣 ${jr.res.name}`
@@ -118,6 +113,11 @@ export default function ScheduleView({
           ? rc(jr.cuhRounder.color, `CUH:${jr.cuhRounder.name}`)
           : `<div class="chip cwrn">⚠CUH?</div>`;
       }
+    }
+    if (sr) chips += rc(sr.res.color, `${sr.isBackup ? '🔬' : '🔶'} ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}`);
+    if (isResBkpDay) {
+      const rb = (schedule!.resBkpDays ?? []).find((d) => d.dateKey === key);
+      if (rb) chips += rc(rb.res.color, `🔬 ${rb.res.name} (bkp)`);
     }
     return chips;
   }
