@@ -100,17 +100,13 @@ export default function ScheduleView({
     const jr = jrMap[key];
     const isResBkpDay = resBkpDayKeys.has(key);
     let chips = '';
-    if (sr) chips += rc(sr.res.color, `${sr.isBackup ? '🔬' : '🔶'} ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}`);
-    if (isResBkpDay) {
-      const rb = (schedule!.resBkpDays ?? []).find((d) => d.dateKey === key);
-      if (rb) chips += rc(rb.res.color, `🔬 ${rb.res.name} (bkp)`);
-    }
+    // Non-backup senior first
+    if (sr && !sr.isBackup) chips += rc(sr.res.color, `🔶 ${sr.res.name}`);
     if (jr) {
-      const label = isHol ? `🎉 ${jr.res.name} 24h`
-        : jr.type === 'saturday' ? `🟣 ${jr.res.name} 24h`
-        : jr.type === 'fri-pair' ? `🔗Fri ${jr.res.name} 12h`
-        : jr.type === 'sun-pair' ? `🔗Sun ${jr.res.name} 24h`
-        : `${jr.res.name} ${jr.shiftHrs}h`;
+      const label = isHol ? `🎉 ${jr.res.name}`
+        : jr.type === 'saturday' ? `🟣 ${jr.res.name}`
+        : (jr.type === 'fri-pair' || jr.type === 'sun-pair') ? `🔗 ${jr.res.name}`
+        : jr.res.name;
       chips += rc(jr.res.color, label);
       if ((isWk || isHol) && jr.res.hospital === 'CUH') chips += `<div class="chip ccuh">🏥 CUH</div>`;
       if ((isWk || isHol) && jr.res.hospital === 'PMH') {
@@ -119,6 +115,12 @@ export default function ScheduleView({
           ? rc(jr.cuhRounder.color, `CUH:${jr.cuhRounder.name}`)
           : `<div class="chip cwrn">⚠CUH?</div>`;
       }
+    }
+    // Backup senior last
+    if (sr && sr.isBackup) chips += rc(sr.res.color, `🔬 ${sr.res.name} (bkp)`);
+    if (isResBkpDay) {
+      const rb = (schedule!.resBkpDays ?? []).find((d) => d.dateKey === key);
+      if (rb) chips += rc(rb.res.color, `🔬 ${rb.res.name} (bkp)`);
     }
     return chips;
   }
