@@ -361,7 +361,7 @@ export default function Requests({
                   return (
                     <div key={res.id} style={{
                       display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0',
-                      borderBottom: '1px solid rgba(255,255,255,.04)',
+                      borderBottom: '1px solid rgba(0,0,0,.05)',
                     }}>
                       {avatar(res)}
                       <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{res.name}</span>

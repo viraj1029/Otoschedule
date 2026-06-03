@@ -276,12 +276,12 @@ select {
 }
 .ptable td {
   padding: 10px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   font-size: 13px;
   vertical-align: middle;
 }
 .ptable tr:last-child td { border-bottom: none; }
-.ptable tbody tr:hover td { background: rgba(255, 255, 255, 0.02); }
+.ptable tbody tr:hover td { background: rgba(0, 0, 0, 0.02); }
 
 /* ── Stats row ── */
 .srow { display: grid; gap: 12px; margin-bottom: 20px; }
@@ -353,7 +353,7 @@ select {
   padding: 8px 6px;
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.01);
+  background: var(--s2);
 }
 .ccell {
   border-right: 1px solid var(--border);
@@ -364,8 +364,8 @@ select {
   transition: background 0.1s;
 }
 .ccell:nth-child(8n) { border-right: none; }
-.ccell:hover { background: rgba(255, 255, 255, 0.025); }
-.ccell.cwk { background: rgba(255, 255, 255, 0.012); }
+.ccell:hover { background: rgba(0, 0, 0, 0.03); }
+.ccell.cwk { background: rgba(0, 0, 0, 0.018); }
 .ccell.coff { opacity: 0.22; cursor: default; }
 .ccell.chol { background: rgba(251, 146, 60, 0.05); }
 .ccell.csel { background: rgba(99, 179, 237, 0.12); outline: 2px solid rgba(99, 179, 237, 0.5); outline-offset: -2px; }
@@ -414,12 +414,12 @@ select {
 .htable th.r, .htable td.r { text-align: right; }
 .htable td {
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   font-size: 12px;
   vertical-align: middle;
 }
 .htable tbody tr:last-child td { border-bottom: none; }
-.htable tbody tr:hover td { background: rgba(255, 255, 255, 0.02); }
+.htable tbody tr:hover td { background: rgba(0, 0, 0, 0.02); }
 .hn { font-family: 'JetBrains Mono', monospace; font-weight: 500; }
 .ht { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 14px; }
 
@@ -434,7 +434,7 @@ select {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.etrack { flex: 1; height: 6px; background: var(--s3); border-radius: 3px; overflow: hidden; }
+.etrack { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
 .efill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
 .eval {
   font-family: 'JetBrains Mono', monospace;
@@ -486,7 +486,7 @@ select {
   color: var(--muted);
   transition: all 0.1s;
 }
-.rc:hover { background: var(--s3); color: var(--text); }
+.rc:hover { background: var(--border); color: var(--text); }
 .rcoff { opacity: 0.2; cursor: default; pointer-events: none; }
 .rchol { background: var(--orange-dim); color: var(--orange); cursor: pointer; }
 .rcholreq { background: var(--orange); color: #000; font-weight: 700; border: 1px solid var(--orange); }
@@ -531,7 +531,7 @@ select {
   border-radius: 20px;
   padding: 36px;
   width: 380px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
   animation: pop 0.2s ease;
 }
 @keyframes pop {
@@ -604,7 +604,7 @@ select {
   max-width: 95vw;
   max-height: 88vh;
   overflow-y: auto;
-  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
   animation: pop 0.18s ease;
 }
 .mh {
