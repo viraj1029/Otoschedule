@@ -79,6 +79,25 @@ export function shiftHours(key: string): number {
   return dow === 0 || dow === 6 ? 24 : 12;
 }
 
+// ─── Trauma weeks ─────────────────────────────────────────────────────────────
+
+function buildTraumaSet(): Set<string> {
+  const ranges = [
+    ['2026-07-13', '2026-07-19'],
+    ['2026-08-03', '2026-08-09'],
+    ['2026-08-24', '2026-08-30'],
+    ['2026-09-14', '2026-09-20'],
+  ];
+  const s = new Set<string>();
+  for (const [start, end] of ranges) {
+    let d = parseDate(start);
+    const e = parseDate(end);
+    while (d <= e) { s.add(dk(d)); d = addDays(d, 1); }
+  }
+  return s;
+}
+export const TRAUMA_WEEKS = buildTraumaSet();
+
 // ─── Main generator ───────────────────────────────────────────────────────────
 
 export type ScheduleMode = 'merged' | 'senior' | 'junior';
@@ -402,8 +421,13 @@ export function generateSchedule(
   const lastCallKey: Record<string, string> = {};    // last assigned date per resident
   const lastWeekendKey: Record<string, string> = {}; // last weekend/holiday call date per resident
 
+  const jrTH: Record<string, number> = {};    // trauma hours total
+  const jrTHwknd: Record<string, number> = {}; // trauma weekend hours
+  const jrTHwkday: Record<string, number> = {}; // trauma weekday hours
+  const jrTD: Record<string, number> = {};    // trauma call days
+
   if (needJr) {
-  jrs.forEach((r) => { jrC[r.id] = 0; jrH[r.id] = 0; jrHwknd[r.id] = 0; jrHwkday[r.id] = 0; jrDwknd[r.id] = 0; jrDwkday[r.id] = 0; });
+  jrs.forEach((r) => { jrC[r.id] = 0; jrH[r.id] = 0; jrHwknd[r.id] = 0; jrHwkday[r.id] = 0; jrDwknd[r.id] = 0; jrDwkday[r.id] = 0; jrTH[r.id] = 0; jrTHwknd[r.id] = 0; jrTHwkday[r.id] = 0; jrTD[r.id] = 0; });
   const processed = new Set<string>();
 
   // Compute rotation weekend / weekday day counts (for proportional equity sorting)
@@ -426,18 +450,22 @@ export function generateSchedule(
   });
 
   // Pick junior: enforce rest gap (2 days preferred, 1 day minimum), balance weekend/weekday separately
-  function pickJr(key: string, ex: string | null = null, isWeekendSlot = false, skipGap = false): Resident {
+  function pickJr(key: string, ex: string | null = null, isWeekendSlot = false, skipGap = false, isTraumaDay = false): Resident {
     const d = parseDate(key);
 
     function sortFn(a: Resident, b: Resident) {
       if (isWeekendSlot) {
         const ar = jrHwknd[a.id] / rotWkndDays[a.id];
         const br = jrHwknd[b.id] / rotWkndDays[b.id];
-        return ar !== br ? ar - br : jrC[a.id] - jrC[b.id];
+        if (ar !== br) return ar - br;
+        if (isTraumaDay) return jrTH[a.id] - jrTH[b.id];
+        return jrC[a.id] - jrC[b.id];
       }
       const ar = jrHwkday[a.id] / rotWkdayDays[a.id];
       const br = jrHwkday[b.id] / rotWkdayDays[b.id];
-      return ar !== br ? ar - br : jrC[a.id] - jrC[b.id];
+      if (ar !== br) return ar - br;
+      if (isTraumaDay) return jrTH[a.id] - jrTH[b.id];
+      return jrC[a.id] - jrC[b.id];
     }
 
     function daysSince(r: Resident): number {
@@ -470,12 +498,19 @@ export function generateSchedule(
     const d = parseDate(key);
     const isWk = d.getDay() === 0 || d.getDay() === 6;
     const isWkndSlot = isWk || HOLIDAYS.has(key);
+    const isTrauma = TRAUMA_WEEKS.has(key);
     jrC[res.id]++;
     jrH[res.id] += hrs;
     if (isWkndSlot) { jrHwknd[res.id] += hrs; jrDwknd[res.id]++; lastWeekendKey[res.id] = key; }
     else             { jrHwkday[res.id] += hrs; jrDwkday[res.id]++; }
+    if (isTrauma) {
+      jrTH[res.id] += hrs;
+      jrTD[res.id]++;
+      if (isWkndSlot) jrTHwknd[res.id] += hrs;
+      else jrTHwkday[res.id] += hrs;
+    }
     lastCallKey[res.id] = key;
-    juniorDays.push({ dateKey: key, res, shiftHrs: hrs, type, paired, cuhRounder: cuhR, isWeekend: isWk, override: false });
+    juniorDays.push({ dateKey: key, res, shiftHrs: hrs, type, paired, cuhRounder: cuhR, isWeekend: isWk, isTrauma, override: false });
     processed.add(key);
   }
 
@@ -494,26 +529,32 @@ export function generateSchedule(
       const sunDate = addDays(d, 2);
       const sunKey = dk(sunDate);
       const inBlock = sunDate <= bEnd;
-      const friRes = pickJr(key, null, true); // weekend sort: picks resident with fewest wknd hrs
+      const friRes = pickJr(key, null, true, false, TRAUMA_WEEKS.has(key)); // weekend sort: picks resident with fewest wknd hrs
       addJD(key, friRes, 'fri-pair', true);   // Friday itself is a weekday shift (12h)
       if (inBlock && !processed.has(sunKey)) {
         const hrs = shiftHours(sunKey);
+        const isSunTrauma = TRAUMA_WEEKS.has(sunKey);
         jrC[friRes.id]++;
         jrH[friRes.id] += hrs;
         jrHwknd[friRes.id] += hrs; // Sunday is a weekend day
         jrDwknd[friRes.id]++;
+        if (isSunTrauma) {
+          jrTH[friRes.id] += hrs;
+          jrTD[friRes.id]++;
+          jrTHwknd[friRes.id] += hrs;
+        }
         lastCallKey[friRes.id] = sunKey;
         lastWeekendKey[friRes.id] = sunKey; // gap tracking: last weekend = Sunday
         const cuhR = friRes.hospital === 'PMH'
           ? jrs.filter((r) => r.hospital === 'CUH' && r.id !== friRes.id && !offMap[r.id].has(sunKey))
               .sort((a, b) => b.pgy - a.pgy)[0] ?? null
           : null;
-        juniorDays.push({ dateKey: sunKey, res: friRes, shiftHrs: hrs, type: 'sun-pair', paired: true, cuhRounder: cuhR, isWeekend: true, override: false });
+        juniorDays.push({ dateKey: sunKey, res: friRes, shiftHrs: hrs, type: 'sun-pair', paired: true, cuhRounder: cuhR, isWeekend: true, isTrauma: isSunTrauma, override: false });
         processed.add(sunKey);
       }
     } else if (dow === 6) {
       // Saturday — weekend slot
-      const satRes = pickJr(key, null, true);
+      const satRes = pickJr(key, null, true, false, TRAUMA_WEEKS.has(key));
       const cuhR = satRes.hospital === 'PMH'
         ? jrs.filter((r) => r.hospital === 'CUH' && r.id !== satRes.id && !offMap[r.id].has(key))
             .sort((a, b) => b.pgy - a.pgy)[0] ?? null
@@ -522,7 +563,7 @@ export function generateSchedule(
     } else {
       // Weekday or holiday-weekday
       const isHolWknd = HOLIDAYS.has(key) && (dow === 0 || dow === 6);
-      addJD(key, pickJr(key, null, HOLIDAYS.has(key)), dow === 0 ? 'sunday' : 'weekday');
+      addJD(key, pickJr(key, null, HOLIDAYS.has(key), false, TRAUMA_WEEKS.has(key)), dow === 0 ? 'sunday' : 'weekday');
       void isHolWknd; // holidays on weekdays are treated as weekend slots via addJD
     }
   }
@@ -554,5 +595,9 @@ export function generateSchedule(
     jrC,
     jrH,
     published: blockPublished,
+    jrTH,
+    jrTHwknd,
+    jrTHwkday,
+    jrTD,
   };
 }
