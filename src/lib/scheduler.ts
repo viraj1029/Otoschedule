@@ -430,9 +430,12 @@ export function generateSchedule(
   jrs.forEach((r) => { jrC[r.id] = 0; jrH[r.id] = 0; jrHwknd[r.id] = 0; jrHwkday[r.id] = 0; jrDwknd[r.id] = 0; jrDwkday[r.id] = 0; jrTH[r.id] = 0; jrTHwknd[r.id] = 0; jrTHwkday[r.id] = 0; jrTD[r.id] = 0; });
   const processed = new Set<string>();
 
-  // Compute rotation weekend / weekday day counts (for proportional equity sorting)
+  // Compute available (non-off) rotation day counts for proportional equity sorting.
+  // Using available days (not raw rotation window) ensures residents with more vacation
+  // don't get assigned at higher density on their working days.
   const rotWkndDays: Record<string, number> = {};
   const rotWkdayDays: Record<string, number> = {};
+  const rotAvailDays: Record<string, number> = {};
   jrs.forEach((r) => {
     let wknd = 0, wkday = 0;
     const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
@@ -441,12 +444,16 @@ export function generateSchedule(
     const effE = rE > bEnd   ? bEnd   : rE;
     let dd = new Date(effS);
     while (dd <= effE) {
-      const dow = dd.getDay();
-      if (dow === 0 || dow === 6 || HOLIDAYS.has(dk(dd))) wknd++; else wkday++;
+      const key = dk(dd);
+      if (!offMap[r.id].has(key)) {
+        const dow = dd.getDay();
+        if (dow === 0 || dow === 6 || HOLIDAYS.has(key)) wknd++; else wkday++;
+      }
       dd = addDays(dd, 1);
     }
     rotWkndDays[r.id] = Math.max(1, wknd);
     rotWkdayDays[r.id] = Math.max(1, wkday);
+    rotAvailDays[r.id] = Math.max(1, wknd + wkday);
   });
 
   // Pick junior: enforce rest gap (2 days preferred, 1 day minimum), balance weekend/weekday separately
@@ -454,16 +461,16 @@ export function generateSchedule(
     const d = parseDate(key);
 
     function sortFn(a: Resident, b: Resident) {
+      // Primary: total hours per available day — directly matches the equity chart metric.
+      const ar = jrH[a.id] / rotAvailDays[a.id];
+      const br = jrH[b.id] / rotAvailDays[b.id];
+      if (Math.abs(ar - br) > 0.001) return ar - br;
+      // Secondary for weekend slots: prefer fewer weekend hours per available weekend day.
       if (isWeekendSlot) {
-        const ar = jrHwknd[a.id] / rotWkndDays[a.id];
-        const br = jrHwknd[b.id] / rotWkndDays[b.id];
-        if (ar !== br) return ar - br;
-        if (isTraumaDay) return jrTH[a.id] - jrTH[b.id];
-        return jrC[a.id] - jrC[b.id];
+        const awr = jrHwknd[a.id] / rotWkndDays[a.id];
+        const bwr = jrHwknd[b.id] / rotWkndDays[b.id];
+        if (Math.abs(awr - bwr) > 0.001) return awr - bwr;
       }
-      const ar = jrHwkday[a.id] / rotWkdayDays[a.id];
-      const br = jrHwkday[b.id] / rotWkdayDays[b.id];
-      if (ar !== br) return ar - br;
       if (isTraumaDay) return jrTH[a.id] - jrTH[b.id];
       return jrC[a.id] - jrC[b.id];
     }

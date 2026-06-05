@@ -653,18 +653,20 @@ export default function ScheduleView({
     const jrH24: Record<string, number> = {};
     jrs.forEach((r) => { jrH24[r.id] = schedule!.juniorDays.filter((d) => d.res.id === r.id && d.shiftHrs === 24).length; });
 
-    // Hours per rotation-day: normalises for residents on shorter rotations
+    // Available days: rotation window minus any off/vacation requests.
+    // Matches the scheduler's normalization so the chart reflects actual call density.
     const jrRotDays: Record<string, number> = {};
     jrs.forEach((r) => {
       const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
       const rE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
       const effS = rS < bStart ? bStart : rS;
       const effE = rE > bEnd   ? bEnd   : rE;
+      const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id).map((req) => req.date));
       let cnt = 0; let d = new Date(effS);
-      while (d <= effE) { cnt++; d = addDays(d, 1); }
+      while (d <= effE) { if (!offDays.has(dk(d))) cnt++; d = addDays(d, 1); }
       jrRotDays[r.id] = Math.max(1, cnt);
     });
-    // Express as hours per 30 rotation days for a legible number
+    // Express as hours per 30 available days for a legible number
     const jrHper30: Record<string, number> = {};
     jrs.forEach((r) => { jrHper30[r.id] = Math.round((jrH[r.id] / jrRotDays[r.id]) * 30 * 10) / 10; });
 
@@ -693,11 +695,11 @@ export default function ScheduleView({
         <div className="card" style={{ gridColumn: 'span 2' }}>
           <div className="ch">
             <div>
-              <div className="ct">Junior Hours per 30 Rotation Days</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Normalised for rotation length — fair distribution shows equal bars</div>
+              <div className="ct">Junior Hours per 30 Available Days</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Normalised for available days (rotation window minus time off) — equal bars = truly equitable distribution</div>
             </div>
           </div>
-          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name} (${jrRotDays[r.id]}d)`, val: jrHper30[r.id] ?? 0, color: r.color })), 'h')}</div>
+          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name} (${jrRotDays[r.id]}d avail)`, val: jrHper30[r.id] ?? 0, color: r.color })), 'h')}</div>
         </div>
       </div>
     );
