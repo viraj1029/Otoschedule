@@ -58,6 +58,7 @@ export interface JuniorDay {
   paired: boolean;
   cuhRounder: Resident | null;
   isWeekend: boolean;
+  isTrauma: boolean;   // true when date falls in a trauma week
   override: boolean;
 }
 
@@ -89,6 +90,10 @@ export interface ScheduleData {
   jrH: Record<string, number>;
   published: boolean;
   roundingOverrides?: Record<string, { cuhResId?: string | null; pmhResId?: string | null }>;
+  jrTH?: Record<string, number>;
+  jrTHwknd?: Record<string, number>;
+  jrTHwkday?: Record<string, number>;
+  jrTD?: Record<string, number>;
 }
 
 // ─── Session / auth ───────────────────────────────────────────────────────────

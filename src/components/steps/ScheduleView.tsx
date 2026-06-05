@@ -2,7 +2,7 @@
 
 import { useState, useEffect, type ReactElement } from 'react';
 import type { Block, Resident, Request, ScheduleData, Tab, Role } from '@/types';
-import { HOLIDAYS, HOLIDAY_NAMES, parseDate, fmtShort, dk, addDays } from '@/lib/scheduler';
+import { HOLIDAYS, HOLIDAY_NAMES, TRAUMA_WEEKS, parseDate, fmtShort, dk, addDays } from '@/lib/scheduler';
 import { api } from '../App';
 import OverrideModal from '../modals/OverrideModal';
 
@@ -94,7 +94,7 @@ export default function ScheduleView({
   }
 
   // ── Calendar rendering (shared by screen + print) ────────────────────────────
-  function buildChips(key: string, isWk: boolean, isHol: boolean): string {
+  function buildChips(key: string, isWk: boolean, isHol: boolean, isTrauma = false): string {
     const rc = (color: string, label: string) =>
       `<div class="chip" style="background:${color}22;color:${color};border:1px solid ${color}44">${label}</div>`;
     const sr = srMap[key];
@@ -104,9 +104,10 @@ export default function ScheduleView({
     let chips = '';
 
     if (jr) {
-      const label = isHol ? `🎉 ${jr.res.name}`
-        : jr.type === 'saturday' ? `🟣 ${jr.res.name}`
-        : (jr.type === 'fri-pair' || jr.type === 'sun-pair') ? `🔗 ${jr.res.name}`
+      const label = isHol ? `🎉${isTrauma ? ' 🚨' : ''} ${jr.res.name}`
+        : jr.type === 'saturday' ? `🟣${isTrauma ? ' 🚨' : ''} ${jr.res.name}`
+        : (jr.type === 'fri-pair' || jr.type === 'sun-pair') ? `🔗${isTrauma ? ' 🚨' : ''} ${jr.res.name}`
+        : isTrauma ? `🚨 ${jr.res.name}`
         : jr.res.name;
       chips += rc(jr.res.color, label);
 
@@ -208,9 +209,10 @@ export default function ScheduleView({
         const dow = d.getDay();
         const isWk = dow === 0 || dow === 6;
         const isHol = HOLIDAYS.has(key);
+        const isTrauma = TRAUMA_WEEKS.has(key);
         const isToday = !forPrint && today.getFullYear() === year && today.getMonth() === month && today.getDate() === day;
         const isSel = !forPrint && selectedKeys.includes(key);
-        const chips = buildChips(key, isWk, isHol);
+        const chips = buildChips(key, isWk, isHol, isTrauma);
         const handleClick = forPrint ? undefined : (role === 'chief'
           ? selectMode
             ? () => setSelectedKeys((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key])
@@ -221,6 +223,7 @@ export default function ScheduleView({
           <div
             key={key + pfx}
             className={`ccell${isWk ? ' cwk' : ''}${isHol ? ' chol' : ''}${isSel ? ' csel' : ''}`}
+            style={isTrauma && !isWk ? { background: 'rgba(239,68,68,0.08)' } : isTrauma ? { background: 'rgba(239,68,68,0.12)' } : undefined}
             onClick={handleClick}
           >
             <div className={`cdate${isToday ? ' tod' : ''}`}>
@@ -510,6 +513,8 @@ export default function ScheduleView({
                   <th className="r" style={{ color: 'var(--blue)' }}>Wkday Days</th>
                   <th className="r" style={{ color: 'var(--blue)' }}>Wkday Hrs</th>
                   <th className="r" style={{ color: 'var(--teal)' }}>Rounding Wknds</th>
+                  <th className="r" style={{ color: 'var(--gold)' }}>Trauma Hrs</th>
+                  <th className="r" style={{ color: 'var(--gold)' }}>Trauma Days</th>
                   <th className="r">Total Hrs</th>
                 </tr>
               </thead>
@@ -520,6 +525,8 @@ export default function ScheduleView({
                   const wkndHrs = wkndDays.reduce((a, d) => a + d.shiftHrs, 0);
                   const wkdayHrs = wkdayDays.reduce((a, d) => a + d.shiftHrs, 0);
                   const roundingWknds = schedule!.juniorDays.filter((d) => d.cuhRounder?.id === res.id).length;
+                  const traumaHrs = schedule!.jrTH?.[res.id] ?? 0;
+                  const traumaDays = schedule!.jrTD?.[res.id] ?? 0;
                   return (
                     <tr key={res.id}>
                       <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{avatar(res)}<span style={{ fontWeight: 500 }}>{res.name}</span></div></td>
@@ -529,6 +536,8 @@ export default function ScheduleView({
                       <td className="r"><span className="hn" style={{ color: 'var(--blue)' }}>{wkdayDays.length}</span></td>
                       <td className="r"><span className="ht" style={{ color: 'var(--blue)' }}>{wkdayHrs}h</span></td>
                       <td className="r"><span className="hn" style={{ color: 'var(--teal)' }}>{roundingWknds}</span></td>
+                      <td className="r"><span className="ht" style={{ color: 'var(--gold)' }}>{traumaHrs}h</span></td>
+                      <td className="r"><span className="hn" style={{ color: 'var(--gold)' }}>{traumaDays}</span></td>
                       <td className="r"><span className="ht" style={{ color: 'var(--green)' }}>{wkndHrs + wkdayHrs}h</span></td>
                     </tr>
                   );
@@ -539,6 +548,8 @@ export default function ScheduleView({
                   const totWkdD = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).length, 0);
                   const totWkdH = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).reduce((s, d) => s + d.shiftHrs, 0), 0);
                   const totRounding = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.cuhRounder?.id === r.id).length, 0);
+                  const totTraumaH = jrs.reduce((a, r) => a + (schedule!.jrTH?.[r.id] ?? 0), 0);
+                  const totTraumaD = jrs.reduce((a, r) => a + (schedule!.jrTD?.[r.id] ?? 0), 0);
                   return (
                     <tr style={{ background: 'rgba(0,0,0,.04)' }}>
                       <td colSpan={2} style={{ fontWeight: 600, fontSize: 12, padding: '10px 12px' }}>TOTAL</td>
@@ -547,6 +558,8 @@ export default function ScheduleView({
                       <td className="r"><span className="hn" style={{ color: 'var(--blue)' }}>{totWkdD}</span></td>
                       <td className="r"><span className="ht" style={{ color: 'var(--blue)' }}>{totWkdH}h</span></td>
                       <td className="r"><span className="hn" style={{ color: 'var(--teal)' }}>{totRounding}</span></td>
+                      <td className="r"><span className="ht" style={{ color: 'var(--gold)' }}>{totTraumaH}h</span></td>
+                      <td className="r"><span className="hn" style={{ color: 'var(--gold)' }}>{totTraumaD}</span></td>
                       <td className="r"><span className="ht" style={{ color: 'var(--gold)' }}>{totWkndH + totWkdH}h</span></td>
                     </tr>
                   );
@@ -668,6 +681,10 @@ export default function ScheduleView({
         <div className="card">
           <div className="ch"><div className="ct">Junior Call Hours (total)</div></div>
           <div className="cb">{eqBars(jrs.map((r) => ({ name: r.name, val: jrH[r.id] ?? 0, color: r.color })), 'h')}</div>
+        </div>
+        <div className="card">
+          <div className="ch"><div className="ct">Junior Trauma Hours</div></div>
+          <div className="cb">{eqBars(jrs.map((r) => ({ name: r.name, val: schedule!.jrTH?.[r.id] ?? 0, color: r.color })), 'h')}</div>
         </div>
         <div className="card">
           <div className="ch"><div className="ct">24h Shifts</div></div>
