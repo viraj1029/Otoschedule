@@ -63,6 +63,8 @@ export default function Requests({
   );
   const [resFilter, setResFilter] = useState<'all' | 'senior' | 'junior'>('all');
 
+  const [resTab, setResTab] = useState<'requests' | 'schedule'>('requests');
+
   // If resident and schedule is published, show schedule view instead
   const isResidentWithPublishedSchedule =
     role === 'resident' && schedule && (schedule.published || block?.published);
@@ -108,24 +110,6 @@ export default function Requests({
     setCalYear(y); setCalMonth(m);
   }
 
-  // If resident with published schedule, show schedule view
-  if (isResidentWithPublishedSchedule && schedule) {
-    return (
-      <ScheduleView
-        schedule={schedule}
-        residents={residents}
-        allRequests={allRequests}
-        block={block}
-        role="resident"
-        onScheduleChanged={() => {}}
-        onBlockChanged={() => {}}
-        onRegenerate={() => {}}
-        showToast={showToast}
-        currentResId={currentResId}
-      />
-    );
-  }
-
   const isAllView = role === 'chief' && selectedResId === '__all__';
   const activeResId = role === 'resident' ? (currentResId ?? '') : (isAllView ? '' : selectedResId);
   const activeRes = residents.find((r) => r.id === activeResId);
@@ -162,6 +146,37 @@ export default function Requests({
 
   return (
     <div>
+      {/* Resident tab switcher when schedule is published */}
+      {isResidentWithPublishedSchedule && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+          <button className={`btn bsm${resTab === 'schedule' ? ' bg' : ' bgh'}`} onClick={() => setResTab('schedule')}>
+            📅 My Schedule
+          </button>
+          <button className={`btn bsm${resTab === 'requests' ? ' bg' : ' bgh'}`} onClick={() => setResTab('requests')}>
+            ✏️ My Requests
+          </button>
+        </div>
+      )}
+
+      {/* Schedule tab */}
+      {isResidentWithPublishedSchedule && resTab === 'schedule' && schedule && (
+        <ScheduleView
+          schedule={schedule}
+          residents={residents}
+          allRequests={allRequests}
+          block={block}
+          role="resident"
+          onScheduleChanged={() => {}}
+          onBlockChanged={() => {}}
+          onRegenerate={() => {}}
+          showToast={showToast}
+          currentResId={currentResId}
+        />
+      )}
+
+      {/* Requests calendar — always for chief, or for resident on "My Requests" tab (or before publish) */}
+      {(!isResidentWithPublishedSchedule || resTab === 'requests') && (
+        <>
       <div className="page-title" id="reqPageTitle">
         {role === 'resident' && activeRes
           ? `Your Requests — ${activeRes.name}`
@@ -399,6 +414,8 @@ export default function Requests({
           <button className="btn bgh" onClick={onBack}>← Back</button>
           <button className="btn bg" onClick={onNext}>Continue to Generate →</button>
         </div>
+      )}
+        </>
       )}
     </div>
   );
