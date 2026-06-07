@@ -81,7 +81,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
 
   function handleAdded(id: string, pin: string, name: string) {
     onResidentsChanged();
-    setPinModal({ open: true, title: 'PIN Generated', name, pin });
+    setPinModal({ open: true, title: 'Resident PIN', name, pin });
     showToast(`${name} added`);
   }
 
@@ -268,6 +268,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
         onClose={() => setAddModalOpen(false)}
         onAdded={handleAdded}
         showToast={showToast}
+        existingResidents={residents}
       />
       <PinDisplayModal
         open={pinModal.open}

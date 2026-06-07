@@ -1,4 +1,5 @@
 import { sql } from '@vercel/postgres';
+import { randomUUID } from 'crypto';
 
 let initialized = false;
 
@@ -15,6 +16,18 @@ export async function initDb() {
       chief_password TEXT NOT NULL,
       published      BOOLEAN DEFAULT FALSE,
       created_at     TIMESTAMP DEFAULT NOW()
+    )
+  `;
+
+  // Global person accounts — one row per real person, persists across blocks.
+  await sql`
+    CREATE TABLE IF NOT EXISTS persons (
+      id         TEXT PRIMARY KEY,
+      name       TEXT NOT NULL,
+      pgy        INTEGER NOT NULL,
+      pin        TEXT NOT NULL,
+      color      TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
     )
   `;
 
@@ -44,9 +57,10 @@ export async function initDb() {
     )
   `;
 
-  // Idempotent migrations
+  // Idempotent column migrations
   await sql`ALTER TABLE residents ADD COLUMN IF NOT EXISTS rotation_start TEXT`;
   await sql`ALTER TABLE residents ADD COLUMN IF NOT EXISTS rotation_end   TEXT`;
+  await sql`ALTER TABLE residents ADD COLUMN IF NOT EXISTS person_id TEXT REFERENCES persons(id)`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS schedules (
@@ -56,4 +70,16 @@ export async function initDb() {
       data         TEXT NOT NULL
     )
   `;
+
+  // Migrate existing residents that have no person_id yet.
+  // For each unlinked resident, create a persons row and link it.
+  const { rows: unlinked } = await sql`SELECT * FROM residents WHERE person_id IS NULL`;
+  for (const r of unlinked) {
+    const personId = 'per_' + randomUUID().replace(/-/g, '').slice(0, 8);
+    await sql`
+      INSERT INTO persons (id, name, pgy, pin, color)
+      VALUES (${personId}, ${r.name}, ${r.pgy as number}, ${r.pin}, ${r.color})
+    `;
+    await sql`UPDATE residents SET person_id = ${personId} WHERE id = ${r.id}`;
+  }
 }

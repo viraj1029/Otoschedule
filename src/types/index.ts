@@ -12,6 +12,7 @@ export interface Block {
 
 export interface Resident {
   id: string;
+  person_id?: string;    // links to global persons table
   block_id: string;
   name: string;
   pgy: number;
@@ -102,11 +103,12 @@ export type Role = 'chief' | 'resident';
 
 export interface SessionData {
   role?: Role;
-  residentId?: string;
+  residentId?: string;  // block-assignment ID
+  personId?: string;    // global person ID
   blockId?: string;
 }
 
 // ─── App UI state ─────────────────────────────────────────────────────────────
 
 export type Step = 1 | 2 | 3 | 4;
-export type Tab = 'calendar' | 'senior' | 'junior' | 'hours' | 'equity';
+export type Tab = 'calendar' | 'senior' | 'junior' | 'hours' | 'equity' | 'stats';
