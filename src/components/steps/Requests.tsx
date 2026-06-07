@@ -121,6 +121,7 @@ export default function Requests({
         onBlockChanged={() => {}}
         onRegenerate={() => {}}
         showToast={showToast}
+        currentResId={currentResId}
       />
     );
   }

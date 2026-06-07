@@ -109,4 +109,4 @@ export interface SessionData {
 // ─── App UI state ─────────────────────────────────────────────────────────────
 
 export type Step = 1 | 2 | 3 | 4;
-export type Tab = 'calendar' | 'senior' | 'junior' | 'hours' | 'equity';
+export type Tab = 'calendar' | 'senior' | 'junior' | 'hours' | 'equity' | 'stats';
