@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Resident } from '@/types';
 import { api } from '../App';
 
@@ -12,12 +12,25 @@ interface Props {
 }
 
 export default function EditResidentModal({ resident, onClose, onSaved, showToast }: Props) {
-  const [pgy, setPgy] = useState(String(resident?.pgy ?? '4'));
-  const [hospital, setHospital] = useState<'CUH' | 'PMH'>(resident?.hospital ?? 'CUH');
-  const [status, setStatus] = useState<'active' | 'research' | 'away'>(resident?.status ?? 'active');
-  const [rotStart, setRotStart] = useState(resident?.rotation_start ?? '');
-  const [rotEnd, setRotEnd] = useState(resident?.rotation_end ?? '');
-  const [loading, setLoading] = useState(false);
+  const [name,     setName]     = useState('');
+  const [pgy,      setPgy]      = useState('4');
+  const [hospital, setHospital] = useState<'CUH' | 'PMH'>('CUH');
+  const [status,   setStatus]   = useState<'active' | 'research' | 'away'>('active');
+  const [rotStart, setRotStart] = useState('');
+  const [rotEnd,   setRotEnd]   = useState('');
+  const [loading,  setLoading]  = useState(false);
+
+  // Sync form state whenever the selected resident changes
+  useEffect(() => {
+    if (resident) {
+      setName(resident.name);
+      setPgy(String(resident.pgy));
+      setHospital(resident.hospital);
+      setStatus(resident.status);
+      setRotStart(resident.rotation_start ?? '');
+      setRotEnd(resident.rotation_end ?? '');
+    }
+  }, [resident]);
 
   if (!resident) return null;
 
@@ -25,14 +38,15 @@ export default function EditResidentModal({ resident, onClose, onSaved, showToas
     setLoading(true);
     try {
       await api(`/residents/${resident!.id}`, 'PATCH', {
+        name: name.trim() || undefined,
         pgy: parseInt(pgy),
         hospital,
         status,
         rotation_start: rotStart || null,
-        rotation_end: rotEnd || null,
+        rotation_end:   rotEnd   || null,
       });
       onSaved();
-      showToast(`${resident!.name} updated`);
+      showToast(`${name.trim() || resident!.name} updated`);
       onClose();
     } catch (e) {
       showToast((e as Error).message, true);
@@ -52,9 +66,14 @@ export default function EditResidentModal({ resident, onClose, onSaved, showToas
           <button className="mx" onClick={onClose}>✕</button>
         </div>
         <div className="mb">
-          <div className="fg f3">
+          {/* Person-level fields — update the global account */}
+          <div className="fg f2">
+            <div className="fl" style={{ gridColumn: 'span 2' }}>
+              <label className="flb">Full Name <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(updates account across blocks)</span></label>
+              <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
             <div className="fl">
-              <label className="flb">PGY Level</label>
+              <label className="flb">PGY Level <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(updates account)</span></label>
               <select value={pgy} onChange={(e) => setPgy(e.target.value)}>
                 <option value="2">PGY-2</option>
                 <option value="3">PGY-3</option>
@@ -62,15 +81,19 @@ export default function EditResidentModal({ resident, onClose, onSaved, showToas
                 <option value="5">PGY-5</option>
               </select>
             </div>
+          </div>
+
+          {/* Block-specific fields */}
+          <div className="fg f2">
             <div className="fl">
-              <label className="flb">Hospital</label>
+              <label className="flb">Hospital <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(this block only)</span></label>
               <select value={hospital} onChange={(e) => setHospital(e.target.value as 'CUH' | 'PMH')}>
                 <option value="CUH">CUH</option>
                 <option value="PMH">PMH</option>
               </select>
             </div>
             <div className="fl">
-              <label className="flb">Status</label>
+              <label className="flb">Status <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(this block only)</span></label>
               <select value={status} onChange={(e) => setStatus(e.target.value as 'active' | 'research' | 'away')}>
                 <option value="active">Active</option>
                 <option value="research">Research (backup)</option>
@@ -89,7 +112,7 @@ export default function EditResidentModal({ resident, onClose, onSaved, showToas
             </div>
           </div>
           <div style={{ fontSize: 11, color: 'var(--muted)', padding: '4px 2px' }}>
-            Leave blank to use the full block period. Call hours are assigned proportionally to rotation length.
+            Leave rotation dates blank to use the full block period.
           </div>
         </div>
         <div className="mf">
