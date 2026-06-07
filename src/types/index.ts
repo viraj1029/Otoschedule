@@ -95,6 +95,7 @@ export interface ScheduleData {
   jrTHwknd?: Record<string, number>;
   jrTHwkday?: Record<string, number>;
   jrTD?: Record<string, number>;
+  jrAvailDays?: Record<string, number>;
 }
 
 // ─── Session / auth ───────────────────────────────────────────────────────────
