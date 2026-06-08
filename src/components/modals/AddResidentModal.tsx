@@ -27,18 +27,20 @@ interface Props {
   blockEnd?: string;
 }
 
-const HOSPITALS: Hospital[] = ['CUH', 'PMH', 'CMC', 'VA'];
+const ALL_HOSPITALS: Hospital[] = ['CUH', 'PMH', 'CMC', 'VA', 'Research'];
 
 function RotationEditor({
   segments,
   onChange,
   blockStart,
   blockEnd,
+  pgy,
 }: {
   segments: RotSegment[];
   onChange: (s: RotSegment[]) => void;
   blockStart: string;
   blockEnd: string;
+  pgy: number;
 }) {
   const [adding, setAdding] = useState(false);
   const [newHosp, setNewHosp] = useState<Hospital>('CUH');
@@ -88,7 +90,7 @@ function RotationEditor({
             <div className="fl">
               <label className="flb">Hospital</label>
               <select value={newHosp} onChange={(e) => setNewHosp(e.target.value as Hospital)}>
-                {HOSPITALS.map((h) => <option key={h} value={h}>{h}</option>)}
+                {ALL_HOSPITALS.filter((h) => h !== 'Research' || pgy >= 4).map((h) => <option key={h} value={h}>{h === 'Research' ? 'Research (backup)' : h}</option>)}
               </select>
             </div>
           </div>
@@ -234,7 +236,6 @@ export default function AddResidentModal({ open, onClose, onAdded, showToast, ex
                 <label className="flb">Status</label>
                 <select value={status} onChange={(e) => setStatus(e.target.value)}>
                   <option value="active">Active</option>
-                  <option value="research">Research (backup)</option>
                   <option value="away">Away / Excused</option>
                 </select>
               </div>
@@ -265,7 +266,6 @@ export default function AddResidentModal({ open, onClose, onAdded, showToast, ex
                 <label className="flb">Status</label>
                 <select value={status} onChange={(e) => setStatus(e.target.value)}>
                   <option value="active">Active</option>
-                  <option value="research">Research (backup)</option>
                   <option value="away">Away / Excused</option>
                 </select>
               </div>
@@ -283,6 +283,7 @@ export default function AddResidentModal({ open, onClose, onAdded, showToast, ex
               onChange={setSegments}
               blockStart={blockStart}
               blockEnd={blockEnd}
+              pgy={parseInt(pgy) || 4}
             />
           </div>
         </div>

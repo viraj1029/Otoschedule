@@ -20,7 +20,7 @@ export interface Schedule {
   generated_at?: string;
 }
 
-export type Hospital = 'CUH' | 'PMH' | 'CMC' | 'VA';
+export type Hospital = 'CUH' | 'PMH' | 'CMC' | 'VA' | 'Research';
 
 export interface Rotation {
   id: string;

@@ -228,8 +228,11 @@ export default function Requests({
         await toggleDay(key, 'vacation', ownerResId);
         await toggleDay(key, 'vacation_official', resId);
       } else {
+        // Limit hit: clear the vacation instead of getting stuck — inform the user why
+        const ownerResId = reqOwner.get(`${key}:vacation`) ?? resId;
+        await toggleDay(key, 'vacation', ownerResId);
         const q = quarterOf(key);
-        showToast(`5-day limit reached for ${q?.label ?? 'this quarter'} — click again to clear`, true);
+        showToast(`Cleared — official vacation limit already reached for ${q?.label ?? 'this quarter'}`, true);
       }
     } else {
       await toggleDay(key, 'vacation', resId);
@@ -393,7 +396,7 @@ export default function Requests({
               <option value="__all__">— All Residents —</option>
               {sortedResidents.map((r) => (
                 <option key={r.id} value={r.id}>
-                  PGY-{r.pgy} — {r.name}{r.status === 'research' ? ' [Research]' : ''}
+                  PGY-{r.pgy} — {r.name}{(r.status === 'research' || r.rotations?.some((s) => s.hospital === 'Research')) ? ' [Research]' : ''}
                 </option>
               ))}
             </select>
@@ -628,7 +631,7 @@ export default function Requests({
                       {avatar(res)}
                       <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{res.name}</span>
                       <span className="bdg bm">PGY-{res.pgy}</span>
-                      {res.status === 'research' && <span className="bdg bpk" style={{ fontSize: 9 }}>Res</span>}
+                      {(res.status === 'research' || res.rotations?.some((s) => s.hospital === 'Research')) && <span className="bdg bpk" style={{ fontSize: 9 }}>Res</span>}
                       <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: 'var(--blue)' }}>{vac}d</span>
                       <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: 'var(--purple)' }}>{w.size}wk</span>
                       {h.size > 0 && <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: 'var(--orange)' }}>{h.size}hol</span>}

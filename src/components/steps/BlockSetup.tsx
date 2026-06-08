@@ -86,8 +86,11 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
   }
 
   const sorted = [...residents].sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
-  const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active');
-  const res = residents.filter((r) => r.pgy >= 4 && r.status === 'research');
+  function isResearch(r: Resident) {
+    return r.rotations?.some((rot) => rot.hospital === 'Research') ?? r.status === 'research';
+  }
+  const res = residents.filter((r) => r.pgy >= 4 && isResearch(r));
+  const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active' && !isResearch(r));
   const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
 
   function hasRotationAt(r: Resident, hosp: Hospital) {
@@ -180,7 +183,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
                 </tr>
               ) : sorted.map((r) => {
                 const statusBadge =
-                  r.status === 'research' ? <span className="bdg bpk">Research</span> :
+                  isResearch(r) ? <span className="bdg bpk">Research</span> :
                   r.status === 'active' ? <span className="bdg bm">Active</span> :
                   <span className="bdg bo">Away</span>;
                 return (
@@ -194,7 +197,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
                     <td><span className={`bdg ${r.pgy >= 4 ? 'bg2' : 'bb'}`}>PGY-{r.pgy}</span></td>
                     <td>
                       <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-                        {r.status === 'research' ? 'Research (backup)' : r.pgy >= 4 ? 'Senior Call' : 'Junior Call'}
+                        {isResearch(r) ? 'Research (backup)' : r.pgy >= 4 ? 'Senior Call' : 'Junior Call'}
                       </span>
                     </td>
                     <td>{statusBadge}</td>
@@ -202,7 +205,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
                       {r.rotations && r.rotations.length > 0 ? (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                           {r.rotations.map((rot) => {
-                            const hospColor: Record<Hospital, string> = { CUH: 'bgr', PMH: 'bp', CMC: 'bb', VA: 'bo' };
+                            const hospColor: Record<Hospital, string> = { CUH: 'bgr', PMH: 'bp', CMC: 'bb', VA: 'bo', Research: 'bpk' };
                             return (
                               <span key={rot.id} className={`bdg ${hospColor[rot.hospital]}`} title={`${rot.start_date} → ${rot.end_date}`}>
                                 {rot.hospital} {fmtShort(rot.start_date)}–{fmtShort(rot.end_date)}

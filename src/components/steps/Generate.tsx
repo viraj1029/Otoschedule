@@ -75,8 +75,14 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
     return r.hospital === hosp;
   }
 
-  const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active' && (hasHospRotation(r, 'CUH') || hasHospRotation(r, 'PMH')));
-  const resR = residents.filter((r) => r.pgy >= 4 && r.status === 'research' && (hasHospRotation(r, 'CUH') || hasHospRotation(r, 'PMH')));
+  function hasResearchRotation(r: typeof residents[0]) {
+    if (r.rotations && r.rotations.length > 0)
+      return r.rotations.some((seg) => seg.hospital === 'Research' && parseDate(seg.start_date) <= parseDate(schedEnd) && parseDate(seg.end_date) >= parseDate(schedStart));
+    return r.status === 'research';
+  }
+  const resR = residents.filter((r) => r.pgy >= 4 && hasResearchRotation(r));
+  const resRIds = new Set(resR.map((r) => r.id));
+  const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active' && !resRIds.has(r.id) && (hasHospRotation(r, 'CUH') || hasHospRotation(r, 'PMH')));
   const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active' && (hasHospRotation(r, 'CUH') || hasHospRotation(r, 'PMH')));
   const cmcPool = residents.filter((r) => r.pgy >= 2 && r.pgy <= 4 && r.status === 'active' && hasHospRotation(r, 'CMC'));
   const vaPool  = residents.filter((r) => (r.pgy === 2 || r.pgy === 4) && r.status === 'active' && hasHospRotation(r, 'VA'));

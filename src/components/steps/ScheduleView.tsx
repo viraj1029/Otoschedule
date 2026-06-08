@@ -462,7 +462,8 @@ export default function ScheduleView({
     const ms24 = mAll.filter((d) => d.shiftHrs === 24).length;
 
     // All senior residents (active + research) treated as one pool
-    const srs = residents.filter((r) => r.pgy >= 4 && (r.status === 'active' || r.status === 'research'))
+    const srs = residents.filter((r) => r.pgy >= 4 && (r.status === 'active' || r.status === 'research' ||
+        r.rotations?.some((seg) => seg.hospital === 'Research')))
       .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
 
     function countWeekDays(weeks: ScheduleData['seniorWeeks']) {
@@ -484,7 +485,8 @@ export default function ScheduleView({
     const allSrStats = srs.map((res) => {
       const weeks = cuhSched.seniorWeeks.filter((w) => w.res.id === res.id);
       const { totalDays, weekendDays, holidayDays } = countWeekDays(weeks);
-      return { res, weeks: weeks.length, totalDays, weekendDays, holidayDays, isResearch: res.status === 'research' };
+      const isResearch = res.status === 'research' || (res.rotations?.some((seg) => seg.hospital === 'Research') ?? false);
+      return { res, weeks: weeks.length, totalDays, weekendDays, holidayDays, isResearch };
     });
 
     return (
@@ -867,7 +869,8 @@ export default function ScheduleView({
   }
 
   function renderEquityTab() {
-    const srs = residents.filter((r) => r.pgy >= 4 && (r.status === 'active' || r.status === 'research'));
+    const srs = residents.filter((r) => r.pgy >= 4 && (r.status === 'active' || r.status === 'research' ||
+        r.rotations?.some((seg) => seg.hospital === 'Research')));
     const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
     const bStart = parseDate(cuhSched.bStart);
     const bEnd = parseDate(cuhSched.bEnd);
