@@ -81,6 +81,8 @@ export default function ScheduleView({
 
   async function switchToTab(tab: HospitalTab) {
     setHospitalTab(tab);
+    setSelectMode(false);
+    setSelectedKeys([]);
     const match = schedules.filter((s) => (s.schedule_type ?? 'cuh_pmh') === tab)[0];
     if (!match) return;
     const currentSchedId = (schedule as AnyScheduleData & { _scheduleId?: string })?._scheduleId ?? activeScheduleId;
@@ -168,11 +170,7 @@ export default function ScheduleView({
     if (cmcDayData) {
       const entry = cmcDayMap[key];
       if (!entry) return '';
-      const d2 = parseDate(key);
-      const pwLabel = entry.isPowerWeekend
-        ? (d2.getDay() === 5 ? ' · Fri PW' : d2.getDay() === 6 ? ' · Sat PW' : ' · Sun PW')
-        : '';
-      return rc(entry.res.color, `${entry.res.name}${pwLabel}${entry.override ? ' ✎' : ''}`);
+      return rc(entry.res.color, `${entry.res.name}${entry.override ? ' ✎' : ''}`);
     }
 
     const sr = srMap[key];
@@ -294,17 +292,29 @@ export default function ScheduleView({
         const isPW = !!(cmcDayData && cmcDayMap[key]?.isPowerWeekend);
         const handleClick = forPrint ? undefined : (role === 'chief'
           ? hospitalTab === 'va'
-            ? () => { const idx = vaWeekMap[key]; if (idx !== undefined) { setPoolOverrideResId(vaSched!.weeks[idx].res.id); setVaOverride({ open: true, weekIndex: idx }); } }
+            ? selectMode
+              ? () => {
+                  const idx = vaWeekMap[key];
+                  if (idx === undefined) return;
+                  const w = vaSched!.weeks[idx];
+                  // Select all keys in this week
+                  let wd = parseDate(w.wS); const we = parseDate(w.wE);
+                  const wKeys: string[] = [];
+                  while (wd <= we) { wKeys.push(dk(wd)); wd = addDays(wd, 1); }
+                  setSelectedKeys(wKeys);
+                }
+              : () => { const idx = vaWeekMap[key]; if (idx !== undefined) { setPoolOverrideResId(vaSched!.weeks[idx].res.id); setVaOverride({ open: true, weekIndex: idx }); } }
             : hospitalTab === 'cmc'
-            ? () => { const entry = cmcDayMap[key]; if (entry) { setPoolOverrideResId(entry.res.id); setCmcOverride({ open: true, dateKey: key }); } }
+            ? selectMode
+              ? () => setSelectedKeys((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key])
+              : () => { const entry = cmcDayMap[key]; if (entry) { setPoolOverrideResId(entry.res.id); setCmcOverride({ open: true, dateKey: key }); } }
             : selectMode
               ? () => setSelectedKeys((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key])
               : () => setOverrideKeys([key])
           : undefined);
 
-        const cellStyle: React.CSSProperties = isPW
-          ? { background: 'rgba(234,179,8,0.15)', outline: '1px solid rgba(234,179,8,0.4)' }
-          : isTrauma && !isWk ? { background: 'rgba(239,68,68,0.20)' }
+        const cellStyle: React.CSSProperties = isTrauma && !isWk
+          ? { background: 'rgba(239,68,68,0.20)' }
           : isTrauma ? { background: 'rgba(239,68,68,0.28)' }
           : {};
 
@@ -317,7 +327,6 @@ export default function ScheduleView({
           >
             <div className={`cdate${isToday ? ' tod' : ''}`}>
               {day}{isSel ? ' ✓' : ''}
-              {isPW && !forPrint && <span style={{ marginLeft: 4, fontSize: 9, color: '#92400e', fontWeight: 700 }}>PW</span>}
               {isHol && <span style={{ marginLeft: 4, color: 'var(--orange)', fontFamily: 'Inter, sans-serif', fontWeight: 600, letterSpacing: 0 }}>🎉 {HOLIDAY_NAMES[key] ?? 'Holiday'}</span>}
             </div>
             <div className="cchips" dangerouslySetInnerHTML={{ __html: chips }} />
@@ -1086,6 +1095,28 @@ export default function ScheduleView({
     const resSet = new Map<string, Resident>();
     cmcDayData.days.forEach((d) => resSet.set(d.res.id, d.res));
     const pool = [...resSet.values()].sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
+
+    // Compute available days per resident (CMC rotation window minus vacation)
+    const bStart = parseDate(cmcDayData.bStart);
+    const bEnd   = parseDate(cmcDayData.bEnd);
+    const cmcRotDays: Record<string, number> = {};
+    pool.forEach((r) => {
+      const cmcSegs = r.rotations?.filter((s) => s.hospital === 'CMC') ?? [];
+      const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id).map((req) => req.date));
+      let cnt = 0; let d = new Date(bStart);
+      while (d <= bEnd) {
+        const dstr = dk(d);
+        const inCMC = cmcSegs.length === 0 || cmcSegs.some((s) => dstr >= s.start_date && dstr <= s.end_date);
+        if (inCMC && !offDays.has(dstr)) cnt++;
+        d = addDays(d, 1);
+      }
+      cmcRotDays[r.id] = Math.max(1, cnt);
+    });
+    const cmcHper30: Record<string, number> = {};
+    pool.forEach((r) => {
+      cmcHper30[r.id] = Math.round(((cmcDayData!.hours[r.id] ?? 0) / cmcRotDays[r.id]) * 30 * 10) / 10;
+    });
+
     return (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
         <div className="card">
@@ -1095,6 +1126,15 @@ export default function ScheduleView({
         <div className="card">
           <div className="ch"><div className="ct">CMC Call Hours</div></div>
           <div className="cb">{eqBars(pool.map((r) => ({ name: r.name, val: cmcDayData!.hours[r.id] ?? 0, color: r.color })), 'h')}</div>
+        </div>
+        <div className="card" style={{ gridColumn: 'span 2' }}>
+          <div className="ch">
+            <div>
+              <div className="ct">CMC Hours per 30 Available Days</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Normalised for available days (CMC rotation window minus time off) — equal bars = truly equitable distribution</div>
+            </div>
+          </div>
+          <div className="cb">{eqBars(pool.map((r) => ({ name: `${r.name} (${cmcRotDays[r.id]}d avail)`, val: cmcHper30[r.id] ?? 0, color: r.color })), 'h')}</div>
         </div>
       </div>
     );
@@ -1167,6 +1207,127 @@ export default function ScheduleView({
     a.href = url; a.download = 'oto_call_schedule.ics'; a.click();
     URL.revokeObjectURL(url);
     showToast('iCal exported');
+  }
+
+  function exportVAExcel() {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const XLSX = require('xlsx') as typeof import('xlsx');
+    if (!vaSched) return;
+    const wb = XLSX.utils.book_new();
+    const monthSet: { year: number; month: number }[] = [];
+    let d = parseDate(vaSched.bStart); const end = parseDate(vaSched.bEnd);
+    while (d <= end) {
+      const y = d.getFullYear(), m = d.getMonth();
+      if (!monthSet.find((x) => x.year === y && x.month === m)) monthSet.push({ year: y, month: m });
+      d = addDays(d, 28);
+    }
+    const ly = end.getFullYear(), lm = end.getMonth();
+    if (!monthSet.find((x) => x.year === ly && x.month === lm)) monthSet.push({ year: ly, month: lm });
+
+    monthSet.forEach(({ year, month }) => {
+      const monthName = MONTHS[month];
+      const firstDay = new Date(year, month, 1).getDay();
+      const dim = new Date(year, month + 1, 0).getDate();
+      const aoa: (string | null)[][] = [];
+      aoa.push([`${monthName} ${year} — VA Call`, null, null, null, null, null, null]);
+      aoa.push(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
+      let row: (string | null)[] = Array(firstDay).fill(null);
+      for (let day = 1; day <= dim; day++) {
+        const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const idx = vaWeekMap[key];
+        const w = idx !== undefined ? vaSched!.weeks[idx] : null;
+        const parts: string[] = [`${day}${HOLIDAYS.has(key) ? ' 🎉' : ''}`];
+        if (w) parts.push(w.res.name);
+        row.push(parts.join('\n'));
+        if (parseDate(key).getDay() === 6 || day === dim) {
+          while (row.length < 7) row.push(null);
+          aoa.push(row); row = [];
+        }
+      }
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = Array(7).fill({ wch: 20 });
+      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }];
+      ws['!rows'] = [{ hpt: 20 }, { hpt: 16 }, ...Array(6).fill({ hpt: 50 })];
+      XLSX.utils.book_append_sheet(wb, ws, monthName.slice(0, 3));
+    });
+    XLSX.writeFile(wb, `${vaSched!.blockName.replace(/[^a-z0-9]/gi, '_')}_VA_schedule.xlsx`);
+    showToast('VA Excel exported');
+  }
+
+  function exportVAICS() {
+    if (!vaSched) return;
+    let ics = 'BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//OTO Scheduler//UTSW//EN\n';
+    vaSched.weeks.forEach((w) => {
+      const ds = w.wS.replace(/-/g, '');
+      const de = dk(addDays(parseDate(w.wE), 1)).replace(/-/g, '');
+      ics += `BEGIN:VEVENT\nDTSTART;VALUE=DATE:${ds}\nDTEND;VALUE=DATE:${de}\nSUMMARY:VA Call – ${w.res.name}\nEND:VEVENT\n`;
+    });
+    ics += 'END:VCALENDAR';
+    const blob = new Blob([ics], { type: 'text/calendar' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'va_call_schedule.ics'; a.click();
+    URL.revokeObjectURL(url);
+    showToast('VA iCal exported');
+  }
+
+  function exportCMCExcel() {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const XLSX = require('xlsx') as typeof import('xlsx');
+    if (!cmcDayData) return;
+    const wb = XLSX.utils.book_new();
+    const monthSet: { year: number; month: number }[] = [];
+    let d = parseDate(cmcDayData.bStart); const end = parseDate(cmcDayData.bEnd);
+    while (d <= end) {
+      const y = d.getFullYear(), m = d.getMonth();
+      if (!monthSet.find((x) => x.year === y && x.month === m)) monthSet.push({ year: y, month: m });
+      d = addDays(d, 28);
+    }
+    const ly = end.getFullYear(), lm = end.getMonth();
+    if (!monthSet.find((x) => x.year === ly && x.month === lm)) monthSet.push({ year: ly, month: lm });
+
+    monthSet.forEach(({ year, month }) => {
+      const monthName = MONTHS[month];
+      const firstDay = new Date(year, month, 1).getDay();
+      const dim = new Date(year, month + 1, 0).getDate();
+      const aoa: (string | null)[][] = [];
+      aoa.push([`${monthName} ${year} — CMC Call`, null, null, null, null, null, null]);
+      aoa.push(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
+      let row: (string | null)[] = Array(firstDay).fill(null);
+      for (let day = 1; day <= dim; day++) {
+        const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const entry = cmcDayMap[key];
+        const parts: string[] = [`${day}${HOLIDAYS.has(key) ? ' 🎉' : ''}${TRAUMA_WEEKS.has(key) ? ' 🚨' : ''}`];
+        if (entry) parts.push(entry.res.name);
+        row.push(parts.join('\n'));
+        if (parseDate(key).getDay() === 6 || day === dim) {
+          while (row.length < 7) row.push(null);
+          aoa.push(row); row = [];
+        }
+      }
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = Array(7).fill({ wch: 20 });
+      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }];
+      ws['!rows'] = [{ hpt: 20 }, { hpt: 16 }, ...Array(6).fill({ hpt: 50 })];
+      XLSX.utils.book_append_sheet(wb, ws, monthName.slice(0, 3));
+    });
+    XLSX.writeFile(wb, `${cmcDayData!.blockName.replace(/[^a-z0-9]/gi, '_')}_CMC_schedule.xlsx`);
+    showToast('CMC Excel exported');
+  }
+
+  function exportCMCICS() {
+    if (!cmcDayData) return;
+    let ics = 'BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//OTO Scheduler//UTSW//EN\n';
+    cmcDayData.days.forEach((day) => {
+      const ds = day.dateKey.replace(/-/g, '');
+      const de = dk(addDays(parseDate(day.dateKey), 1)).replace(/-/g, '');
+      ics += `BEGIN:VEVENT\nDTSTART;VALUE=DATE:${ds}\nDTEND;VALUE=DATE:${de}\nSUMMARY:CMC Call – ${day.res.name} · ${day.shiftHrs}h\nEND:VEVENT\n`;
+    });
+    ics += 'END:VCALENDAR';
+    const blob = new Blob([ics], { type: 'text/calendar' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'cmc_call_schedule.ics'; a.click();
+    URL.revokeObjectURL(url);
+    showToast('CMC iCal exported');
   }
 
   function navCal(dir: number) {
@@ -1273,6 +1434,8 @@ export default function ScheduleView({
                     <button className={`btn bsm ${published ? 'bg' : 'bgh'}`} onClick={togglePublish}>
                       {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
                     </button>
+                    <button className="btn bgh bsm" onClick={exportVAICS}>📅 iCal</button>
+                    <button className="btn bg bsm" onClick={exportVAExcel}>📊 Excel</button>
                   </div>
                 )}
               </div>
@@ -1287,9 +1450,29 @@ export default function ScheduleView({
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
                     <button className="btn bgh bsm" onClick={() => navCal(-1)}>‹ Prev</button>
                     <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 16, fontWeight: 700, flex: 1, textAlign: 'center' }}>{MONTHS[calMonth]} {calYear}</div>
+                    {role === 'chief' && !selectMode && (
+                      <button className="btn bgh bsm" onClick={() => setSelectMode(true)}>☑ Select Days</button>
+                    )}
+                    {role === 'chief' && selectMode && (
+                      <>
+                        {selectedKeys.length > 0 && (
+                          <button className="btn bg bsm" onClick={() => {
+                            const weekIdx = vaWeekMap[selectedKeys[0]];
+                            if (weekIdx !== undefined) { setPoolOverrideResId(vaSched!.weeks[weekIdx].res.id); setVaOverride({ open: true, weekIndex: weekIdx }); }
+                            setSelectMode(false); setSelectedKeys([]);
+                          }}>Override week</button>
+                        )}
+                        <button className="btn bgh bsm" onClick={() => { setSelectMode(false); setSelectedKeys([]); }}>✕ Cancel</button>
+                      </>
+                    )}
                     <button className="btn bgh bsm" onClick={() => navCal(1)}>Next ›</button>
                   </div>
-                  {role === 'chief' && (
+                  {selectMode && (
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, padding: '6px 10px', background: 'rgba(0,0,0,0.05)', borderRadius: 6 }}>
+                      Click a day to select its week · {selectedKeys.length > 0 ? `Week of ${selectedKeys[0]} selected` : 'none selected'}
+                    </div>
+                  )}
+                  {!selectMode && role === 'chief' && (
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, padding: '5px 10px', background: 'rgba(0,0,0,0.04)', borderRadius: 6 }}>
                       Click any day to override the weekly assignment
                     </div>
@@ -1327,6 +1510,8 @@ export default function ScheduleView({
                     <button className={`btn bsm ${published ? 'bg' : 'bgh'}`} onClick={togglePublish}>
                       {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
                     </button>
+                    <button className="btn bgh bsm" onClick={exportCMCICS}>📅 iCal</button>
+                    <button className="btn bg bsm" onClick={exportCMCExcel}>📊 Excel</button>
                   </div>
                 )}
               </div>
@@ -1341,9 +1526,29 @@ export default function ScheduleView({
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
                     <button className="btn bgh bsm" onClick={() => navCal(-1)}>‹ Prev</button>
                     <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 16, fontWeight: 700, flex: 1, textAlign: 'center' }}>{MONTHS[calMonth]} {calYear}</div>
+                    {role === 'chief' && !selectMode && (
+                      <button className="btn bgh bsm" onClick={() => setSelectMode(true)}>☑ Select Days</button>
+                    )}
+                    {role === 'chief' && selectMode && (
+                      <>
+                        {selectedKeys.length > 0 && (
+                          <button className="btn bg bsm" onClick={() => {
+                            const entry = cmcDayMap[selectedKeys[0]];
+                            if (entry) setPoolOverrideResId(entry.res.id);
+                            setCmcOverride({ open: true, dateKey: selectedKeys[0] });
+                          }}>Override {selectedKeys.length} day{selectedKeys.length !== 1 ? 's' : ''}</button>
+                        )}
+                        <button className="btn bgh bsm" onClick={() => { setSelectMode(false); setSelectedKeys([]); }}>✕ Cancel</button>
+                      </>
+                    )}
                     <button className="btn bgh bsm" onClick={() => navCal(1)}>Next ›</button>
                   </div>
-                  {role === 'chief' && (
+                  {selectMode && (
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, padding: '6px 10px', background: 'rgba(0,0,0,0.05)', borderRadius: 6 }}>
+                      Click days to select · {selectedKeys.length} selected
+                    </div>
+                  )}
+                  {!selectMode && role === 'chief' && (
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, padding: '5px 10px', background: 'rgba(0,0,0,0.04)', borderRadius: 6 }}>
                       Click any day to override the assignment
                     </div>
@@ -1560,10 +1765,10 @@ export default function ScheduleView({
           <div className="modal">
             <div className="mh">
               <div>
-                <div className="mt">Override CMC Day</div>
-                <div className="ms">{fmtShort(cmcOverride.dateKey)}</div>
+                <div className="mt">Override CMC {selectedKeys.length > 1 ? `${selectedKeys.length} Days` : 'Day'}</div>
+                <div className="ms">{selectedKeys.length > 1 ? `${fmtShort(selectedKeys[0])} – ${fmtShort(selectedKeys[selectedKeys.length - 1])}` : fmtShort(cmcOverride.dateKey)}</div>
               </div>
-              <button className="mx" onClick={() => setCmcOverride({ open: false, dateKey: '' })}>✕</button>
+              <button className="mx" onClick={() => { setCmcOverride({ open: false, dateKey: '' }); setSelectedKeys([]); setSelectMode(false); }}>✕</button>
             </div>
             <div className="mb">
               <div className="fl">
@@ -1577,15 +1782,17 @@ export default function ScheduleView({
               </div>
             </div>
             <div className="mf">
-              <button className="btn bgh" onClick={() => setCmcOverride({ open: false, dateKey: '' })}>Cancel</button>
+              <button className="btn bgh" onClick={() => { setCmcOverride({ open: false, dateKey: '' }); setSelectedKeys([]); setSelectMode(false); }}>Cancel</button>
               <button className="btn bg" disabled={!poolOverrideResId} onClick={() => {
                 const newRes = residents.find((r) => r.id === poolOverrideResId);
                 if (!newRes || !cmcDayData) return;
-                const newDaysArr = cmcDayData.days.map((d) => d.dateKey === cmcOverride.dateKey ? { ...d, res: newRes, override: true } : d);
+                const keysToUpdate = selectedKeys.length > 1 ? selectedKeys : [cmcOverride.dateKey];
+                const newDaysArr = cmcDayData.days.map((d) => keysToUpdate.includes(d.dateKey) ? { ...d, res: newRes, override: true } : d);
                 const finalCounts: Record<string, number> = {}; const finalHours: Record<string, number> = {};
                 newDaysArr.forEach((d) => { finalCounts[d.res.id] = (finalCounts[d.res.id] ?? 0) + 1; finalHours[d.res.id] = (finalHours[d.res.id] ?? 0) + d.shiftHrs; });
                 persistSchedule({ ...cmcDayData, days: newDaysArr, counts: finalCounts, hours: finalHours });
                 setCmcOverride({ open: false, dateKey: '' });
+                setSelectedKeys([]); setSelectMode(false);
                 showToast('CMC override saved');
               }}>Save Override</button>
             </div>

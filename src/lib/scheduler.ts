@@ -873,15 +873,6 @@ export function generateVASchedule(
     offMap[r.id] = vac;
   });
 
-  // Precompute total available days per resident across the full period
-  const totalAvailDays: Record<string, number> = {};
-  pool.forEach((r) => {
-    let cnt = 0;
-    let d2 = new Date(bStart);
-    while (d2 <= bEnd) { if (!offMap[r.id].has(dk(d2))) cnt++; d2 = addDays(d2, 1); }
-    totalAvailDays[r.id] = Math.max(cnt, 1);
-  });
-
   // Count available days per resident in a date range
   function availableDaysInRange(r: Resident, wS: Date, wE: Date): number {
     let cnt = 0, d = new Date(wS);
@@ -907,12 +898,13 @@ export function generateVASchedule(
 
     if (wSDate > bEnd) break;
 
-    // Pick: prefer alternating; sort by proportion of available days used
+    // Pick: sort by local proportion (days worked / days available so far from bStart to now)
     const sorted = [...pool].sort((a, b) => {
-      const aProp = days[a.id] / totalAvailDays[a.id];
-      const bProp = days[b.id] / totalAvailDays[b.id];
+      const aDaysAvail = wSDate > bStart ? availableDaysInRange(a, bStart, addDays(wSDate, -1)) : 0;
+      const bDaysAvail = wSDate > bStart ? availableDaysInRange(b, bStart, addDays(wSDate, -1)) : 0;
+      const aProp = aDaysAvail > 0 ? days[a.id] / aDaysAvail : 0;
+      const bProp = bDaysAvail > 0 ? days[b.id] / bDaysAvail : 0;
       if (Math.abs(aProp - bProp) > 1e-9) return aProp - bProp;
-      // Tiebreak: prefer not last person
       if (a.id !== lastId && b.id === lastId) return -1;
       if (b.id !== lastId && a.id === lastId) return 1;
       return 0;
