@@ -505,8 +505,9 @@ export function generateSchedule(
       return Math.round((d.getTime() - parseDate(lastWeekendKey[r.id]).getTime()) / 86400000);
     }
 
-    // Progressive gap relaxation: prefer ≥3 days (q4+), fallback to ≥2 (q3), ≥1, then any
-    const minGaps = skipGap ? [0] : [3, 2, 1, 0];
+    // Progressive gap relaxation: prefer ≥3 days, fallback to ≥2, then ≥1.
+    // Never relaxes to 0 — back-to-back shifts are handled only in the fallback below.
+    const minGaps = skipGap ? [1] : [3, 2, 1];
     for (const minGap of minGaps) {
       const eligible = jrs.filter((r) =>
         r.id !== ex &&
@@ -516,13 +517,24 @@ export function generateSchedule(
       );
       if (!eligible.length) continue;
       if (isWeekendSlot) {
-        // Prefer residents who haven't worked a weekend in the last 7 days (no consecutive weekends)
-        const noConsec = eligible.filter((r) => daysSinceLastWeekend(r) >= 7);
-        if (noConsec.length) return noConsec.sort(sortFn)[0];
+        // Progressive weekend spacing: strongly prefer skipping a full weekend (≥14 days),
+        // fall back to no-consecutive-weekend (≥8 days), then any eligible.
+        for (const minWknd of [14, 8]) {
+          const noConsec = eligible.filter((r) => daysSinceLastWeekend(r) >= minWknd);
+          if (noConsec.length) return noConsec.sort(sortFn)[0];
+        }
       }
       return eligible.sort(sortFn)[0];
     }
-    return jrs.sort(sortFn)[0]; // absolute fallback
+    // Fallback: gap relaxed but still prefer ≥1 day (no back-to-back) if at all possible.
+    const inWindow = jrs.filter((r) =>
+      r.id !== ex &&
+      !offMap[r.id].has(key) &&
+      d >= rotEffStart[r.id] && d <= rotEffEnd[r.id],
+    );
+    const withGap = inWindow.filter((r) => daysSince(r) >= 1);
+    const pool = withGap.length ? withGap : inWindow.length ? inWindow : jrs;
+    return pool.sort(sortFn)[0];
   }
 
   function addJD(key: string, res: Resident, type: JuniorDayType, paired = false, cuhR: Resident | null = null) {
