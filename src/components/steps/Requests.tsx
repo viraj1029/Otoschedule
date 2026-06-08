@@ -228,8 +228,11 @@ export default function Requests({
         await toggleDay(key, 'vacation', ownerResId);
         await toggleDay(key, 'vacation_official', resId);
       } else {
+        // Limit hit: clear the vacation instead of getting stuck — inform the user why
+        const ownerResId = reqOwner.get(`${key}:vacation`) ?? resId;
+        await toggleDay(key, 'vacation', ownerResId);
         const q = quarterOf(key);
-        showToast(`5-day limit reached for ${q?.label ?? 'this quarter'} — click again to clear`, true);
+        showToast(`Cleared — official vacation limit already reached for ${q?.label ?? 'this quarter'}`, true);
       }
     } else {
       await toggleDay(key, 'vacation', resId);
