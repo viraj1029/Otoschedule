@@ -106,17 +106,31 @@ export const TRAUMA_WEEKS = buildTraumaSet();
 
 export type ScheduleMode = 'merged' | 'senior' | 'junior';
 
-// Returns true if the resident has a CUH or PMH rotation segment overlapping [periodStart, periodEnd].
-// Falls back to checking r.hospital if no segments are defined.
+// Returns true if the resident has a CUH, PMH, or Research rotation segment overlapping [periodStart, periodEnd].
+// Research residents (PGY4+) count as CUH/PMH eligible because they do backup weeks there.
+// Falls back to checking r.hospital / r.status if no segments are defined.
 function hasMainHospitalRotation(r: Resident, periodStart: Date, periodEnd: Date): boolean {
   if (r.rotations && r.rotations.length > 0) {
     return r.rotations.some((seg) =>
-      (seg.hospital === 'CUH' || seg.hospital === 'PMH') &&
+      (seg.hospital === 'CUH' || seg.hospital === 'PMH' ||
+       (seg.hospital === 'Research' && r.pgy >= 4)) &&
       parseDate(seg.start_date) <= periodEnd &&
       parseDate(seg.end_date)   >= periodStart,
     );
   }
-  return r.hospital === 'CUH' || r.hospital === 'PMH';
+  return r.hospital === 'CUH' || r.hospital === 'PMH' || r.status === 'research';
+}
+
+// Returns true if the resident is on a Research rotation overlapping [periodStart, periodEnd].
+function hasResearchRotation(r: Resident, periodStart: Date, periodEnd: Date): boolean {
+  if (r.rotations && r.rotations.length > 0) {
+    return r.rotations.some((seg) =>
+      seg.hospital === 'Research' &&
+      parseDate(seg.start_date) <= periodEnd &&
+      parseDate(seg.end_date)   >= periodStart,
+    );
+  }
+  return r.status === 'research'; // legacy fallback
 }
 
 export function generateSchedule(
@@ -135,10 +149,11 @@ export function generateSchedule(
   // Filter to residents who have a CUH/PMH rotation overlapping this schedule period
   const eligibleResidents = residents.filter((r) => hasMainHospitalRotation(r, bStart, bEnd));
 
+  const resR = eligibleResidents.filter((r) => r.pgy >= 4 && hasResearchRotation(r, bStart, bEnd));
+  const resRIds = new Set(resR.map((r) => r.id));
   const srs = eligibleResidents
-    .filter((r) => r.pgy >= 4 && r.status === 'active')
+    .filter((r) => r.pgy >= 4 && r.status === 'active' && !resRIds.has(r.id))
     .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
-  const resR = eligibleResidents.filter((r) => r.pgy >= 4 && r.status === 'research');
   const jrs = eligibleResidents
     .filter((r) => r.pgy <= 3 && r.status === 'active')
     .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));

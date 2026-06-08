@@ -13,7 +13,7 @@ interface Props {
   blockEnd?: string;
 }
 
-const HOSPITALS: Hospital[] = ['CUH', 'PMH', 'CMC', 'VA'];
+const ALL_HOSPITALS: Hospital[] = ['CUH', 'PMH', 'CMC', 'VA', 'Research'];
 
 export default function EditResidentModal({ resident, onClose, onSaved, showToast, blockStart = '2026-07-01', blockEnd = '2027-06-30' }: Props) {
   const [name,    setName]    = useState('');
@@ -143,7 +143,6 @@ export default function EditResidentModal({ resident, onClose, onSaved, showToas
               <label className="flb">Status</label>
               <select value={status} onChange={(e) => setStatus(e.target.value as 'active' | 'research' | 'away')}>
                 <option value="active">Active</option>
-                <option value="research">Research (backup)</option>
                 <option value="away">Away / Excused</option>
               </select>
             </div>
@@ -172,7 +171,7 @@ export default function EditResidentModal({ resident, onClose, onSaved, showToas
               {editingId === rot.id ? (
                 <>
                   <select value={editHosp} onChange={(e) => setEditHosp(e.target.value as Hospital)} style={{ width: 80, fontSize: 12 }}>
-                    {HOSPITALS.map((h) => <option key={h} value={h}>{h}</option>)}
+                    {ALL_HOSPITALS.filter((h) => h !== 'Research' || parseInt(pgy) >= 4).map((h) => <option key={h} value={h}>{h === 'Research' ? 'Research (backup)' : h}</option>)}
                   </select>
                   <input type="date" value={editStart} onChange={(e) => setEditStart(e.target.value)} style={{ fontSize: 11, width: 130 }} />
                   <span style={{ color: 'var(--muted)', fontSize: 11 }}>→</span>
@@ -186,7 +185,7 @@ export default function EditResidentModal({ resident, onClose, onSaved, showToas
                 <>
                   <span style={{
                     fontWeight: 700, fontSize: 12, minWidth: 40,
-                    color: rot.hospital === 'CUH' ? 'var(--green)' : rot.hospital === 'PMH' ? 'var(--purple)' : rot.hospital === 'CMC' ? 'var(--blue)' : 'var(--orange)',
+                    color: rot.hospital === 'CUH' ? 'var(--green)' : rot.hospital === 'PMH' ? 'var(--purple)' : rot.hospital === 'CMC' ? 'var(--blue)' : rot.hospital === 'Research' ? 'var(--pink)' : 'var(--orange)',
                   }}>{rot.hospital}</span>
                   <span style={{ fontSize: 12, color: 'var(--muted)', fontFamily: "'JetBrains Mono',monospace" }}>
                     {rot.start_date} → {rot.end_date}
@@ -206,7 +205,7 @@ export default function EditResidentModal({ resident, onClose, onSaved, showToas
                 <div className="fl">
                   <label className="flb">Hospital</label>
                   <select value={newHosp} onChange={(e) => setNewHosp(e.target.value as Hospital)}>
-                    {HOSPITALS.map((h) => <option key={h} value={h}>{h}</option>)}
+                    {ALL_HOSPITALS.filter((h) => h !== 'Research' || parseInt(pgy) >= 4).map((h) => <option key={h} value={h}>{h === 'Research' ? 'Research (backup)' : h}</option>)}
                   </select>
                 </div>
               </div>
