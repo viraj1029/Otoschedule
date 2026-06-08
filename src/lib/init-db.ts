@@ -84,6 +84,7 @@ export async function initDb() {
     )
   `;
 
+
   // Migrate existing residents that have no person_id yet.
   // For each unlinked resident, create a persons row and link it.
   const { rows: unlinked } = await sql`SELECT * FROM residents WHERE person_id IS NULL`;
