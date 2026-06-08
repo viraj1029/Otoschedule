@@ -30,7 +30,7 @@ export interface Request {
   resident_id: string;
   block_id: string;
   date: string; // YYYY-MM-DD
-  type: 'vacation' | 'weekend' | 'holiday';
+  type: 'vacation' | 'vacation_official' | 'weekend' | 'holiday';
   created_at?: string;
 }
 

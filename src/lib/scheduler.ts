@@ -133,7 +133,7 @@ export function generateSchedule(
   const offMap: Record<string, Set<string>> = {};
   const rotDays: Record<string, number> = {}; // effective rotation days within block
   residents.forEach((r) => {
-    const vac = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'vacation').map((req) => req.date));
+    const vac = new Set(requests.filter((req) => req.resident_id === r.id && (req.type === 'vacation' || req.type === 'vacation_official')).map((req) => req.date));
     const wk  = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'weekend').map((req) => req.date));
     const hol = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'holiday').map((req) => req.date));
     offMap[r.id] = new Set([...vac, ...wk, ...hol]);
