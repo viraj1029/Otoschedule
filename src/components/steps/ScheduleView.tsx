@@ -1051,27 +1051,79 @@ export default function ScheduleView({
     const resSet = new Map<string, Resident>();
     cmcDayData.days.forEach((d) => resSet.set(d.res.id, d.res));
     const pool = [...resSet.values()].sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
+
+    // Block months
+    const cmcMonths: { year: number; month: number }[] = [];
+    let dm = parseDate(cmcDayData.bStart); const cmcEnd = parseDate(cmcDayData.bEnd);
+    while (dm <= cmcEnd) {
+      const y = dm.getFullYear(), mo = dm.getMonth();
+      if (!cmcMonths.find((x) => x.year === y && x.month === mo)) cmcMonths.push({ year: y, month: mo });
+      dm = addDays(dm, 28);
+    }
+    const ly2 = cmcEnd.getFullYear(), lm2 = cmcEnd.getMonth();
+    if (!cmcMonths.find((x) => x.year === ly2 && x.month === lm2)) cmcMonths.push({ year: ly2, month: lm2 });
+
+    const curHrs = hrsMonth ?? cmcMonths[0];
+    const prefix = curHrs ? `${curHrs.year}-${String(curHrs.month + 1).padStart(2, '0')}-` : '';
+    const dim2 = curHrs ? new Date(curHrs.year, curHrs.month + 1, 0).getDate() : 30;
+    const wks2 = Math.ceil(dim2 / 7);
+
+    // Block total hours by type
+    const tPW   = cmcDayData.days.filter((d) => d.isPowerWeekend).reduce((a, d) => a + d.shiftHrs, 0);
+    const tWd   = cmcDayData.days.filter((d) => !d.isPowerWeekend).reduce((a, d) => a + d.shiftHrs, 0);
+    const tHol  = cmcDayData.days.filter((d) => HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
+    const tTrauma = cmcDayData.days.filter((d) => TRAUMA_WEEKS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
+
+    const bd = pool.map((res) => {
+      const myDays = cmcDayData!.days.filter((d) => d.res.id === res.id);
+      const pw  = myDays.filter((d) => d.isPowerWeekend).length;
+      const wd  = myDays.filter((d) => !d.isPowerWeekend).length;
+      const hrs = cmcDayData!.hours[res.id] ?? 0;
+      return { res, pw, wd, hrs };
+    });
+
+    // Breakdown per resident
+    const detailRows = pool.map((res) => {
+      const myDays = cmcDayData!.days.filter((d) => d.res.id === res.id);
+      const pwDays    = myDays.filter((d) => d.isPowerWeekend);
+      const wdDays    = myDays.filter((d) => !d.isPowerWeekend);
+      const holDays   = myDays.filter((d) => HOLIDAYS.has(d.dateKey));
+      const traumaDays = myDays.filter((d) => TRAUMA_WEEKS.has(d.dateKey));
+      const pwHrs   = pwDays.reduce((a, d) => a + d.shiftHrs, 0);
+      const wdHrs   = wdDays.reduce((a, d) => a + d.shiftHrs, 0);
+      const traumaHrs = traumaDays.reduce((a, d) => a + d.shiftHrs, 0);
+      return { res, pwCount: pwDays.length, wdCount: wdDays.length, holCount: holDays.length,
+               traumaCount: traumaDays.length, pwHrs, wdHrs, traumaHrs,
+               totalHrs: cmcDayData!.hours[res.id] ?? 0 };
+    });
+
+    // Monthly breakdown
+    const monthRows = pool.map((res) => {
+      const myDays = cmcDayData!.days.filter((d) => d.res.id === res.id && d.dateKey.startsWith(prefix));
+      const hrs = myDays.reduce((a, d) => a + d.shiftHrs, 0);
+      const pw  = myDays.filter((d) => d.isPowerWeekend).length;
+      const wd  = myDays.filter((d) => !d.isPowerWeekend).length;
+      return { res, pw, wd, hrs };
+    });
+    const mTotal = cmcDayData.days.filter((d) => d.dateKey.startsWith(prefix)).reduce((a, d) => a + d.shiftHrs, 0);
+
     return (
-      <div className="card">
-        <div className="ch"><div className="ct">CMC Call Summary</div></div>
-        <div className="cbt">
-          <table className="htable">
-            <thead>
-              <tr>
-                <th>Resident</th><th>PGY</th>
-                <th className="r">Total Days</th>
-                <th className="r">Power Wknds</th>
-                <th className="r">Weekdays</th>
-                <th className="r">Total Hours</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pool.map((res) => {
-                const myDays = cmcDayData!.days.filter((d) => d.res.id === res.id);
-                const pw  = myDays.filter((d) => d.isPowerWeekend).length;
-                const wd  = myDays.filter((d) => !d.isPowerWeekend).length;
-                const hrs = cmcDayData!.hours[res.id] ?? 0;
-                return (
+      <div>
+        <div className="card" style={{ marginBottom: 18 }}>
+          <div className="ch"><div className="ct">CMC Call Summary</div></div>
+          <div className="cbt">
+            <table className="htable">
+              <thead>
+                <tr>
+                  <th>Resident</th><th>PGY</th>
+                  <th className="r">Total Days</th>
+                  <th className="r">Power Wknds</th>
+                  <th className="r">Weekdays</th>
+                  <th className="r">Total Hours</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bd.map(({ res, pw, wd, hrs }) => (
                   <tr key={res.id}>
                     <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{avatar(res)}<span style={{ fontWeight: 500 }}>{res.name}</span></div></td>
                     <td><span className="bdg bb">PGY-{res.pgy}</span></td>
@@ -1080,10 +1132,133 @@ export default function ScheduleView({
                     <td className="r"><span className="ht" style={{ color: 'var(--blue)' }}>{wd}</span></td>
                     <td className="r"><span className="ht" style={{ color: 'var(--green)' }}>{hrs}h</span></td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ))}
+                <tr style={{ background: 'rgba(0,0,0,.04)' }}>
+                  <td colSpan={2} style={{ fontWeight: 600, fontSize: 12, padding: '10px 12px' }}>TOTAL</td>
+                  <td className="r"><span className="hn">{bd.reduce((a, d) => a + d.pw + d.wd, 0)}</span></td>
+                  <td className="r"><span className="ht" style={{ color: '#92400e' }}>{Math.round(bd.reduce((a, d) => a + d.pw, 0) / 3)}</span></td>
+                  <td className="r"><span className="ht" style={{ color: 'var(--blue)' }}>{bd.reduce((a, d) => a + d.wd, 0)}</span></td>
+                  <td className="r"><span className="ht" style={{ color: 'var(--gold)' }}>{bd.reduce((a, d) => a + d.hrs, 0)}h</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginBottom: 18 }}>
+          <div className="card">
+            <div className="ch"><div className="ct">Hours by Type</div></div>
+            <div className="cb">
+              {[
+                { l: 'Weekday Mon–Thu (12h)', v: tWd,    c: 'var(--blue)' },
+                { l: 'Power Weekend (60h)',   v: tPW,    c: '#92400e' },
+                { l: 'Holiday',               v: tHol,   c: 'var(--orange)' },
+                { l: 'Trauma Week',           v: tTrauma, c: 'var(--red)' },
+              ].map((s) => (
+                <div key={s.l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid rgba(0,0,0,.05)' }}>
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>{s.l}</span>
+                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 15, fontWeight: 700, color: s.c }}>{s.v}h</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="card">
+            <div className="ch"><div className="ct">Weekend vs Weekday Breakdown</div></div>
+            <div className="cbt">
+              <table className="htable">
+                <thead>
+                  <tr>
+                    <th>Resident</th>
+                    <th className="r" style={{ color: '#92400e' }}>PW Days</th>
+                    <th className="r" style={{ color: '#92400e' }}>PW Hrs</th>
+                    <th className="r" style={{ color: 'var(--blue)' }}>WD Days</th>
+                    <th className="r" style={{ color: 'var(--blue)' }}>WD Hrs</th>
+                    <th className="r" style={{ color: 'var(--red)' }}>Trauma Hrs</th>
+                    <th className="r">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detailRows.map(({ res, pwCount, wdCount, pwHrs, wdHrs, traumaHrs, totalHrs }) => (
+                    <tr key={res.id}>
+                      <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{avatar(res)}<span style={{ fontWeight: 500 }}>{res.name}</span></div></td>
+                      <td className="r"><span className="hn" style={{ color: '#92400e' }}>{pwCount}</span></td>
+                      <td className="r"><span className="ht" style={{ color: '#92400e' }}>{pwHrs}h</span></td>
+                      <td className="r"><span className="hn" style={{ color: 'var(--blue)' }}>{wdCount}</span></td>
+                      <td className="r"><span className="ht" style={{ color: 'var(--blue)' }}>{wdHrs}h</span></td>
+                      <td className="r"><span className="ht" style={{ color: 'var(--red)' }}>{traumaHrs}h</span></td>
+                      <td className="r"><span className="ht" style={{ color: 'var(--green)' }}>{totalHrs}h</span></td>
+                    </tr>
+                  ))}
+                  {(() => {
+                    const totPWD = detailRows.reduce((a, r) => a + r.pwCount, 0);
+                    const totPWH = detailRows.reduce((a, r) => a + r.pwHrs, 0);
+                    const totWDD = detailRows.reduce((a, r) => a + r.wdCount, 0);
+                    const totWDH = detailRows.reduce((a, r) => a + r.wdHrs, 0);
+                    const totTH  = detailRows.reduce((a, r) => a + r.traumaHrs, 0);
+                    const totH   = detailRows.reduce((a, r) => a + r.totalHrs, 0);
+                    return (
+                      <tr style={{ background: 'rgba(0,0,0,.04)' }}>
+                        <td style={{ fontWeight: 600, fontSize: 12, padding: '10px 12px' }}>TOTAL</td>
+                        <td className="r"><span className="hn" style={{ color: '#92400e' }}>{totPWD}</span></td>
+                        <td className="r"><span className="ht" style={{ color: '#92400e' }}>{totPWH}h</span></td>
+                        <td className="r"><span className="hn" style={{ color: 'var(--blue)' }}>{totWDD}</span></td>
+                        <td className="r"><span className="ht" style={{ color: 'var(--blue)' }}>{totWDH}h</span></td>
+                        <td className="r"><span className="ht" style={{ color: 'var(--red)' }}>{totTH}h</span></td>
+                        <td className="r"><span className="ht" style={{ color: 'var(--gold)' }}>{totH}h</span></td>
+                      </tr>
+                    );
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="ch">
+            <div className="ct">Monthly Breakdown</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {cmcMonths.map((m) => (
+                <button
+                  key={`${m.year}-${m.month}`}
+                  className={`btn bsm ${curHrs && curHrs.year === m.year && curHrs.month === m.month ? 'bg' : 'bgh'}`}
+                  onClick={() => setHrsMonth(m)}
+                >
+                  {MONTHS[m.month].slice(0, 3)} {m.year}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="cbt">
+            <table className="htable">
+              <thead>
+                <tr>
+                  <th>Resident</th><th>PGY</th>
+                  <th className="r">Power Wknds</th>
+                  <th className="r">Weekdays</th>
+                  <th className="r">Hours</th>
+                  <th className="r">Avg/Wk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {monthRows.map(({ res, pw, wd, hrs }) => (
+                  <tr key={res.id}>
+                    <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{avatar(res)}<span style={{ fontWeight: 500 }}>{res.name}</span></div></td>
+                    <td><span className="bdg bb">PGY-{res.pgy}</span></td>
+                    <td className="r"><span className="hn" style={{ color: '#92400e' }}>{Math.round(pw / 3)}</span></td>
+                    <td className="r"><span className="hn" style={{ color: 'var(--blue)' }}>{wd}</span></td>
+                    <td className="r"><span className="ht" style={{ color: 'var(--green)' }}>{hrs}h</span></td>
+                    <td className="r"><span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: 'var(--muted)' }}>{wks2 > 0 ? Math.round(hrs / wks2) : 0}h/wk</span></td>
+                  </tr>
+                ))}
+                <tr style={{ background: 'rgba(0,0,0,.04)' }}>
+                  <td colSpan={4} style={{ fontWeight: 600, fontSize: 12, padding: '10px 12px' }}>MONTH TOTAL</td>
+                  <td className="r"><span className="ht" style={{ color: 'var(--gold)' }}>{mTotal}h</span></td>
+                  <td />
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     );
