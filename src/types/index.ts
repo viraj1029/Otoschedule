@@ -18,6 +18,7 @@ export interface Schedule {
   end_date: string;   // YYYY-MM-DD
   published: boolean;
   generated_at?: string;
+  schedule_type?: string;
 }
 
 export type Hospital = 'CUH' | 'PMH' | 'CMC' | 'VA' | 'Research';

@@ -42,3 +42,17 @@ export async function GET(req: Request) {
   scheduleData._scheduleId = rows[0].id;
   return NextResponse.json(scheduleData);
 }
+
+export async function PUT(req: Request) {
+  const session = await getSession();
+  if (session.role !== 'chief') {
+    return NextResponse.json({ error: 'Chief access required' }, { status: 401 });
+  }
+  const { id, scheduleData } = await req.json() as { id: string; scheduleData: unknown };
+  if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+  await sql`
+    UPDATE schedules SET data = ${JSON.stringify(scheduleData)}
+    WHERE id = ${id} AND block_id = ${DEFAULT_BLOCK_ID}
+  `;
+  return NextResponse.json({ ok: true });
+}

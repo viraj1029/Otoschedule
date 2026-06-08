@@ -18,9 +18,10 @@ export async function POST(req: Request) {
   const sStart = start_date || scheduleData.bStart;
   const sEnd = end_date || scheduleData.bEnd;
 
+  const scheduleType = (scheduleData as { type?: string }).type ?? 'cuh_pmh';
   await sql`
-    INSERT INTO schedules (id, block_id, name, start_date, end_date, data, published)
-    VALUES (${id}, ${DEFAULT_BLOCK_ID}, ${scheduleName}, ${sStart}, ${sEnd}, ${data}, FALSE)
+    INSERT INTO schedules (id, block_id, name, start_date, end_date, data, published, schedule_type)
+    VALUES (${id}, ${DEFAULT_BLOCK_ID}, ${scheduleName}, ${sStart}, ${sEnd}, ${data}, FALSE, ${scheduleType})
   `;
 
   return NextResponse.json({ ok: true, id });

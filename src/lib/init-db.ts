@@ -78,6 +78,16 @@ export async function initDb() {
   await sql`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS start_date TEXT`;
   await sql`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS end_date TEXT`;
   await sql`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT FALSE`;
+  await sql`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS schedule_type TEXT`;
+  await sql`
+    UPDATE schedules
+    SET schedule_type = CASE (data::jsonb)->>'type'
+      WHEN 'cmc' THEN 'cmc'
+      WHEN 'va'  THEN 'va'
+      ELSE 'cuh_pmh'
+    END
+    WHERE schedule_type IS NULL
+  `;
 
   // Backfill the legacy sched_block_main record with block dates and published state
   await sql`
