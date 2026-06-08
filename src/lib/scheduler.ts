@@ -731,22 +731,42 @@ export function generateCMCSchedule(
   });
 
   const cmcDays: CMCDay[] = [];
-  const counts:       Record<string, number> = {};
-  const hours:        Record<string, number> = {};
-  const traumaHours:  Record<string, number> = {};
-  pool.forEach((r) => { counts[r.id] = 0; hours[r.id] = 0; traumaHours[r.id] = 0; });
+  const counts:      Record<string, number> = {};
+  const hours:       Record<string, number> = {};
+  const traumaHours: Record<string, number> = {};
+  const wdCount:     Record<string, number> = {}; // weekday shifts only
+  const pwCount:     Record<string, number> = {}; // power weekends only
+  pool.forEach((r) => { counts[r.id] = 0; hours[r.id] = 0; traumaHours[r.id] = 0; wdCount[r.id] = 0; pwCount[r.id] = 0; });
 
-  // Total available days per resident (CMC rotation window minus vacation/off days).
-  // Used to normalize hours so a shorter rotation doesn't get over-assigned.
-  const availDays: Record<string, number> = {};
+  // Available weekdays (Mon–Thu) per resident
+  const wdAvail: Record<string, number> = {};
   pool.forEach((r) => {
     let cnt = 0;
     let ad = new Date(bStart);
-    while (ad <= bEnd) { if (!offMap[r.id].has(dk(ad))) cnt++; ad = addDays(ad, 1); }
-    availDays[r.id] = Math.max(cnt, 1);
+    while (ad <= bEnd) {
+      const dow = ad.getDay();
+      if (dow >= 1 && dow <= 4 && !offMap[r.id].has(dk(ad))) cnt++;
+      ad = addDays(ad, 1);
+    }
+    wdAvail[r.id] = Math.max(cnt, 1);
   });
 
-  // Available trauma days per resident (for trauma equity)
+  // Available power weekends (Fri+Sat+Sun) per resident
+  const pwAvail: Record<string, number> = {};
+  pool.forEach((r) => {
+    let cnt = 0;
+    let fd2 = new Date(bStart);
+    while (fd2 <= bEnd) {
+      if (fd2.getDay() === 5) {
+        const friKey = dk(fd2), satKey = dk(addDays(fd2, 1)), sunKey = dk(addDays(fd2, 2));
+        if (!(offMap[r.id].has(friKey) && offMap[r.id].has(satKey) && offMap[r.id].has(sunKey))) cnt++;
+      }
+      fd2 = addDays(fd2, 1);
+    }
+    pwAvail[r.id] = Math.max(cnt, 1);
+  });
+
+  // Available trauma days per resident
   const traumaAvail: Record<string, number> = {};
   pool.forEach((r) => {
     let cnt = 0;
@@ -758,19 +778,27 @@ export function generateCMCSchedule(
     traumaAvail[r.id] = Math.max(cnt, 1);
   });
 
-  // Pick the candidate with the lowest hours/availDays proportion.
-  // On trauma days use trauma proportion as the primary key instead.
-  // No-repeat and no-consecutive exclusions are applied before calling this.
-  function pickEquitable(candidates: Resident[], isTraumaDay: boolean): Resident {
+  // Weekday pick: sort by wdCount/wdAvail (trauma proportion primary on trauma days)
+  function pickWeekday(candidates: Resident[], isTraumaDay: boolean): Resident {
     return [...candidates].sort((a, b) => {
       if (isTraumaDay) {
         const aProp = traumaHours[a.id] / traumaAvail[a.id];
         const bProp = traumaHours[b.id] / traumaAvail[b.id];
         if (Math.abs(aProp - bProp) > 1e-9) return aProp - bProp;
       }
-      const aProp = hours[a.id] / availDays[a.id];
-      const bProp = hours[b.id] / availDays[b.id];
-      return aProp - bProp;
+      return wdCount[a.id] / wdAvail[a.id] - wdCount[b.id] / wdAvail[b.id];
+    })[0];
+  }
+
+  // Power weekend pick: sort by pwCount/pwAvail (trauma proportion primary on trauma weekends)
+  function pickPowerWeekend(candidates: Resident[], isTraumaWeekend: boolean): Resident {
+    return [...candidates].sort((a, b) => {
+      if (isTraumaWeekend) {
+        const aProp = traumaHours[a.id] / traumaAvail[a.id];
+        const bProp = traumaHours[b.id] / traumaAvail[b.id];
+        if (Math.abs(aProp - bProp) > 1e-9) return aProp - bProp;
+      }
+      return pwCount[a.id] / pwAvail[a.id] - pwCount[b.id] / pwAvail[b.id];
     })[0];
   }
 
@@ -791,17 +819,16 @@ export function generateCMCSchedule(
     const sunKey = dk(addDays(fri, 2));
     const isPwTrauma = TRAUMA_WEEKS.has(friKey) || TRAUMA_WEEKS.has(satKey) || TRAUMA_WEEKS.has(sunKey);
 
-    // Exclude last power weekend person (no back-to-back power weekends)
-    // and anyone unavailable for all 3 days
     let candidates = pool.filter(
       (r) => r.id !== lastPwId && !(offMap[r.id].has(friKey) && offMap[r.id].has(satKey) && offMap[r.id].has(sunKey)),
     );
     if (!candidates.length) candidates = pool.filter((r) => r.id !== lastPwId);
     if (!candidates.length) candidates = [...pool];
 
-    const pick = pickEquitable(candidates, isPwTrauma);
+    const pick = pickPowerWeekend(candidates, isPwTrauma);
     pwByFri.set(friKey, pick);
     lastPwId = pick.id;
+    pwCount[pick.id]++;
 
     for (const [key, shiftHrs] of [[friKey, 12], [satKey, 24], [sunKey, 24]] as [string, number][]) {
       const pd = parseDate(key);
@@ -842,15 +869,14 @@ export function generateCMCSchedule(
       if (!avail.length) avail = pool.filter((r) => !offMap[r.id].has(dateKey));
       if (!avail.length) avail = [...pool];
 
-      const pick = pickEquitable(avail, isTraumaDay);
+      const pick = pickWeekday(avail, isTraumaDay);
       cmcDays.push({ dateKey, res: pick, shiftHrs: 12, isPowerWeekend: false, override: false });
       counts[pick.id]++;
       hours[pick.id] += 12;
+      wdCount[pick.id]++;
       if (isTraumaDay) traumaHours[pick.id] += 12;
       lastWkdayId = pick.id;
     } else {
-      // Friday starts a power weekend — reset lastWkdayId so Monday after the
-      // weekend doesn't carry the Thursday constraint across the gap
       if (dow === 5) lastWkdayId = null;
     }
     d = addDays(d, 1);
