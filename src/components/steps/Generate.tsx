@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { Block, Resident, Request, ScheduleData, AnyScheduleData } from '@/types';
+import type { Block, Resident, Request, AnyScheduleData } from '@/types';
 import { parseDate, generateSchedule, generateCMCSchedule, generateVASchedule } from '@/lib/scheduler';
 import type { ScheduleMode } from '@/lib/scheduler';
 import { api } from '../App';

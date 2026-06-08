@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { Block, Resident, Request, ScheduleData, AnyScheduleData, Schedule, Step, Role } from '@/types';
+import type { Block, Resident, Request, AnyScheduleData, Schedule, Step, Role } from '@/types';
 import LoginGate from './LoginGate';
 import TopBar from './TopBar';
 import BlockSetup from './steps/BlockSetup';
