@@ -23,11 +23,16 @@ interface Props {
   schedule?: ScheduleData | null;
 }
 
-function getResRequests(allRequests: Request[], resId: string) {
-  const vacDays = new Set(allRequests.filter((r) => r.resident_id === resId && r.type === 'vacation').map((r) => r.date));
-  const weekends = new Set(allRequests.filter((r) => r.resident_id === resId && r.type === 'weekend').map((r) => r.date));
-  const holidayReqs = new Set(allRequests.filter((r) => r.resident_id === resId && r.type === 'holiday').map((r) => r.date));
-  return { vacDays, weekends, holidayReqs };
+function getResRequests(allRequests: Request[], resIds: string[]) {
+  const set = new Set(resIds);
+  const mine = allRequests.filter((r) => set.has(r.resident_id));
+  const vacDays = new Set(mine.filter((r) => r.type === 'vacation').map((r) => r.date));
+  const weekends = new Set(mine.filter((r) => r.type === 'weekend').map((r) => r.date));
+  const holidayReqs = new Set(mine.filter((r) => r.type === 'holiday').map((r) => r.date));
+  // date+type → actual resident_id that owns the request (for correct delete routing)
+  const reqOwner = new Map<string, string>();
+  mine.forEach((r) => reqOwner.set(`${r.date}:${r.type}`, r.resident_id));
+  return { vacDays, weekends, holidayReqs, reqOwner };
 }
 
 function initials(name: string): string {
@@ -113,7 +118,30 @@ export default function Requests({
   const isAllView = role === 'chief' && selectedResId === '__all__';
   const activeResId = role === 'resident' ? (currentResId ?? '') : (isAllView ? '' : selectedResId);
   const activeRes = residents.find((r) => r.id === activeResId);
-  const { vacDays, weekends, holidayReqs } = activeResId ? getResRequests(allRequests, activeResId) : { vacDays: new Set<string>(), weekends: new Set<string>(), holidayReqs: new Set<string>() };
+
+  // For residents who appear across multiple rotation records (same person_id),
+  // aggregate requests from ALL their records and route toggles to the right one by date.
+  const personResIds: string[] = (() => {
+    if (role === 'resident' && currentResidentFull?.person_id) {
+      return residents.filter((r) => r.person_id === currentResidentFull.person_id).map((r) => r.id);
+    }
+    return activeResId ? [activeResId] : [];
+  })();
+
+  // Resolve which resident record owns a given date (for toggle routing).
+  function resIdForDate(dateStr: string): string {
+    if (personResIds.length <= 1) return personResIds[0] ?? activeResId;
+    const matching = residents.find((r) =>
+      personResIds.includes(r.id) &&
+      dateStr >= (r.rotation_start ?? block?.start_date ?? '0000-01-01') &&
+      dateStr <= (r.rotation_end ?? block?.end_date ?? '9999-12-31'),
+    );
+    return matching?.id ?? personResIds[0] ?? activeResId;
+  }
+
+  const { vacDays, weekends, holidayReqs, reqOwner } = personResIds.length
+    ? getResRequests(allRequests, personResIds)
+    : { vacDays: new Set<string>(), weekends: new Set<string>(), holidayReqs: new Set<string>(), reqOwner: new Map<string, string>() };
 
   const vacUsed = [...vacDays].filter((d) => {
     const dd = parseDate(d); return dd >= bStart && dd <= bEnd && !HOLIDAYS.has(d);
@@ -123,7 +151,7 @@ export default function Requests({
   const allResMap: Record<string, Resident[]> = {};
   if (isAllView) {
     residents.forEach((res) => {
-      const { vacDays: v, weekends: w, holidayReqs: h } = getResRequests(allRequests, res.id);
+      const { vacDays: v, weekends: w, holidayReqs: h } = getResRequests(allRequests, [res.id]);
       [...v, ...w, ...h].forEach((d) => {
         if (!allResMap[d]) allResMap[d] = [];
         if (!allResMap[d].find((x) => x.id === res.id)) allResMap[d].push(res);
@@ -136,10 +164,10 @@ export default function Requests({
   const dim = new Date(calYear, calMonth + 1, 0).getDate();
   const today = new Date();
 
-  const allDaysList: { d: string; t: 'vac' | 'wk' | 'hol' }[] = [
-    ...[...vacDays].map((d) => ({ d, t: 'vac' as const })),
-    ...[...weekends].map((d) => ({ d, t: 'wk' as const })),
-    ...[...holidayReqs].map((d) => ({ d, t: 'hol' as const })),
+  const allDaysList: { d: string; t: 'vac' | 'wk' | 'hol'; resId: string }[] = [
+    ...[...vacDays].map((d) => ({ d, t: 'vac' as const, resId: reqOwner.get(`${d}:vacation`) ?? activeResId })),
+    ...[...weekends].map((d) => ({ d, t: 'wk' as const, resId: reqOwner.get(`${d}:weekend`) ?? activeResId })),
+    ...[...holidayReqs].map((d) => ({ d, t: 'hol' as const, resId: reqOwner.get(`${d}:holiday`) ?? activeResId })),
   ].sort((a, b) => a.d.localeCompare(b.d));
 
   const sortedResidents = [...residents].sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
@@ -307,12 +335,18 @@ export default function Requests({
                 else if (isWkReq) cls += ' rcwk';
                 else if (isWk) cls += ' rcwe';
                 const clickable = inBlock && activeResId;
+                const type = isHol ? 'holiday' : isWk ? 'weekend' : 'vacation';
+                // For toggling: use the owner of the existing request (delete) or the
+                // rotation-window-appropriate record (add).
+                const toggleResId = (isVac || isWkReq || isHolReq)
+                  ? (reqOwner.get(`${key}:${type}`) ?? resIdForDate(key))
+                  : resIdForDate(key);
                 return (
                   <div
                     key={key}
                     className={cls}
                     style={isToday ? { fontWeight: 700, color: 'var(--text)' } : {}}
-                    onClick={clickable ? () => toggleDay(key, isHol ? 'holiday' : isWk ? 'weekend' : 'vacation', activeResId) : undefined}
+                    onClick={clickable ? () => toggleDay(key, type, toggleResId) : undefined}
                   >
                     {day}
                   </div>
@@ -355,7 +389,7 @@ export default function Requests({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 }}>
                 {allDaysList.length === 0 ? (
                   <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>No days selected</div>
-                ) : allDaysList.map(({ d, t }) => (
+                ) : allDaysList.map(({ d, t, resId }) => (
                   <div key={d + t} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span className={`bdg ${t === 'vac' ? 'bb' : t === 'hol' ? 'bo' : 'bp'}`} style={{ fontSize: 9 }}>
                       {t === 'vac' ? 'VAC' : t === 'hol' ? 'HOL' : 'WKD'}
@@ -367,7 +401,7 @@ export default function Requests({
                       <button
                         className="bico"
                         style={{ width: 20, height: 20, fontSize: 10 }}
-                        onClick={() => toggleDay(d, t === 'vac' ? 'vacation' : t === 'hol' ? 'holiday' : 'weekend', activeResId)}
+                        onClick={() => toggleDay(d, t === 'vac' ? 'vacation' : t === 'hol' ? 'holiday' : 'weekend', resId)}
                       >
                         ✕
                       </button>
@@ -384,7 +418,7 @@ export default function Requests({
               <div className="ch"><div className="ct">All Residents</div></div>
               <div className="cb">
                 {sortedResidents.map((res) => {
-                  const { vacDays: v, weekends: w, holidayReqs: h } = getResRequests(allRequests, res.id);
+                  const { vacDays: v, weekends: w, holidayReqs: h } = getResRequests(allRequests, [res.id]);
                   const vac = [...v].filter((d) => {
                     const dd = parseDate(d); return dd >= bStart && dd <= bEnd && !HOLIDAYS.has(d);
                   }).length;

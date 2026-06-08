@@ -41,7 +41,24 @@ export default function LoginGate({ residents, onLogin, showToast }: Props) {
     }
   }
 
-  const sorted = [...residents].sort((a, b) => a.name.localeCompare(b.name));
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  // Deduplicate by person_id — show each real person once.
+  // For the dropdown value we still pass a resident record ID (for auth compat).
+  // Pick the record whose rotation window covers today; fall back to the latest one.
+  const uniquePersonMap = new Map<string, Resident>();
+  for (const r of residents) {
+    const key = r.person_id ?? r.id;
+    const prev = uniquePersonMap.get(key);
+    if (!prev) {
+      uniquePersonMap.set(key, r);
+    } else {
+      const covers = (r.rotation_start ?? '0000') <= todayStr && (r.rotation_end ?? '9999') >= todayStr;
+      const prevCovers = (prev.rotation_start ?? '0000') <= todayStr && (prev.rotation_end ?? '9999') >= todayStr;
+      if (covers && !prevCovers) uniquePersonMap.set(key, r);
+    }
+  }
+  const sorted = [...uniquePersonMap.values()].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div
