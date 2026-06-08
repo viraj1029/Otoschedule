@@ -173,20 +173,30 @@ export function generateSchedule(
     const hol = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'holiday').map((req) => req.date));
     offMap[r.id] = new Set([...vac, ...wk, ...hol]);
 
-    // Block dates outside the resident's rotation window.
-    // Use rotation segments if available; otherwise fall back to legacy fields.
-    const segs = r.rotations && r.rotations.length > 0 ? r.rotations : null;
+    // Block dates outside the resident's CUH/PMH/Research rotation window.
+    // Only CUH, PMH, and Research (for PGY4+) segments count as "on rotation" here —
+    // VA and CMC segments do NOT make a resident available for this schedule.
+    const cuhPmhSegs = r.rotations && r.rotations.length > 0
+      ? r.rotations.filter((seg) =>
+          seg.hospital === 'CUH' || seg.hospital === 'PMH' ||
+          (seg.hospital === 'Research' && r.pgy >= 4))
+      : null;
+
     let cnt = 0;
     let dd = new Date(bStart);
     while (dd <= bEnd) {
       let onRotation: boolean;
-      if (segs) {
-        onRotation = segs.some((seg) => {
+      if (cuhPmhSegs && cuhPmhSegs.length > 0) {
+        onRotation = cuhPmhSegs.some((seg) => {
           const s = parseDate(seg.start_date);
           const e = parseDate(seg.end_date);
           return dd >= s && dd <= e;
         });
+      } else if (r.rotations && r.rotations.length > 0) {
+        // Has rotation segments but none are CUH/PMH/Research — mark all days as off.
+        onRotation = false;
       } else {
+        // Legacy fallback: use rotation_start/rotation_end fields
         const rotStart = r.rotation_start ? parseDate(r.rotation_start) : bStart;
         const rotEnd   = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
         onRotation = dd >= rotStart && dd <= rotEnd;
