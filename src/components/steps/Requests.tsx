@@ -214,18 +214,20 @@ export default function Requests({
   }
 
   // 3-state weekday cycle for resident view: empty → prefer-off → official vacation → empty
-  async function cycleWeekday(key: string, isOff: boolean, isOfficial: boolean, officialUsed: number) {
+  async function cycleWeekday(key: string, isOff: boolean, isOfficial: boolean) {
     const resId = resIdForDate(key);
     if (isOfficial) {
       const ownerResId = reqOwner.get(`${key}:vacation_official`) ?? resId;
       await toggleDay(key, 'vacation_official', ownerResId);
     } else if (isOff) {
-      if (officialUsed < 5) {
+      const usedThisQuarter = officialVacUsedForDate(key);
+      if (usedThisQuarter < 5) {
         const ownerResId = reqOwner.get(`${key}:vacation`) ?? resId;
         await toggleDay(key, 'vacation', ownerResId);
         await toggleDay(key, 'vacation_official', resId);
       } else {
-        showToast('5-day official vacation limit reached — click again to clear', true);
+        const q = quarterOf(key);
+        showToast(`5-day limit reached for ${q?.label ?? 'this quarter'} — click again to clear`, true);
       }
     } else {
       await toggleDay(key, 'vacation', resId);
@@ -272,10 +274,32 @@ export default function Requests({
     const dd = parseDate(d); return dd >= bStart && dd <= bEnd && !HOLIDAYS.has(d);
   }).length;
 
-  const officialVacUsed = [...vacOfficial].filter((d) => {
+  // 5 official vacation days per quarter (Jul–Sep, Oct–Dec, Jan–Mar, Apr–Jun)
+  const acYear = bStart.getMonth() >= 6 ? bStart.getFullYear() : bStart.getFullYear() - 1;
+  const quarters = [
+    { label: 'Jul–Sep', start: `${acYear}-07-01`,     end: `${acYear}-09-30` },
+    { label: 'Oct–Dec', start: `${acYear}-10-01`,     end: `${acYear}-12-31` },
+    { label: 'Jan–Mar', start: `${acYear + 1}-01-01`, end: `${acYear + 1}-03-31` },
+    { label: 'Apr–Jun', start: `${acYear + 1}-04-01`, end: `${acYear + 1}-06-30` },
+  ];
+
+  function quarterOf(dateStr: string) {
+    return quarters.find((q) => dateStr >= q.start && dateStr <= q.end);
+  }
+
+  const officialVacByQuarter: Record<string, number> = {};
+  for (const q of quarters) officialVacByQuarter[q.label] = 0;
+  for (const d of vacOfficial) {
     const dd = parseDate(d); const dow = dd.getDay();
-    return dd >= bStart && dd <= bEnd && !HOLIDAYS.has(d) && dow !== 0 && dow !== 6;
-  }).length;
+    if (HOLIDAYS.has(d) || dow === 0 || dow === 6) continue;
+    const q = quarterOf(d);
+    if (q) officialVacByQuarter[q.label] = (officialVacByQuarter[q.label] ?? 0) + 1;
+  }
+
+  function officialVacUsedForDate(dateStr: string): number {
+    const q = quarterOf(dateStr);
+    return q ? (officialVacByQuarter[q.label] ?? 0) : 0;
+  }
 
   // Build all-residents request map for chief "all" view
   const allResMap: Record<string, Resident[]> = {};
@@ -493,7 +517,7 @@ export default function Requests({
                 // Resident weekday cells use 3-state cycle; all others use simple toggle
                 const handleClick = !clickable ? undefined :
                   (role === 'resident' && !isWk && !isHol)
-                    ? () => cycleWeekday(key, isVac, isVacOff, officialVacUsed)
+                    ? () => cycleWeekday(key, isVac, isVacOff)
                     : () => toggleDay(key, type, toggleResId);
                 return (
                   <div
@@ -531,11 +555,20 @@ export default function Requests({
             <div className="ch"><div className="ct">My Requests</div></div>
             <div className="cb" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {role === 'resident' && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>Official vacation</span>
-                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: officialVacUsed >= 5 ? 'var(--red)' : 'var(--orange)' }}>
-                    {officialVacUsed} / 5
-                  </span>
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Official vacation (5 days / quarter)</div>
+                  {quarters.map((q) => {
+                    const used = officialVacByQuarter[q.label] ?? 0;
+                    const atLimit = used >= 5;
+                    return (
+                      <div key={q.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                        <span style={{ fontSize: 11, color: 'var(--muted2)' }}>{q.label}</span>
+                        <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: atLimit ? 'var(--red)' : used > 0 ? 'var(--orange)' : 'var(--muted2)' }}>
+                          {used} / 5
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>

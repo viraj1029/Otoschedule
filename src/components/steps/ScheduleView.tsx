@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, type ReactElement } from 'react';
-import type { Block, Resident, Request, ScheduleData, Tab, Role } from '@/types';
+import type { Block, Resident, Request, ScheduleData, Schedule, Tab, Role } from '@/types';
 import { HOLIDAYS, HOLIDAY_NAMES, TRAUMA_WEEKS, parseDate, fmtShort, dk, addDays } from '@/lib/scheduler';
 import { api } from '../App';
 import OverrideModal from '../modals/OverrideModal';
@@ -11,12 +11,16 @@ const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
 interface Props {
   schedule: ScheduleData | null;
+  schedules?: Schedule[];          // all schedule metadata (chief only)
+  activeScheduleId?: string | null;
   residents: Resident[];
   allRequests: Request[];
   block: Block | null;
   role: Role;
   onScheduleChanged: (s: ScheduleData | null) => void;
   onBlockChanged: (b: Block | null) => void;
+  onScheduleSelected?: (id: string) => void;
+  onScheduleListChanged?: () => void;
   onRegenerate: () => void;
   showToast: (msg: string, err?: boolean) => void;
   currentResId?: string | null;
@@ -40,14 +44,15 @@ function getResRequests(allRequests: Request[], resId: string) {
 }
 
 export default function ScheduleView({
-  schedule, residents, allRequests, block, role, onScheduleChanged, onBlockChanged, onRegenerate, showToast, currentResId,
+  schedule, schedules = [], activeScheduleId, residents, allRequests, block, role,
+  onScheduleChanged, onBlockChanged, onScheduleSelected, onScheduleListChanged, onRegenerate, showToast, currentResId,
 }: Props) {
   const [tab, setTab] = useState<Tab>(role === 'resident' ? 'stats' : 'calendar');
   const [statsMonth, setStatsMonth] = useState<{ year: number; month: number } | null>(null);
   const [calYear, setCalYear] = useState<number>(0);
   const [calMonth, setCalMonth] = useState<number>(0);
   const [hrsMonth, setHrsMonth] = useState<{ year: number; month: number } | null>(null);
-  const [published, setPublished] = useState<boolean>(block?.published ?? false);
+  const [published, setPublished] = useState<boolean>(schedule?.published ?? block?.published ?? false);
   const [overrideKeys, setOverrideKeys] = useState<string[]>([]);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
@@ -59,8 +64,9 @@ export default function ScheduleView({
       setCalYear(start.getFullYear());
       setCalMonth(start.getMonth());
       setHrsMonth({ year: start.getFullYear(), month: start.getMonth() });
+      // Per-schedule published state: prefer the DB-injected flag on the schedule object
+      setPublished(schedule.published ?? block?.published ?? false);
     }
-    setPublished(block?.published ?? false);
   }, [schedule, block?.published]);
 
   if (!schedule) {
@@ -85,9 +91,12 @@ export default function ScheduleView({
   async function togglePublish() {
     const next = !published;
     setPublished(next);
-    await api('/block/publish', 'POST', { published: next });
+    // Use the active schedule ID (injected as _scheduleId in the data) or fall back to block-level
+    const scheduleId = (schedule as ScheduleData & { _scheduleId?: string })?._scheduleId ?? activeScheduleId;
+    await api('/block/publish', 'POST', { published: next, scheduleId });
     if (block) onBlockChanged({ ...block, published: next });
     if (schedule) onScheduleChanged({ ...schedule, published: next });
+    onScheduleListChanged?.();
     showToast(next ? 'Schedule published — residents can now view it' : 'Schedule unpublished');
   }
 
@@ -958,11 +967,37 @@ export default function ScheduleView({
 
   return (
     <div>
+      {/* Schedule selector (chief only, when multiple schedules exist) */}
+      {role === 'chief' && schedules.length > 1 && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>SCHEDULE</span>
+          {schedules.map((s) => {
+            const isActive = s.id === activeScheduleId || s.id === (schedule as ScheduleData & { _scheduleId?: string })?._scheduleId;
+            return (
+              <button
+                key={s.id}
+                className={`btn bsm${isActive ? ' bg' : ' bgh'}`}
+                onClick={() => !isActive && onScheduleSelected?.(s.id)}
+                style={{ position: 'relative' }}
+              >
+                {s.name}
+                {s.published && (
+                  <span style={{ marginLeft: 5, fontSize: 9, color: 'var(--green)', fontWeight: 700 }}>●</span>
+                )}
+              </button>
+            );
+          })}
+          <button className="btn bsm bgh" onClick={onRegenerate} style={{ marginLeft: 'auto' }}>＋ New Schedule</button>
+        </div>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
         <div className="page-title">{schedule.blockName}</div>
         {role === 'chief' && (
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn bgh bsm" onClick={onRegenerate}>← Regenerate</button>
+            {schedules.length <= 1 && (
+              <button className="btn bgh bsm" onClick={onRegenerate}>← Regenerate</button>
+            )}
             <button
               className={`btn bsm ${published ? 'bg' : 'bgh'}`}
               onClick={togglePublish}

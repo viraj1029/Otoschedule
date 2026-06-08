@@ -11,9 +11,17 @@ interface Props {
   residents: Resident[];
   allRequests: Request[];
   schedule: ScheduleData | null;
-  onScheduleGenerated: (sched: ScheduleData) => void;
+  onScheduleGenerated: (sched: ScheduleData, scheduleId: string) => void;
   onBack: () => void;
   showToast: (msg: string, err?: boolean) => void;
+}
+
+function defaultScheduleName(start: string, end: string): string {
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const s = parseDate(start); const e = parseDate(end);
+  return s.getFullYear() === e.getFullYear()
+    ? `${M[s.getMonth()]} – ${M[e.getMonth()]} ${s.getFullYear()}`
+    : `${M[s.getMonth()]} ${s.getFullYear()} – ${M[e.getMonth()]} ${e.getFullYear()}`;
 }
 
 function avatar(res: Resident, size = 26) {
@@ -33,12 +41,35 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
   const [generating, setGenerating] = useState(false);
   const [mode, setMode] = useState<ScheduleMode>('merged');
 
+  const yearStart = block?.start_date ?? '2026-07-01';
+  const yearEnd = block?.end_date ?? '2027-06-30';
+
+  // Default end = end of first quarter within the year
+  const defaultEnd = (() => {
+    const s = parseDate(yearStart); const m = s.getMonth(); const y = s.getFullYear();
+    if (m >= 6 && m <= 8) return `${y}-09-30`;
+    if (m >= 9 && m <= 11) return `${y}-12-31`;
+    if (m >= 0 && m <= 2) return `${y}-03-31`;
+    return `${y}-06-30`;
+  })();
+
+  const [schedStart, setSchedStart] = useState(yearStart);
+  const [schedEnd, setSchedEnd] = useState(defaultEnd);
+  const [scheduleName, setScheduleName] = useState(() => defaultScheduleName(yearStart, defaultEnd));
+  const [nameEdited, setNameEdited] = useState(false);
+
+  function handleStartChange(v: string) {
+    setSchedStart(v);
+    if (!nameEdited) setScheduleName(defaultScheduleName(v, schedEnd));
+  }
+  function handleEndChange(v: string) {
+    setSchedEnd(v);
+    if (!nameEdited) setScheduleName(defaultScheduleName(schedStart, v));
+  }
+
   const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active');
   const resR = residents.filter((r) => r.pgy >= 4 && r.status === 'research');
   const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
-
-  const bStart = block ? parseDate(block.start_date) : parseDate('2026-07-01');
-  const bEnd = block ? parseDate(block.end_date) : parseDate('2026-09-30');
 
   function poolList(pool: Resident[]) {
     if (!pool.length) return (
@@ -59,22 +90,28 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
   }
 
   async function generateAndSave() {
+    if (!schedStart || !schedEnd) { showToast('Set start and end dates', true); return; }
+    if (parseDate(schedStart) > parseDate(schedEnd)) { showToast('Start must be before end', true); return; }
     setGenerating(true);
     try {
-      // Fetch cross-block carry-in hours (archives prior block if needed, returns cumulative data)
       const carryIn = await api<Record<string, { hours: number; availDays: number }>>('/jr-carry');
       const scheduleData = generateSchedule(
         residents,
         allRequests,
-        block?.name ?? 'CUH/PMH Block',
-        block?.start_date ?? '2026-07-01',
-        block?.end_date ?? '2026-09-30',
-        block?.published ?? false,
+        scheduleName,
+        schedStart,
+        schedEnd,
+        false,
         mode,
         carryIn,
       );
-      await api('/schedule/generate', 'POST', { scheduleData });
-      onScheduleGenerated(scheduleData);
+      const result = await api<{ ok: boolean; id: string }>('/schedule/generate', 'POST', {
+        scheduleData,
+        name: scheduleName,
+        start_date: schedStart,
+        end_date: schedEnd,
+      });
+      onScheduleGenerated(scheduleData, result.id);
       showToast('Schedule generated & saved!');
     } catch (e) {
       showToast((e as Error).message, true);
@@ -87,8 +124,36 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
     <div>
       <div className="page-title">Generate Schedule</div>
       <div className="page-sub">
-        Review pools and requests, then generate. The schedule is saved to the database.
-        You can publish it when ready so residents can view it.
+        Set the date range for this schedule period, then generate. Multiple schedules can be stored
+        under the same academic year and viewed independently in Schedule View.
+      </div>
+
+      {/* Schedule period */}
+      <div className="card" style={{ marginBottom: 18 }}>
+        <div className="ch"><div className="ct">Schedule Period</div></div>
+        <div className="cb">
+          <div className="fg f2" style={{ marginBottom: 14 }}>
+            <div className="fl">
+              <label className="flb">Start Date</label>
+              <input type="date" value={schedStart} min={yearStart} max={yearEnd}
+                onChange={(e) => handleStartChange(e.target.value)} />
+            </div>
+            <div className="fl">
+              <label className="flb">End Date</label>
+              <input type="date" value={schedEnd} min={schedStart} max={yearEnd}
+                onChange={(e) => handleEndChange(e.target.value)} />
+            </div>
+          </div>
+          <div className="fl">
+            <label className="flb">Schedule Name</label>
+            <input type="text" value={scheduleName}
+              onChange={(e) => { setScheduleName(e.target.value); setNameEdited(true); }}
+              placeholder="e.g. Jul – Sep 2026" />
+          </div>
+          <div className="hint" style={{ marginTop: 6 }}>
+            Academic year: {yearStart} → {yearEnd}. Only residents whose rotation windows overlap this period are scheduled.
+          </div>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18, marginBottom: 18 }}>
