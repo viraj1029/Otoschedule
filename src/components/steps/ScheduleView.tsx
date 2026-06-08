@@ -23,6 +23,7 @@ interface Props {
   onBlockChanged: (b: Block | null) => void;
   onScheduleSelected?: (id: string) => void;
   onScheduleListChanged?: () => void;
+  onScheduleDeleted?: (id: string) => Promise<void>;
   onRegenerate: () => void;
   showToast: (msg: string, err?: boolean) => void;
   currentResId?: string | null;
@@ -45,9 +46,11 @@ function getResRequests(allRequests: Request[], resId: string) {
   return { weekends };
 }
 
+type HospitalTab = 'cuh_pmh' | 'va' | 'cmc';
+
 export default function ScheduleView({
   schedule, schedules = [], activeScheduleId, residents, allRequests, block, role,
-  onScheduleChanged, onBlockChanged, onScheduleSelected, onScheduleListChanged, onRegenerate, showToast, currentResId,
+  onScheduleChanged, onBlockChanged, onScheduleSelected, onScheduleListChanged, onScheduleDeleted, onRegenerate, showToast, currentResId,
 }: Props) {
   const [tab, setTab] = useState<Tab>(role === 'resident' ? 'stats' : 'calendar');
   const [statsMonth, setStatsMonth] = useState<{ year: number; month: number } | null>(null);
@@ -60,6 +63,10 @@ export default function ScheduleView({
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [editingRounding, setEditingRounding] = useState<string | null>(null);
 
+  const initialHospTab: HospitalTab = schedule?.type === 'va' ? 'va' : schedule?.type === 'cmc' ? 'cmc' : 'cuh_pmh';
+  const [hospitalTab, setHospitalTab] = useState<HospitalTab>(initialHospTab);
+  const [tabLoading, setTabLoading] = useState(false);
+
   useEffect(() => {
     if (schedule) {
       const start = parseDate(schedule.bStart);
@@ -71,7 +78,29 @@ export default function ScheduleView({
     }
   }, [schedule, block?.published]);
 
-  if (!schedule) {
+  async function switchToTab(tab: HospitalTab) {
+    setHospitalTab(tab);
+    const match = schedules.filter((s) => (s.schedule_type ?? 'cuh_pmh') === tab)[0];
+    if (!match) return;
+    const currentSchedId = (schedule as AnyScheduleData & { _scheduleId?: string })?._scheduleId ?? activeScheduleId;
+    if (match.id === currentSchedId) return;
+    setTabLoading(true);
+    try {
+      await onScheduleSelected?.(match.id);
+    } finally {
+      setTimeout(() => setTabLoading(false), 300);
+    }
+  }
+
+  async function persistSchedule(updated: AnyScheduleData) {
+    const schedId = (schedule as AnyScheduleData & { _scheduleId?: string })?._scheduleId ?? activeScheduleId;
+    onScheduleChanged(updated);
+    if (schedId) {
+      try { await api('/schedule', 'PUT', { id: schedId, scheduleData: updated }); } catch { /* non-critical */ }
+    }
+  }
+
+  if (!schedule && schedules.filter((s) => (s.schedule_type ?? 'cuh_pmh') === hospitalTab).length === 0 && hospitalTab === 'cuh_pmh') {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, color: 'var(--muted)' }}>
         No schedule generated yet.
@@ -94,78 +123,21 @@ export default function ScheduleView({
     return parseDate(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
-  // ── CMC / VA early-return views ───────────────────────────────────────────────
-  if (schedule.type === 'cmc' || schedule.type === 'va') {
-    return (
-      <div>
-        {/* Schedule selector */}
-        {role === 'chief' && schedules.length > 1 && (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>SCHEDULE</span>
-            {schedules.map((s) => {
-              const isActive = s.id === activeScheduleId || s.id === (schedule as AnyScheduleData & { _scheduleId?: string })?._scheduleId;
-              return (
-                <button
-                  key={s.id}
-                  className={`btn bsm${isActive ? ' bg' : ' bgh'}`}
-                  onClick={() => !isActive && onScheduleSelected?.(s.id)}
-                  style={{ position: 'relative' }}
-                >
-                  {s.name}
-                  {s.published && <span style={{ marginLeft: 5, fontSize: 9, color: 'var(--green)', fontWeight: 700 }}>●</span>}
-                </button>
-              );
-            })}
-            <button className="btn bsm bgh" onClick={onRegenerate} style={{ marginLeft: 'auto' }}>＋ New Schedule</button>
-          </div>
-        )}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-          <div className="page-title">
-            {schedule.blockName}
-            <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 600, color: schedule.type === 'cmc' ? 'var(--blue)' : 'var(--orange)', verticalAlign: 'middle' }}>
-              {schedule.type === 'cmc' ? 'CMC' : 'VA'}
-            </span>
-          </div>
-          {role === 'chief' && (
-            <div style={{ display: 'flex', gap: 8 }}>
-              {schedules.length <= 1 && (
-                <button className="btn bgh bsm" onClick={onRegenerate}>← Regenerate</button>
-              )}
-              <button
-                className={`btn bsm ${published ? 'bg' : 'bgh'}`}
-                onClick={togglePublish}
-              >
-                {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
-              </button>
-            </div>
-          )}
-        </div>
-        <div className="page-sub">{fmtDate(schedule.bStart)} → {fmtDate(schedule.bEnd)}</div>
+  // ── CUH/PMH schedule data ─────────────────────────────────────────────────────
+  const cuhSched = (schedule && schedule.type !== 'cmc' && schedule.type !== 'va') ? schedule as ScheduleData : null;
 
-        {schedule.type === 'cmc' && (
-          <CMCScheduleView schedule={schedule as CMCScheduleData} residents={residents} />
-        )}
-        {schedule.type === 'va' && (
-          <VAScheduleView schedule={schedule as VAScheduleData} residents={residents} />
-        )}
-      </div>
-    );
+  // Build maps (only used when cuhSched is present)
+  const jrMap: Record<string, ScheduleData['juniorDays'][0]> = {};
+  if (cuhSched) cuhSched!.juniorDays.forEach((d) => (jrMap[d.dateKey] = d));
+  const srMap: Record<string, ScheduleData['seniorWeeks'][0]> = {};
+  if (cuhSched) {
+    cuhSched!.seniorWeeks.forEach((w) => {
+      let d = parseDate(w.wS);
+      const end = parseDate(w.wE);
+      while (d <= end) { srMap[dk(d)] = w; d = addDays(d, 1); }
+    });
   }
-
-  // ── CUH/PMH schedule (existing logic) ────────────────────────────────────────
-  // TypeScript narrows `schedule` to ScheduleData after the CMC/VA early returns above.
-  const cuhSched = schedule as ScheduleData;
-
-  // Build maps
-  const jrMap: Record<string, typeof cuhSched.juniorDays[0]> = {};
-  cuhSched.juniorDays.forEach((d) => (jrMap[d.dateKey] = d));
-  const srMap: Record<string, typeof cuhSched.seniorWeeks[0]> = {};
-  cuhSched.seniorWeeks.forEach((w) => {
-    let d = parseDate(w.wS);
-    const end = parseDate(w.wE);
-    while (d <= end) { srMap[dk(d)] = w; d = addDays(d, 1); }
-  });
-  const resBkpDayKeys = new Set(cuhSched.resBkpDayKeys ?? []);
+  const resBkpDayKeys = new Set(cuhSched?.resBkpDayKeys ?? []);
 
   // ── Calendar rendering (shared by screen + print) ────────────────────────────
   function buildChips(key: string, isWk: boolean, isHol: boolean, isTrauma = false): string {
@@ -186,7 +158,7 @@ export default function ScheduleView({
       chips += rc(jr.res.color, label);
 
       if (isWk || isHol) {
-        const ov = (cuhSched.roundingOverrides ?? {})[key];
+        const ov = (cuhSched?.roundingOverrides ?? {})[key];
         if (dow === 6) {
           // Saturday
           const friJr = jrMap[dk(addDays(parseDate(key), -1))];
@@ -256,7 +228,7 @@ export default function ScheduleView({
 
     if (sr) chips += rc(sr.res.color, `${sr.isBackup ? '🔬' : '🔶'} ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}`);
     if (isResBkpDay) {
-      const rb = (cuhSched.resBkpDays ?? []).find((d) => d.dateKey === key);
+      const rb = (cuhSched?.resBkpDays ?? []).find((d) => d.dateKey === key);
       if (rb) chips += rc(rb.res.color, `🔬 ${rb.res.name} (bkp)`);
     }
     return chips;
@@ -318,10 +290,10 @@ export default function ScheduleView({
               <RoundingEditor
                 dateKey={key}
                 residents={residents}
-                currentOverride={(cuhSched.roundingOverrides ?? {})[key]}
+                currentOverride={(cuhSched!.roundingOverrides ?? {})[key]}
                 onSave={async (cuhResId, pmhResId) => {
                   await api('/schedule/rounding', 'POST', { dateKey: key, cuhResId, pmhResId });
-                  onScheduleChanged({ ...cuhSched,roundingOverrides: { ...(cuhSched.roundingOverrides ?? {}), [key]: { cuhResId, pmhResId } } });
+                  onScheduleChanged({ ...cuhSched!,roundingOverrides: { ...(cuhSched!.roundingOverrides ?? {}), [key]: { cuhResId, pmhResId } } });
                   setEditingRounding(null);
                 }}
               />
@@ -339,7 +311,7 @@ export default function ScheduleView({
 
   // ── Senior tab ────────────────────────────────────────────────────────────────
   function renderSeniorTab() {
-    return cuhSched.seniorWeeks.map((w, i) => (
+    return cuhSched!.seniorWeeks.map((w, i) => (
       <div key={i} className="wrow" style={w.isBackup ? { borderLeft: '3px solid var(--pink)' } : {}}>
         <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: 'var(--muted)', lineHeight: 1.7 }}>
           {fmtShort(w.wS)}<br />→ {fmtShort(w.wE)}
@@ -368,7 +340,7 @@ export default function ScheduleView({
       weekday: 'Weekday', 'fri-pair': 'Fri (paired)', 'sun-pair': 'Sun (paired)',
       saturday: 'Saturday 24h', sunday: 'Sunday',
     };
-    return cuhSched.juniorDays.map((jd, i) => {
+    return cuhSched!.juniorDays.map((jd, i) => {
       const d = parseDate(jd.dateKey);
       const dow = DOW[d.getDay()];
       const isHol = HOLIDAYS.has(jd.dateKey);
@@ -416,8 +388,8 @@ export default function ScheduleView({
   // ── Hours tab ─────────────────────────────────────────────────────────────────
   function getBlockMonths() {
     const months: { year: number; month: number }[] = [];
-    let d = parseDate(cuhSched.bStart);
-    const end = parseDate(cuhSched.bEnd);
+    let d = parseDate(cuhSched!.bStart);
+    const end = parseDate(cuhSched!.bEnd);
     while (d <= end) {
       const y = d.getFullYear(), m = d.getMonth();
       if (!months.find((x) => x.year === y && x.month === m)) months.push({ year: y, month: m });
@@ -432,16 +404,16 @@ export default function ScheduleView({
     const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active')
       .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
     const bd = jrs.map((res) => {
-      const days = cuhSched.juniorDays.filter((d) => d.res.id === res.id);
+      const days = cuhSched!.juniorDays.filter((d) => d.res.id === res.id);
       const s12 = days.filter((d) => d.shiftHrs === 12).length;
       const s24 = days.filter((d) => d.shiftHrs === 24).length;
       const total = days.reduce((a, d) => a + d.shiftHrs, 0);
       return { res, s12, s24, total };
     });
-    const tWd = cuhSched.juniorDays.filter((d) => !d.isWeekend && !HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
-    const tSat = cuhSched.juniorDays.filter((d) => parseDate(d.dateKey).getDay() === 6 && !HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
-    const tSun = cuhSched.juniorDays.filter((d) => parseDate(d.dateKey).getDay() === 0 && !HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
-    const tHol = cuhSched.juniorDays.filter((d) => HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
+    const tWd = cuhSched!.juniorDays.filter((d) => !d.isWeekend && !HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
+    const tSat = cuhSched!.juniorDays.filter((d) => parseDate(d.dateKey).getDay() === 6 && !HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
+    const tSun = cuhSched!.juniorDays.filter((d) => parseDate(d.dateKey).getDay() === 0 && !HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
+    const tHol = cuhSched!.juniorDays.filter((d) => HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
 
     const months = getBlockMonths();
     const curHrs = hrsMonth ?? months[0];
@@ -450,13 +422,13 @@ export default function ScheduleView({
     const wks = Math.ceil(dim / 7);
 
     const monthRows = jrs.map((res) => {
-      const days = cuhSched.juniorDays.filter((d) => d.res.id === res.id && d.dateKey.startsWith(prefix));
+      const days = cuhSched!.juniorDays.filter((d) => d.res.id === res.id && d.dateKey.startsWith(prefix));
       const s12 = days.filter((d) => d.shiftHrs === 12).length;
       const s24 = days.filter((d) => d.shiftHrs === 24).length;
       const total = days.reduce((a, d) => a + d.shiftHrs, 0);
       return { res, s12, s24, total };
     });
-    const mAll = cuhSched.juniorDays.filter((d) => d.dateKey.startsWith(prefix));
+    const mAll = cuhSched!.juniorDays.filter((d) => d.dateKey.startsWith(prefix));
     const mTotal = mAll.reduce((a, d) => a + d.shiftHrs, 0);
     const ms12 = mAll.filter((d) => d.shiftHrs === 12).length;
     const ms24 = mAll.filter((d) => d.shiftHrs === 24).length;
@@ -483,7 +455,7 @@ export default function ScheduleView({
     }
 
     const allSrStats = srs.map((res) => {
-      const weeks = cuhSched.seniorWeeks.filter((w) => w.res.id === res.id);
+      const weeks = cuhSched!.seniorWeeks.filter((w) => w.res.id === res.id);
       const { totalDays, weekendDays, holidayDays } = countWeekDays(weeks);
       const isResearch = res.status === 'research' || (res.rotations?.some((seg) => seg.hospital === 'Research') ?? false);
       return { res, weeks: weeks.length, totalDays, weekendDays, holidayDays, isResearch };
@@ -596,13 +568,13 @@ export default function ScheduleView({
               </thead>
               <tbody>
                 {jrs.map((res) => {
-                  const wkndDays = cuhSched.juniorDays.filter((d) => d.res.id === res.id && (d.isWeekend || HOLIDAYS.has(d.dateKey)));
-                  const wkdayDays = cuhSched.juniorDays.filter((d) => d.res.id === res.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey));
+                  const wkndDays = cuhSched!.juniorDays.filter((d) => d.res.id === res.id && (d.isWeekend || HOLIDAYS.has(d.dateKey)));
+                  const wkdayDays = cuhSched!.juniorDays.filter((d) => d.res.id === res.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey));
                   const wkndHrs = wkndDays.reduce((a, d) => a + d.shiftHrs, 0);
                   const wkdayHrs = wkdayDays.reduce((a, d) => a + d.shiftHrs, 0);
-                  const roundingWknds = cuhSched.juniorDays.filter((d) => d.cuhRounder?.id === res.id).length;
-                  const traumaHrs = cuhSched.jrTH?.[res.id] ?? 0;
-                  const traumaDays = cuhSched.jrTD?.[res.id] ?? 0;
+                  const roundingWknds = cuhSched!.juniorDays.filter((d) => d.cuhRounder?.id === res.id).length;
+                  const traumaHrs = cuhSched!.jrTH?.[res.id] ?? 0;
+                  const traumaDays = cuhSched!.jrTD?.[res.id] ?? 0;
                   return (
                     <tr key={res.id}>
                       <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{avatar(res)}<span style={{ fontWeight: 500 }}>{res.name}</span></div></td>
@@ -619,13 +591,13 @@ export default function ScheduleView({
                   );
                 })}
                 {(() => {
-                  const totWkndD = jrs.reduce((a, r) => a + cuhSched.juniorDays.filter((d) => d.res.id === r.id && (d.isWeekend || HOLIDAYS.has(d.dateKey))).length, 0);
-                  const totWkndH = jrs.reduce((a, r) => a + cuhSched.juniorDays.filter((d) => d.res.id === r.id && (d.isWeekend || HOLIDAYS.has(d.dateKey))).reduce((s, d) => s + d.shiftHrs, 0), 0);
-                  const totWkdD = jrs.reduce((a, r) => a + cuhSched.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).length, 0);
-                  const totWkdH = jrs.reduce((a, r) => a + cuhSched.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).reduce((s, d) => s + d.shiftHrs, 0), 0);
-                  const totRounding = jrs.reduce((a, r) => a + cuhSched.juniorDays.filter((d) => d.cuhRounder?.id === r.id).length, 0);
-                  const totTraumaH = jrs.reduce((a, r) => a + (cuhSched.jrTH?.[r.id] ?? 0), 0);
-                  const totTraumaD = jrs.reduce((a, r) => a + (cuhSched.jrTD?.[r.id] ?? 0), 0);
+                  const totWkndD = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.res.id === r.id && (d.isWeekend || HOLIDAYS.has(d.dateKey))).length, 0);
+                  const totWkndH = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.res.id === r.id && (d.isWeekend || HOLIDAYS.has(d.dateKey))).reduce((s, d) => s + d.shiftHrs, 0), 0);
+                  const totWkdD = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).length, 0);
+                  const totWkdH = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).reduce((s, d) => s + d.shiftHrs, 0), 0);
+                  const totRounding = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.cuhRounder?.id === r.id).length, 0);
+                  const totTraumaH = jrs.reduce((a, r) => a + (cuhSched!.jrTH?.[r.id] ?? 0), 0);
+                  const totTraumaD = jrs.reduce((a, r) => a + (cuhSched!.jrTD?.[r.id] ?? 0), 0);
                   return (
                     <tr style={{ background: 'rgba(0,0,0,.04)' }}>
                       <td colSpan={2} style={{ fontWeight: 600, fontSize: 12, padding: '10px 12px' }}>TOTAL</td>
@@ -701,10 +673,10 @@ export default function ScheduleView({
       : null;
 
     function computeJrStats() {
-      const days = cuhSched.juniorDays.filter(
+      const days = cuhSched!.juniorDays.filter(
         (d) => d.res.id === currentResId! && (!prefix || d.dateKey.startsWith(prefix)),
       );
-      const cuhRdrDays = cuhSched.juniorDays.filter(
+      const cuhRdrDays = cuhSched!.juniorDays.filter(
         (d) => d.cuhRounder?.id === currentResId! && (!prefix || d.dateKey.startsWith(prefix)),
       );
       const wkday  = days.filter((d) => !d.isWeekend && !HOLIDAYS.has(d.dateKey));
@@ -722,7 +694,7 @@ export default function ScheduleView({
     }
 
     function computeSrStats() {
-      const srWeeks = cuhSched.seniorWeeks.filter((w) => w.res.id === currentResId!);
+      const srWeeks = cuhSched!.seniorWeeks.filter((w) => w.res.id === currentResId!);
       let wkdayCount = 0, wkndCount = 0, holCount = 0;
       srWeeks.forEach((w) => {
         let d = parseDate(w.wS); const end = parseDate(w.wE);
@@ -872,13 +844,13 @@ export default function ScheduleView({
     const srs = residents.filter((r) => r.pgy >= 4 && (r.status === 'active' || r.status === 'research' ||
         r.rotations?.some((seg) => seg.hospital === 'Research')));
     const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
-    const bStart = parseDate(cuhSched.bStart);
-    const bEnd = parseDate(cuhSched.bEnd);
+    const bStart = parseDate(cuhSched!.bStart);
+    const bEnd = parseDate(cuhSched!.bEnd);
 
     const srWkdays: Record<string, number> = {};
     const srWkends: Record<string, number> = {};
     srs.forEach((r) => { srWkdays[r.id] = 0; srWkends[r.id] = 0; });
-    cuhSched.seniorWeeks.forEach((w) => {
+    cuhSched!.seniorWeeks.forEach((w) => {
       if (!srs.find((r) => r.id === w.res.id)) return;
       let d = parseDate(w.wS); const end = parseDate(w.wE);
       while (d <= end) {
@@ -890,10 +862,10 @@ export default function ScheduleView({
     });
 
     const jrH: Record<string, number> = {};
-    jrs.forEach((r) => { jrH[r.id] = cuhSched.juniorDays.filter((d) => d.res.id === r.id).reduce((a, d) => a + d.shiftHrs, 0); });
+    jrs.forEach((r) => { jrH[r.id] = cuhSched!.juniorDays.filter((d) => d.res.id === r.id).reduce((a, d) => a + d.shiftHrs, 0); });
 
     const jrH24: Record<string, number> = {};
-    jrs.forEach((r) => { jrH24[r.id] = cuhSched.juniorDays.filter((d) => d.res.id === r.id && d.shiftHrs === 24).length; });
+    jrs.forEach((r) => { jrH24[r.id] = cuhSched!.juniorDays.filter((d) => d.res.id === r.id && d.shiftHrs === 24).length; });
 
     // Available days: rotation window minus any off/vacation requests.
     // Matches the scheduler's normalization so the chart reflects actual call density.
@@ -928,7 +900,7 @@ export default function ScheduleView({
         </div>
         <div className="card">
           <div className="ch"><div className="ct">Junior Trauma Hours</div></div>
-          <div className="cb">{eqBars(jrs.map((r) => ({ name: r.name, val: cuhSched.jrTH?.[r.id] ?? 0, color: r.color })), 'h')}</div>
+          <div className="cb">{eqBars(jrs.map((r) => ({ name: r.name, val: cuhSched!.jrTH?.[r.id] ?? 0, color: r.color })), 'h')}</div>
         </div>
         <div className="card">
           <div className="ch"><div className="ct">24h Shifts</div></div>
@@ -970,7 +942,7 @@ export default function ScheduleView({
         const sr = srMap[key];
         if (sr) parts.push(`Sr: ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}`);
         if (resBkpDayKeys.has(key)) {
-          const rb = (cuhSched.resBkpDays ?? []).find((x) => x.dateKey === key);
+          const rb = (cuhSched!.resBkpDays ?? []).find((x) => x.dateKey === key);
           if (rb) parts.push(`Bkp: ${rb.res.name}`);
         }
         const jr = jrMap[key];
@@ -991,18 +963,18 @@ export default function ScheduleView({
       XLSX.utils.book_append_sheet(wb, ws, monthName.slice(0, 3));
     });
 
-    XLSX.writeFile(wb, `${cuhSched.blockName.replace(/[^a-z0-9]/gi, '_')}_schedule.xlsx`);
+    XLSX.writeFile(wb, `${cuhSched!.blockName.replace(/[^a-z0-9]/gi, '_')}_schedule.xlsx`);
     showToast('Excel exported');
   }
 
   function exportICS() {
     let ics = 'BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//OTO Scheduler//UTSW//EN\n';
-    cuhSched.juniorDays.forEach((jd) => {
+    cuhSched!.juniorDays.forEach((jd) => {
       const ds = jd.dateKey.replace(/-/g, '');
       const de = dk(addDays(parseDate(jd.dateKey), 1)).replace(/-/g, '');
       ics += `BEGIN:VEVENT\nDTSTART;VALUE=DATE:${ds}\nDTEND;VALUE=DATE:${de}\nSUMMARY:Jr Call – ${jd.res.name} · ${jd.shiftHrs}h\nEND:VEVENT\n`;
     });
-    cuhSched.seniorWeeks.forEach((w) => {
+    cuhSched!.seniorWeeks.forEach((w) => {
       const ds = w.wS.replace(/-/g, '');
       const de = dk(addDays(parseDate(w.wE), 1)).replace(/-/g, '');
       ics += `BEGIN:VEVENT\nDTSTART;VALUE=DATE:${ds}\nDTEND;VALUE=DATE:${de}\nSUMMARY:${w.isBackup ? 'Research Backup' : 'Sr Call'} – ${w.res.name}\nEND:VEVENT\n`;
@@ -1031,153 +1003,327 @@ export default function ScheduleView({
     ] : []),
   ];
 
+  // ── Per-tab schedule filtering ────────────────────────────────────────────────
+  const currentSchedId = (schedule as AnyScheduleData & { _scheduleId?: string })?._scheduleId ?? activeScheduleId;
+  const tabScheduleList = schedules.filter((s) => (s.schedule_type ?? 'cuh_pmh') === hospitalTab);
+  const scheduleMatchesTab = schedule && (
+    hospitalTab === 'va' ? schedule.type === 'va' :
+    hospitalTab === 'cmc' ? schedule.type === 'cmc' :
+    (schedule.type !== 'va' && schedule.type !== 'cmc')
+  );
+  const currentTabSchedule = scheduleMatchesTab ? schedule : null;
+
   return (
     <div>
-      {/* Schedule selector (chief only, when multiple schedules exist) */}
-      {role === 'chief' && schedules.length > 1 && (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>SCHEDULE</span>
-          {schedules.map((s) => {
-            const isActive = s.id === activeScheduleId || s.id === (schedule as ScheduleData & { _scheduleId?: string })?._scheduleId;
-            return (
-              <button
-                key={s.id}
-                className={`btn bsm${isActive ? ' bg' : ' bgh'}`}
-                onClick={() => !isActive && onScheduleSelected?.(s.id)}
-                style={{ position: 'relative' }}
-              >
-                {s.name}
-                {s.published && (
-                  <span style={{ marginLeft: 5, fontSize: 9, color: 'var(--green)', fontWeight: 700 }}>●</span>
-                )}
-              </button>
-            );
-          })}
-          <button className="btn bsm bgh" onClick={onRegenerate} style={{ marginLeft: 'auto' }}>＋ New Schedule</button>
-        </div>
-      )}
-
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-        <div className="page-title">{schedule.blockName}</div>
-        {role === 'chief' && (
-          <div style={{ display: 'flex', gap: 8 }}>
-            {schedules.length <= 1 && (
-              <button className="btn bgh bsm" onClick={onRegenerate}>← Regenerate</button>
-            )}
+      {/* Hospital type tab bar */}
+      <div className="tabrow" style={{ marginBottom: 16 }}>
+        {([
+          { id: 'cuh_pmh' as HospitalTab, label: 'CUH / PMH' },
+          { id: 'va'      as HospitalTab, label: 'VA' },
+          { id: 'cmc'     as HospitalTab, label: 'CMC' },
+        ]).map(({ id, label }) => {
+          const typeCount = schedules.filter((s) => (s.schedule_type ?? 'cuh_pmh') === id).length;
+          return (
             <button
-              className={`btn bsm ${published ? 'bg' : 'bgh'}`}
-              onClick={togglePublish}
+              key={id}
+              className={`tabbtn${hospitalTab === id ? ' active' : ''}`}
+              onClick={() => switchToTab(id)}
             >
-              {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
+              {label}
+              {typeCount > 0 && <span style={{ marginLeft: 5, fontSize: 10, opacity: 0.7 }}>({typeCount})</span>}
             </button>
-            <button className="btn bgh bsm" onClick={exportICS}>📅 iCal</button>
-            <button className="btn bg bsm" onClick={exportExcel}>📊 Excel</button>
-          </div>
-        )}
+          );
+        })}
       </div>
 
-      <div className="page-sub">
-        {fmtDate(schedule.bStart)} → {fmtDate(schedule.bEnd)}
-      </div>
+      {tabLoading && <div style={{ color: 'var(--muted)', padding: 20, textAlign: 'center' }}>Loading…</div>}
 
-      {/* Tabs */}
-      <div className="tabrow">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            className={`tabbtn${tab === t.id ? ' active' : ''}`}
-            onClick={() => setTab(t.id)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab content */}
-      {tab === 'calendar' && (
+      {!tabLoading && (
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-            <button className="btn bgh bsm" onClick={() => navCal(-1)}>‹ Prev</button>
-            <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 16, fontWeight: 700, flex: 1, textAlign: 'center' }}>
-              {MONTHS[calMonth]} {calYear}
-            </div>
-            {role === 'chief' && !selectMode && (
-              <button className="btn bgh bsm" onClick={() => setSelectMode(true)}>☑ Select Days</button>
-            )}
-            {role === 'chief' && selectMode && (
-              <>
-                {selectedKeys.length > 0 && (
-                  <button
-                    className="btn bg bsm"
-                    onClick={() => { setOverrideKeys([...selectedKeys]); }}
-                  >
-                    Override {selectedKeys.length} day{selectedKeys.length !== 1 ? 's' : ''}
-                  </button>
-                )}
-                <button
-                  className="btn bgh bsm"
-                  onClick={() => { setSelectMode(false); setSelectedKeys([]); }}
-                >
-                  ✕ Cancel
-                </button>
-              </>
-            )}
-            <button className="btn bgh bsm" onClick={() => navCal(1)}>Next ›</button>
-          </div>
-          {selectMode && (
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, padding: '6px 10px', background: 'rgba(0,0,0,0.05)', borderRadius: 6 }}>
-              Click days to select · {selectedKeys.length} selected
+          {/* Per-tab schedule selector */}
+          {role === 'chief' && tabScheduleList.length > 0 && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>SCHEDULE</span>
+              {tabScheduleList.map((s) => {
+                const isActive = s.id === currentSchedId;
+                return (
+                  <span key={s.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 0 }}>
+                    <button
+                      className={`btn bsm${isActive ? ' bg' : ' bgh'}`}
+                      onClick={async () => {
+                        if (!isActive) await onScheduleSelected?.(s.id);
+                      }}
+                      style={{ position: 'relative' }}
+                    >
+                      {s.name}
+                      {s.published && <span style={{ marginLeft: 5, fontSize: 9, color: 'var(--green)', fontWeight: 700 }}>●</span>}
+                    </button>
+                    {role === 'chief' && (
+                      <button
+                        style={{ fontSize: 9, color: 'var(--red)', marginLeft: 2, cursor: 'pointer', border: 'none', background: 'none', padding: '0 3px' }}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!confirm(`Delete "${s.name}"?`)) return;
+                          await onScheduleDeleted?.(s.id);
+                          onScheduleListChanged?.();
+                          showToast('Schedule deleted');
+                        }}
+                        title="Delete schedule"
+                      >✕</button>
+                    )}
+                  </span>
+                );
+              })}
+              <button className="btn bsm bgh" onClick={onRegenerate} style={{ marginLeft: 'auto' }}>＋ New Schedule</button>
             </div>
           )}
-          <div className="calgrid">
-            <div className="cdow" style={{ background: 'var(--s2)' }}>Wk</div>
-            {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => (
-              <div key={d} className="cdow">{d}</div>
-            ))}
-            {renderCalendar()}
-          </div>
-        </div>
-      )}
 
-      {tab === 'stats' && renderStatsTab()}
-      {tab === 'hours' && renderHoursTab()}
-      {tab === 'equity' && renderEquityTab()}
-
-      {/* Print-only calendar */}
-      <div className="print-cal">
-        {getBlockMonths().map(({ year, month }) => (
-          <div key={`${year}-${month}`} className="print-month">
-            <div className="print-month-title">{MONTHS[month]} {year}</div>
-            <div className="calgrid no-wl">
-              {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => (
-                <div key={d} className="cdow">{d}</div>
-              ))}
-              {renderCalendarMonth(year, month, true)}
+          {/* VA tab */}
+          {hospitalTab === 'va' && currentTabSchedule && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <div className="page-title">
+                  {currentTabSchedule.blockName}
+                  <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 600, color: 'var(--orange)', verticalAlign: 'middle' }}>VA</span>
+                </div>
+                {role === 'chief' && (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {tabScheduleList.length === 0 && (
+                      <button className="btn bgh bsm" onClick={onRegenerate}>← Regenerate</button>
+                    )}
+                    <button className={`btn bsm ${published ? 'bg' : 'bgh'}`} onClick={togglePublish}>
+                      {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="page-sub">{fmtDate(currentTabSchedule.bStart)} → {fmtDate(currentTabSchedule.bEnd)}</div>
+              <VAScheduleView
+                schedule={currentTabSchedule as VAScheduleData}
+                residents={residents}
+                role={role}
+                onOverride={(weekIndex, newRes) => {
+                  const vaSched = currentTabSchedule as VAScheduleData;
+                  const oldWeek = vaSched.weeks[weekIndex];
+                  const oldResId = oldWeek.res.id;
+                  const newResId = newRes.id;
+                  const newCounts = { ...vaSched.counts };
+                  const newDays2  = { ...vaSched.days };
+                  const newHours2 = { ...vaSched.hours };
+                  newCounts[oldResId] = Math.max(0, (newCounts[oldResId] ?? 0) - 1);
+                  newCounts[newResId] = (newCounts[newResId] ?? 0) + 1;
+                  let d2 = parseDate(oldWeek.wS);
+                  const wEnd = parseDate(oldWeek.wE);
+                  while (d2 <= wEnd) {
+                    const key2 = dk(d2);
+                    const dow2 = d2.getDay();
+                    const hrs2 = (dow2 === 0 || dow2 === 6 || HOLIDAYS.has(key2)) ? 24 : 12;
+                    newDays2[oldResId]  = Math.max(0, (newDays2[oldResId] ?? 0) - 1);
+                    newDays2[newResId]  = (newDays2[newResId] ?? 0) + 1;
+                    newHours2[oldResId] = Math.max(0, (newHours2[oldResId] ?? 0) - hrs2);
+                    newHours2[newResId] = (newHours2[newResId] ?? 0) + hrs2;
+                    d2 = addDays(d2, 1);
+                  }
+                  const newWeeks = [...vaSched.weeks];
+                  newWeeks[weekIndex] = { ...oldWeek, res: newRes, override: true };
+                  const updated: VAScheduleData = { ...vaSched, weeks: newWeeks, counts: newCounts, days: newDays2, hours: newHours2 };
+                  persistSchedule(updated);
+                  showToast('VA override saved');
+                }}
+              />
             </div>
-          </div>
-        ))}
-      </div>
+          )}
 
-      {/* Override modal */}
-      {role === 'chief' && (
-        <OverrideModal
-          open={overrideKeys.length > 0}
-          dateKeys={overrideKeys}
-          schedule={schedule}
-          residents={residents}
-          onSave={(updated) => {
-            onScheduleChanged(updated);
-            setOverrideKeys([]);
-            setSelectedKeys([]);
-            setSelectMode(false);
-          }}
-          onClose={() => {
-            setOverrideKeys([]);
-            setSelectedKeys([]);
-            setSelectMode(false);
-          }}
-          showToast={showToast}
-        />
+          {hospitalTab === 'va' && !currentTabSchedule && (
+            <div style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>
+              <div style={{ marginBottom: 12 }}>No VA schedule generated yet.</div>
+              {role === 'chief' && <button className="btn bg" onClick={onRegenerate}>Generate VA Schedule →</button>}
+            </div>
+          )}
+
+          {/* CMC tab */}
+          {hospitalTab === 'cmc' && currentTabSchedule && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <div className="page-title">
+                  {currentTabSchedule.blockName}
+                  <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 600, color: 'var(--blue)', verticalAlign: 'middle' }}>CMC</span>
+                </div>
+                {role === 'chief' && (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {tabScheduleList.length === 0 && (
+                      <button className="btn bgh bsm" onClick={onRegenerate}>← Regenerate</button>
+                    )}
+                    <button className={`btn bsm ${published ? 'bg' : 'bgh'}`} onClick={togglePublish}>
+                      {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="page-sub">{fmtDate(currentTabSchedule.bStart)} → {fmtDate(currentTabSchedule.bEnd)}</div>
+              <CMCScheduleView
+                schedule={currentTabSchedule as CMCScheduleData}
+                residents={residents}
+                role={role}
+                onOverride={(dateKey, newRes) => {
+                  const cmcSched = currentTabSchedule as CMCScheduleData;
+                  const newDaysArr = cmcSched.days.map((d) => d.dateKey === dateKey ? { ...d, res: newRes, override: true } : d);
+                  const finalCounts: Record<string, number> = {};
+                  const finalHours: Record<string, number> = {};
+                  newDaysArr.forEach((d) => {
+                    finalCounts[d.res.id] = (finalCounts[d.res.id] ?? 0) + 1;
+                    finalHours[d.res.id]  = (finalHours[d.res.id] ?? 0) + d.shiftHrs;
+                  });
+                  const updated: CMCScheduleData = { ...cmcSched, days: newDaysArr, counts: finalCounts, hours: finalHours };
+                  persistSchedule(updated);
+                  showToast('CMC override saved');
+                }}
+              />
+            </div>
+          )}
+
+          {hospitalTab === 'cmc' && !currentTabSchedule && (
+            <div style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>
+              <div style={{ marginBottom: 12 }}>No CMC schedule generated yet.</div>
+              {role === 'chief' && <button className="btn bg" onClick={onRegenerate}>Generate CMC Schedule →</button>}
+            </div>
+          )}
+
+          {/* CUH/PMH tab */}
+          {hospitalTab === 'cuh_pmh' && !currentTabSchedule && (
+            <div style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>
+              <div style={{ marginBottom: 12 }}>No CUH/PMH schedule generated yet.</div>
+              {role === 'chief' && <button className="btn bg" onClick={onRegenerate}>Generate Schedule →</button>}
+            </div>
+          )}
+
+          {hospitalTab === 'cuh_pmh' && currentTabSchedule && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <div className="page-title">{currentTabSchedule.blockName}</div>
+                {role === 'chief' && (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {tabScheduleList.length === 0 && (
+                      <button className="btn bgh bsm" onClick={onRegenerate}>← Regenerate</button>
+                    )}
+                    <button
+                      className={`btn bsm ${published ? 'bg' : 'bgh'}`}
+                      onClick={togglePublish}
+                    >
+                      {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
+                    </button>
+                    <button className="btn bgh bsm" onClick={exportICS}>📅 iCal</button>
+                    <button className="btn bg bsm" onClick={exportExcel}>📊 Excel</button>
+                  </div>
+                )}
+              </div>
+
+              <div className="page-sub">
+                {fmtDate(currentTabSchedule.bStart)} → {fmtDate(currentTabSchedule.bEnd)}
+              </div>
+
+              {/* CUH/PMH sub-tabs */}
+              <div className="tabrow">
+                {TABS.map((t) => (
+                  <button
+                    key={t.id}
+                    className={`tabbtn${tab === t.id ? ' active' : ''}`}
+                    onClick={() => setTab(t.id)}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab content */}
+              {tab === 'calendar' && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                    <button className="btn bgh bsm" onClick={() => navCal(-1)}>‹ Prev</button>
+                    <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 16, fontWeight: 700, flex: 1, textAlign: 'center' }}>
+                      {MONTHS[calMonth]} {calYear}
+                    </div>
+                    {role === 'chief' && !selectMode && (
+                      <button className="btn bgh bsm" onClick={() => setSelectMode(true)}>☑ Select Days</button>
+                    )}
+                    {role === 'chief' && selectMode && (
+                      <>
+                        {selectedKeys.length > 0 && (
+                          <button
+                            className="btn bg bsm"
+                            onClick={() => { setOverrideKeys([...selectedKeys]); }}
+                          >
+                            Override {selectedKeys.length} day{selectedKeys.length !== 1 ? 's' : ''}
+                          </button>
+                        )}
+                        <button
+                          className="btn bgh bsm"
+                          onClick={() => { setSelectMode(false); setSelectedKeys([]); }}
+                        >
+                          ✕ Cancel
+                        </button>
+                      </>
+                    )}
+                    <button className="btn bgh bsm" onClick={() => navCal(1)}>Next ›</button>
+                  </div>
+                  {selectMode && (
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, padding: '6px 10px', background: 'rgba(0,0,0,0.05)', borderRadius: 6 }}>
+                      Click days to select · {selectedKeys.length} selected
+                    </div>
+                  )}
+                  <div className="calgrid">
+                    <div className="cdow" style={{ background: 'var(--s2)' }}>Wk</div>
+                    {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => (
+                      <div key={d} className="cdow">{d}</div>
+                    ))}
+                    {renderCalendar()}
+                  </div>
+                </div>
+              )}
+
+              {tab === 'stats' && renderStatsTab()}
+              {tab === 'hours' && renderHoursTab()}
+              {tab === 'equity' && renderEquityTab()}
+
+              {/* Print-only calendar */}
+              <div className="print-cal">
+                {getBlockMonths().map(({ year, month }) => (
+                  <div key={`${year}-${month}`} className="print-month">
+                    <div className="print-month-title">{MONTHS[month]} {year}</div>
+                    <div className="calgrid no-wl">
+                      {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => (
+                        <div key={d} className="cdow">{d}</div>
+                      ))}
+                      {renderCalendarMonth(year, month, true)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Override modal */}
+              {role === 'chief' && (
+                <OverrideModal
+                  open={overrideKeys.length > 0}
+                  dateKeys={overrideKeys}
+                  schedule={currentTabSchedule as ScheduleData}
+                  residents={residents}
+                  onSave={(updated) => {
+                    onScheduleChanged(updated);
+                    setOverrideKeys([]);
+                    setSelectedKeys([]);
+                    setSelectMode(false);
+                  }}
+                  onClose={() => {
+                    setOverrideKeys([]);
+                    setSelectedKeys([]);
+                    setSelectMode(false);
+                  }}
+                  showToast={showToast}
+                />
+              )}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
