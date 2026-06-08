@@ -1,9 +1,7 @@
 'use client';
 
-import { useState, useEffect, type ReactElement } from 'react';
+import React, { useState, useEffect, type ReactElement } from 'react';
 import type { Block, Resident, Request, ScheduleData, CMCScheduleData, VAScheduleData, AnyScheduleData, Schedule, Tab, Role } from '@/types';
-import CMCScheduleView from './CMCScheduleView';
-import VAScheduleView from './VAScheduleView';
 import { HOLIDAYS, HOLIDAY_NAMES, TRAUMA_WEEKS, parseDate, fmtShort, dk, addDays } from '@/lib/scheduler';
 import { api } from '../App';
 import OverrideModal from '../modals/OverrideModal';
@@ -66,6 +64,9 @@ export default function ScheduleView({
   const initialHospTab: HospitalTab = schedule?.type === 'va' ? 'va' : schedule?.type === 'cmc' ? 'cmc' : 'cuh_pmh';
   const [hospitalTab, setHospitalTab] = useState<HospitalTab>(initialHospTab);
   const [tabLoading, setTabLoading] = useState(false);
+  const [vaOverride, setVaOverride] = useState<{ open: boolean; weekIndex: number }>({ open: false, weekIndex: -1 });
+  const [cmcOverride, setCmcOverride] = useState<{ open: boolean; dateKey: string }>({ open: false, dateKey: '' });
+  const [poolOverrideResId, setPoolOverrideResId] = useState('');
 
   useEffect(() => {
     if (schedule) {
@@ -139,10 +140,41 @@ export default function ScheduleView({
   }
   const resBkpDayKeys = new Set(cuhSched?.resBkpDayKeys ?? []);
 
+  // ── VA / CMC schedule data ────────────────────────────────────────────────────
+  const vaSched   = schedule?.type === 'va'  ? schedule as VAScheduleData  : null;
+  const cmcDayData = schedule?.type === 'cmc' ? schedule as CMCScheduleData : null;
+
+  const vaWeekMap: Record<string, number> = {};
+  if (vaSched) vaSched.weeks.forEach((w, i) => {
+    let d = parseDate(w.wS); const end = parseDate(w.wE);
+    while (d <= end) { vaWeekMap[dk(d)] = i; d = addDays(d, 1); }
+  });
+  const cmcDayMap: Record<string, CMCScheduleData['days'][0]> = {};
+  if (cmcDayData) cmcDayData.days.forEach((d) => (cmcDayMap[d.dateKey] = d));
+
   // ── Calendar rendering (shared by screen + print) ────────────────────────────
   function buildChips(key: string, isWk: boolean, isHol: boolean, isTrauma = false): string {
     const rc = (color: string, label: string) =>
       `<div class="chip" style="background:${color}22;color:${color};border:1px solid ${color}44">${label}</div>`;
+
+    // VA mode
+    if (vaSched) {
+      const idx = vaWeekMap[key];
+      if (idx === undefined) return '';
+      const w = vaSched.weeks[idx];
+      return rc(w.res.color, `🔶 ${w.res.name}${w.override ? ' ✎' : ''}`);
+    }
+    // CMC mode
+    if (cmcDayData) {
+      const entry = cmcDayMap[key];
+      if (!entry) return '';
+      const d2 = parseDate(key);
+      const pwLabel = entry.isPowerWeekend
+        ? (d2.getDay() === 5 ? ' · Fri PW' : d2.getDay() === 6 ? ' · Sat PW' : ' · Sun PW')
+        : '';
+      return rc(entry.res.color, `${entry.res.name}${pwLabel}${entry.override ? ' ✎' : ''}`);
+    }
+
     const sr = srMap[key];
     const jr = jrMap[key];
     const isResBkpDay = resBkpDayKeys.has(key);
@@ -259,25 +291,37 @@ export default function ScheduleView({
         const isToday = !forPrint && today.getFullYear() === year && today.getMonth() === month && today.getDate() === day;
         const isSel = !forPrint && selectedKeys.includes(key);
         const chips = buildChips(key, isWk, isHol, isTrauma);
+        const isPW = !!(cmcDayData && cmcDayMap[key]?.isPowerWeekend);
         const handleClick = forPrint ? undefined : (role === 'chief'
-          ? selectMode
-            ? () => setSelectedKeys((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key])
-            : () => setOverrideKeys([key])
+          ? hospitalTab === 'va'
+            ? () => { const idx = vaWeekMap[key]; if (idx !== undefined) { setPoolOverrideResId(vaSched!.weeks[idx].res.id); setVaOverride({ open: true, weekIndex: idx }); } }
+            : hospitalTab === 'cmc'
+            ? () => { const entry = cmcDayMap[key]; if (entry) { setPoolOverrideResId(entry.res.id); setCmcOverride({ open: true, dateKey: key }); } }
+            : selectMode
+              ? () => setSelectedKeys((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key])
+              : () => setOverrideKeys([key])
           : undefined);
+
+        const cellStyle: React.CSSProperties = isPW
+          ? { background: 'rgba(234,179,8,0.15)', outline: '1px solid rgba(234,179,8,0.4)' }
+          : isTrauma && !isWk ? { background: 'rgba(239,68,68,0.20)' }
+          : isTrauma ? { background: 'rgba(239,68,68,0.28)' }
+          : {};
 
         rows.push(
           <div
             key={key + pfx}
             className={`ccell${isWk ? ' cwk' : ''}${isHol ? ' chol' : ''}${isSel ? ' csel' : ''}`}
-            style={isTrauma && !isWk ? { background: 'rgba(239,68,68,0.20)' } : isTrauma ? { background: 'rgba(239,68,68,0.28)' } : undefined}
+            style={{ ...cellStyle, cursor: !forPrint && role === 'chief' && (hospitalTab === 'va' || hospitalTab === 'cmc') ? 'pointer' : undefined }}
             onClick={handleClick}
           >
             <div className={`cdate${isToday ? ' tod' : ''}`}>
               {day}{isSel ? ' ✓' : ''}
+              {isPW && !forPrint && <span style={{ marginLeft: 4, fontSize: 9, color: '#92400e', fontWeight: 700 }}>PW</span>}
               {isHol && <span style={{ marginLeft: 4, color: 'var(--orange)', fontFamily: 'Inter, sans-serif', fontWeight: 600, letterSpacing: 0 }}>🎉 {HOLIDAY_NAMES[key] ?? 'Holiday'}</span>}
             </div>
             <div className="cchips" dangerouslySetInnerHTML={{ __html: chips }} />
-            {role === 'chief' && (isWk || isHol) && (
+            {role === 'chief' && hospitalTab === 'cuh_pmh' && (isWk || isHol) && (
               <button
                 className="bico"
                 style={{ fontSize: 9, padding: '1px 4px', marginTop: 2, width: '100%', opacity: 0.6 }}
@@ -286,7 +330,7 @@ export default function ScheduleView({
                 {editingRounding === key ? '✕ close' : '✎ rounding'}
               </button>
             )}
-            {role === 'chief' && editingRounding === key && (
+            {role === 'chief' && hospitalTab === 'cuh_pmh' && editingRounding === key && (
               <RoundingEditor
                 dateKey={key}
                 residents={residents}
@@ -919,6 +963,143 @@ export default function ScheduleView({
     );
   }
 
+  // ── VA Hours/Equity tabs ──────────────────────────────────────────────────────
+  function renderVAHoursTab() {
+    if (!vaSched) return null;
+    const resSet = new Map<string, Resident>();
+    vaSched.weeks.forEach((w) => resSet.set(w.res.id, w.res));
+    const pool = [...resSet.values()].sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
+    return (
+      <div className="card">
+        <div className="ch"><div className="ct">VA Call Summary</div></div>
+        <div className="cbt">
+          <table className="htable">
+            <thead>
+              <tr>
+                <th>Resident</th><th>PGY</th>
+                <th className="r">Weeks</th>
+                <th className="r">Weekday Days</th>
+                <th className="r">Weekend Days</th>
+                <th className="r">Holidays</th>
+                <th className="r">Total Hours</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pool.map((res) => {
+                const myWeeks = vaSched!.weeks.filter((w) => w.res.id === res.id);
+                let wkday = 0, wknd = 0, hol = 0;
+                myWeeks.forEach((w) => {
+                  let d = parseDate(w.wS); const end = parseDate(w.wE);
+                  while (d <= end) {
+                    const key = dk(d);
+                    if (HOLIDAYS.has(key)) hol++;
+                    else if (d.getDay() === 0 || d.getDay() === 6) wknd++;
+                    else wkday++;
+                    d = addDays(d, 1);
+                  }
+                });
+                const hrs = vaSched!.hours[res.id] ?? 0;
+                return (
+                  <tr key={res.id}>
+                    <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{avatar(res)}<span style={{ fontWeight: 500 }}>{res.name}</span></div></td>
+                    <td><span className={`bdg ${res.pgy >= 4 ? 'bg2' : 'bb'}`}>PGY-{res.pgy}</span></td>
+                    <td className="r"><span className="hn">{vaSched!.counts[res.id] ?? 0}</span></td>
+                    <td className="r"><span className="ht" style={{ color: 'var(--blue)' }}>{wkday}</span></td>
+                    <td className="r"><span className="ht" style={{ color: 'var(--purple)' }}>{wknd}</span></td>
+                    <td className="r"><span className="ht" style={{ color: 'var(--orange)' }}>{hol}</span></td>
+                    <td className="r"><span className="ht" style={{ color: 'var(--green)' }}>{hrs}h</span></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  function renderVAEquityTab() {
+    if (!vaSched) return null;
+    const resSet = new Map<string, Resident>();
+    vaSched.weeks.forEach((w) => resSet.set(w.res.id, w.res));
+    const pool = [...resSet.values()].sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+        <div className="card">
+          <div className="ch"><div className="ct">VA Call Weeks</div></div>
+          <div className="cb">{eqBars(pool.map((r) => ({ name: r.name, val: vaSched!.counts[r.id] ?? 0, color: r.color })), ' wks')}</div>
+        </div>
+        <div className="card">
+          <div className="ch"><div className="ct">VA Call Hours</div></div>
+          <div className="cb">{eqBars(pool.map((r) => ({ name: r.name, val: vaSched!.hours[r.id] ?? 0, color: r.color })), 'h')}</div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── CMC Hours/Equity tabs ─────────────────────────────────────────────────────
+  function renderCMCHoursTab() {
+    if (!cmcDayData) return null;
+    const resSet = new Map<string, Resident>();
+    cmcDayData.days.forEach((d) => resSet.set(d.res.id, d.res));
+    const pool = [...resSet.values()].sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
+    return (
+      <div className="card">
+        <div className="ch"><div className="ct">CMC Call Summary</div></div>
+        <div className="cbt">
+          <table className="htable">
+            <thead>
+              <tr>
+                <th>Resident</th><th>PGY</th>
+                <th className="r">Total Days</th>
+                <th className="r">Power Wknds</th>
+                <th className="r">Weekdays</th>
+                <th className="r">Total Hours</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pool.map((res) => {
+                const myDays = cmcDayData!.days.filter((d) => d.res.id === res.id);
+                const pw  = myDays.filter((d) => d.isPowerWeekend).length;
+                const wd  = myDays.filter((d) => !d.isPowerWeekend).length;
+                const hrs = cmcDayData!.hours[res.id] ?? 0;
+                return (
+                  <tr key={res.id}>
+                    <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{avatar(res)}<span style={{ fontWeight: 500 }}>{res.name}</span></div></td>
+                    <td><span className="bdg bb">PGY-{res.pgy}</span></td>
+                    <td className="r"><span className="hn">{cmcDayData!.counts[res.id] ?? 0}</span></td>
+                    <td className="r"><span className="ht" style={{ color: '#92400e' }}>{Math.round(pw / 3)}</span></td>
+                    <td className="r"><span className="ht" style={{ color: 'var(--blue)' }}>{wd}</span></td>
+                    <td className="r"><span className="ht" style={{ color: 'var(--green)' }}>{hrs}h</span></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  function renderCMCEquityTab() {
+    if (!cmcDayData) return null;
+    const resSet = new Map<string, Resident>();
+    cmcDayData.days.forEach((d) => resSet.set(d.res.id, d.res));
+    const pool = [...resSet.values()].sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+        <div className="card">
+          <div className="ch"><div className="ct">CMC Call Days</div></div>
+          <div className="cb">{eqBars(pool.map((r) => ({ name: r.name, val: cmcDayData!.counts[r.id] ?? 0, color: r.color })), 'd')}</div>
+        </div>
+        <div className="card">
+          <div className="ch"><div className="ct">CMC Call Hours</div></div>
+          <div className="cb">{eqBars(pool.map((r) => ({ name: r.name, val: cmcDayData!.hours[r.id] ?? 0, color: r.color })), 'h')}</div>
+        </div>
+      </div>
+    );
+  }
+
   function exportExcel() {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const XLSX = require('xlsx') as typeof import('xlsx');
@@ -1088,9 +1269,7 @@ export default function ScheduleView({
                 </div>
                 {role === 'chief' && (
                   <div style={{ display: 'flex', gap: 8 }}>
-                    {tabScheduleList.length === 0 && (
-                      <button className="btn bgh bsm" onClick={onRegenerate}>← Regenerate</button>
-                    )}
+                    {tabScheduleList.length === 0 && <button className="btn bgh bsm" onClick={onRegenerate}>← Regenerate</button>}
                     <button className={`btn bsm ${published ? 'bg' : 'bgh'}`} onClick={togglePublish}>
                       {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
                     </button>
@@ -1098,39 +1277,32 @@ export default function ScheduleView({
                 )}
               </div>
               <div className="page-sub">{fmtDate(currentTabSchedule.bStart)} → {fmtDate(currentTabSchedule.bEnd)}</div>
-              <VAScheduleView
-                schedule={currentTabSchedule as VAScheduleData}
-                residents={residents}
-                role={role}
-                onOverride={(weekIndex, newRes) => {
-                  const vaSched = currentTabSchedule as VAScheduleData;
-                  const oldWeek = vaSched.weeks[weekIndex];
-                  const oldResId = oldWeek.res.id;
-                  const newResId = newRes.id;
-                  const newCounts = { ...vaSched.counts };
-                  const newDays2  = { ...vaSched.days };
-                  const newHours2 = { ...vaSched.hours };
-                  newCounts[oldResId] = Math.max(0, (newCounts[oldResId] ?? 0) - 1);
-                  newCounts[newResId] = (newCounts[newResId] ?? 0) + 1;
-                  let d2 = parseDate(oldWeek.wS);
-                  const wEnd = parseDate(oldWeek.wE);
-                  while (d2 <= wEnd) {
-                    const key2 = dk(d2);
-                    const dow2 = d2.getDay();
-                    const hrs2 = (dow2 === 0 || dow2 === 6 || HOLIDAYS.has(key2)) ? 24 : 12;
-                    newDays2[oldResId]  = Math.max(0, (newDays2[oldResId] ?? 0) - 1);
-                    newDays2[newResId]  = (newDays2[newResId] ?? 0) + 1;
-                    newHours2[oldResId] = Math.max(0, (newHours2[oldResId] ?? 0) - hrs2);
-                    newHours2[newResId] = (newHours2[newResId] ?? 0) + hrs2;
-                    d2 = addDays(d2, 1);
-                  }
-                  const newWeeks = [...vaSched.weeks];
-                  newWeeks[weekIndex] = { ...oldWeek, res: newRes, override: true };
-                  const updated: VAScheduleData = { ...vaSched, weeks: newWeeks, counts: newCounts, days: newDays2, hours: newHours2 };
-                  persistSchedule(updated);
-                  showToast('VA override saved');
-                }}
-              />
+              <div className="tabrow">
+                {TABS.map((t) => (
+                  <button key={t.id} className={`tabbtn${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
+                ))}
+              </div>
+              {tab === 'calendar' && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                    <button className="btn bgh bsm" onClick={() => navCal(-1)}>‹ Prev</button>
+                    <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 16, fontWeight: 700, flex: 1, textAlign: 'center' }}>{MONTHS[calMonth]} {calYear}</div>
+                    <button className="btn bgh bsm" onClick={() => navCal(1)}>Next ›</button>
+                  </div>
+                  {role === 'chief' && (
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, padding: '5px 10px', background: 'rgba(0,0,0,0.04)', borderRadius: 6 }}>
+                      Click any day to override the weekly assignment
+                    </div>
+                  )}
+                  <div className="calgrid">
+                    <div className="cdow" style={{ background: 'var(--s2)' }}>Wk</div>
+                    {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => <div key={d} className="cdow">{d}</div>)}
+                    {renderCalendar()}
+                  </div>
+                </div>
+              )}
+              {tab === 'hours'  && renderVAHoursTab()}
+              {tab === 'equity' && renderVAEquityTab()}
             </div>
           )}
 
@@ -1151,9 +1323,7 @@ export default function ScheduleView({
                 </div>
                 {role === 'chief' && (
                   <div style={{ display: 'flex', gap: 8 }}>
-                    {tabScheduleList.length === 0 && (
-                      <button className="btn bgh bsm" onClick={onRegenerate}>← Regenerate</button>
-                    )}
+                    {tabScheduleList.length === 0 && <button className="btn bgh bsm" onClick={onRegenerate}>← Regenerate</button>}
                     <button className={`btn bsm ${published ? 'bg' : 'bgh'}`} onClick={togglePublish}>
                       {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
                     </button>
@@ -1161,24 +1331,32 @@ export default function ScheduleView({
                 )}
               </div>
               <div className="page-sub">{fmtDate(currentTabSchedule.bStart)} → {fmtDate(currentTabSchedule.bEnd)}</div>
-              <CMCScheduleView
-                schedule={currentTabSchedule as CMCScheduleData}
-                residents={residents}
-                role={role}
-                onOverride={(dateKey, newRes) => {
-                  const cmcSched = currentTabSchedule as CMCScheduleData;
-                  const newDaysArr = cmcSched.days.map((d) => d.dateKey === dateKey ? { ...d, res: newRes, override: true } : d);
-                  const finalCounts: Record<string, number> = {};
-                  const finalHours: Record<string, number> = {};
-                  newDaysArr.forEach((d) => {
-                    finalCounts[d.res.id] = (finalCounts[d.res.id] ?? 0) + 1;
-                    finalHours[d.res.id]  = (finalHours[d.res.id] ?? 0) + d.shiftHrs;
-                  });
-                  const updated: CMCScheduleData = { ...cmcSched, days: newDaysArr, counts: finalCounts, hours: finalHours };
-                  persistSchedule(updated);
-                  showToast('CMC override saved');
-                }}
-              />
+              <div className="tabrow">
+                {TABS.map((t) => (
+                  <button key={t.id} className={`tabbtn${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
+                ))}
+              </div>
+              {tab === 'calendar' && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                    <button className="btn bgh bsm" onClick={() => navCal(-1)}>‹ Prev</button>
+                    <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 16, fontWeight: 700, flex: 1, textAlign: 'center' }}>{MONTHS[calMonth]} {calYear}</div>
+                    <button className="btn bgh bsm" onClick={() => navCal(1)}>Next ›</button>
+                  </div>
+                  {role === 'chief' && (
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, padding: '5px 10px', background: 'rgba(0,0,0,0.04)', borderRadius: 6 }}>
+                      Click any day to override the assignment
+                    </div>
+                  )}
+                  <div className="calgrid">
+                    <div className="cdow" style={{ background: 'var(--s2)' }}>Wk</div>
+                    {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => <div key={d} className="cdow">{d}</div>)}
+                    {renderCalendar()}
+                  </div>
+                </div>
+              )}
+              {tab === 'hours'  && renderCMCHoursTab()}
+              {tab === 'equity' && renderCMCEquityTab()}
             </div>
           )}
 
@@ -1323,6 +1501,95 @@ export default function ScheduleView({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* VA override modal */}
+      {vaOverride.open && vaSched && (
+        <div className="modal-bg open">
+          <div className="modal">
+            <div className="mh">
+              <div>
+                <div className="mt">Override VA Week</div>
+                <div className="ms">Week of {fmtShort(vaSched.weeks[vaOverride.weekIndex]?.wS ?? '')} – {fmtShort(vaSched.weeks[vaOverride.weekIndex]?.wE ?? '')}</div>
+              </div>
+              <button className="mx" onClick={() => setVaOverride({ open: false, weekIndex: -1 })}>✕</button>
+            </div>
+            <div className="mb">
+              <div className="fl">
+                <label className="flb">Assign VA call</label>
+                <select value={poolOverrideResId} onChange={(e) => setPoolOverrideResId(e.target.value)}>
+                  <option value="">— select resident —</option>
+                  {residents.filter((r) => r.status !== 'away').map((r) => (
+                    <option key={r.id} value={r.id}>{r.name} (PGY-{r.pgy})</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="mf">
+              <button className="btn bgh" onClick={() => setVaOverride({ open: false, weekIndex: -1 })}>Cancel</button>
+              <button className="btn bg" disabled={!poolOverrideResId} onClick={() => {
+                const newRes = residents.find((r) => r.id === poolOverrideResId);
+                if (!newRes || !vaSched) return;
+                const oldWeek = vaSched.weeks[vaOverride.weekIndex];
+                const oldResId = oldWeek.res.id; const newResId = newRes.id;
+                const newCounts = { ...vaSched.counts }; const newDays2 = { ...vaSched.days }; const newHours2 = { ...vaSched.hours };
+                newCounts[oldResId] = Math.max(0, (newCounts[oldResId] ?? 0) - 1); newCounts[newResId] = (newCounts[newResId] ?? 0) + 1;
+                let d2 = parseDate(oldWeek.wS); const wEnd = parseDate(oldWeek.wE);
+                while (d2 <= wEnd) {
+                  const key2 = dk(d2); const dow2 = d2.getDay();
+                  const hrs2 = (dow2 === 0 || dow2 === 6 || HOLIDAYS.has(key2)) ? 24 : 12;
+                  newDays2[oldResId] = Math.max(0, (newDays2[oldResId] ?? 0) - 1); newDays2[newResId] = (newDays2[newResId] ?? 0) + 1;
+                  newHours2[oldResId] = Math.max(0, (newHours2[oldResId] ?? 0) - hrs2); newHours2[newResId] = (newHours2[newResId] ?? 0) + hrs2;
+                  d2 = addDays(d2, 1);
+                }
+                const newWeeks = [...vaSched.weeks];
+                newWeeks[vaOverride.weekIndex] = { ...oldWeek, res: newRes, override: true };
+                persistSchedule({ ...vaSched, weeks: newWeeks, counts: newCounts, days: newDays2, hours: newHours2 });
+                setVaOverride({ open: false, weekIndex: -1 });
+                showToast('VA override saved');
+              }}>Save Override</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CMC override modal */}
+      {cmcOverride.open && cmcDayData && (
+        <div className="modal-bg open">
+          <div className="modal">
+            <div className="mh">
+              <div>
+                <div className="mt">Override CMC Day</div>
+                <div className="ms">{fmtShort(cmcOverride.dateKey)}</div>
+              </div>
+              <button className="mx" onClick={() => setCmcOverride({ open: false, dateKey: '' })}>✕</button>
+            </div>
+            <div className="mb">
+              <div className="fl">
+                <label className="flb">Assign CMC call</label>
+                <select value={poolOverrideResId} onChange={(e) => setPoolOverrideResId(e.target.value)}>
+                  <option value="">— select resident —</option>
+                  {residents.filter((r) => r.status === 'active' && r.pgy >= 2 && r.pgy <= 4).map((r) => (
+                    <option key={r.id} value={r.id}>{r.name} (PGY-{r.pgy})</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="mf">
+              <button className="btn bgh" onClick={() => setCmcOverride({ open: false, dateKey: '' })}>Cancel</button>
+              <button className="btn bg" disabled={!poolOverrideResId} onClick={() => {
+                const newRes = residents.find((r) => r.id === poolOverrideResId);
+                if (!newRes || !cmcDayData) return;
+                const newDaysArr = cmcDayData.days.map((d) => d.dateKey === cmcOverride.dateKey ? { ...d, res: newRes, override: true } : d);
+                const finalCounts: Record<string, number> = {}; const finalHours: Record<string, number> = {};
+                newDaysArr.forEach((d) => { finalCounts[d.res.id] = (finalCounts[d.res.id] ?? 0) + 1; finalHours[d.res.id] = (finalHours[d.res.id] ?? 0) + d.shiftHrs; });
+                persistSchedule({ ...cmcDayData, days: newDaysArr, counts: finalCounts, hours: finalHours });
+                setCmcOverride({ open: false, dateKey: '' });
+                showToast('CMC override saved');
+              }}>Save Override</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
