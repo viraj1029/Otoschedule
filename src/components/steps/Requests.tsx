@@ -121,11 +121,12 @@ function VacationsView({ residents, allRequests, bStart }: {
                           <div style={{ flex: 1 }}>
                             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3 }}>{res.name}</div>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                              {dates.map((d) => (
-                                <span key={d} className="bdg bo" style={{ fontSize: 10 }}>
-                                  {fmtShort(d)} ({DOW[parseDate(d).getDay()]})
+                              {groupDates(dates).map(({ start, end }) => (
+                                <span key={start} className="bdg bo" style={{ fontSize: 10 }}>
+                                  {fmtRange(start, end)}
                                 </span>
                               ))}
+                              <span style={{ fontSize: 10, color: 'var(--muted)', alignSelf: 'center' }}>({dates.length}d)</span>
                             </div>
                           </div>
                           <span className="bdg bm" style={{ fontSize: 9, flexShrink: 0 }}>PGY-{res.pgy}</span>
@@ -141,6 +142,27 @@ function VacationsView({ residents, allRequests, bStart }: {
       })}
     </div>
   );
+}
+
+function groupDates(dates: string[]): { start: string; end: string }[] {
+  if (!dates.length) return [];
+  const sorted = [...dates].sort();
+  const groups: { start: string; end: string }[] = [];
+  let s = sorted[0], e = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = parseDate(sorted[i - 1]), cur = parseDate(sorted[i]);
+    if ((cur.getTime() - prev.getTime()) / 86400000 === 1) { e = sorted[i]; }
+    else { groups.push({ start: s, end: e }); s = sorted[i]; e = sorted[i]; }
+  }
+  groups.push({ start: s, end: e });
+  return groups;
+}
+
+function fmtRange(start: string, end: string): string {
+  const s = parseDate(start), e = parseDate(end);
+  const sm = `${s.getMonth() + 1}/${s.getDate()}`;
+  const em = `${e.getMonth() + 1}/${e.getDate()}`;
+  return start === end ? sm : `${sm} – ${em}`;
 }
 
 function initials(name: string): string {
@@ -519,9 +541,9 @@ export default function Requests({
                 const toggleResId = (isVac || isVacOff || isWkReq || isHolReq)
                   ? (reqOwner.get(`${key}:${type}`) ?? resIdForDate(key))
                   : resIdForDate(key);
-                // Resident weekday cells use 3-state cycle; all others use simple toggle
+                // Weekday cells use 3-state cycle when a specific resident is selected; weekends/holidays use simple toggle
                 const handleClick = !clickable ? undefined :
-                  (role === 'resident' && !isWk && !isHol)
+                  (!isWk && !isHol && !isAllView)
                     ? () => cycleWeekday(key, isVac, isVacOff)
                     : () => toggleDay(key, type, toggleResId);
                 return (
@@ -539,7 +561,7 @@ export default function Requests({
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12, fontSize: 11, color: 'var(--muted)' }}>
               {[
                 { cls: 'rcvac', label: 'Prefer off / unavailable' },
-                ...(role === 'resident' ? [{ cls: 'rcvacoff', label: 'Official vacation (5-day limit)' }] : []),
+                ...((role === 'resident' || (role === 'chief' && activeResId && !isAllView)) ? [{ cls: 'rcvacoff', label: 'Official vacation (5-day limit)' }] : []),
                 { cls: 'rcwk', label: 'Weekend off' },
                 { cls: 'rchol', label: 'Holiday (click to request off)' },
                 { cls: 'rcholreq', label: 'Holiday requested off' },
@@ -557,9 +579,9 @@ export default function Requests({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {/* Requests summary */}
           <div className="card">
-            <div className="ch"><div className="ct">My Requests</div></div>
+            <div className="ch"><div className="ct">{role === 'chief' && activeResId && !isAllView ? `${residents.find(r => r.id === activeResId)?.name.split(' ')[0] ?? 'Resident'}'s Requests` : 'My Requests'}</div></div>
             <div className="cb" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {role === 'resident' && (
+              {(role === 'resident' || (role === 'chief' && activeResId && !isAllView)) && (
                 <div>
                   <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Official vacation (5 days / quarter)</div>
                   {quarters.map((q) => {
