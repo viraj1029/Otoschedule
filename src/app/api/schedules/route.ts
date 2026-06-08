@@ -11,7 +11,7 @@ export async function GET() {
   }
 
   const { rows } = await sql`
-    SELECT id, block_id, name, start_date, end_date, published, generated_at
+    SELECT id, block_id, name, start_date, end_date, published, generated_at, schedule_type
     FROM schedules
     WHERE block_id = ${DEFAULT_BLOCK_ID}
     ORDER BY generated_at DESC

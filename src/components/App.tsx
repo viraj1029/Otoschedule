@@ -20,6 +20,7 @@ export interface AppState {
   schedule: AnyScheduleData | null;
   schedules: Schedule[];       // list of all schedule metadata
   activeScheduleId: string | null; // which schedule the chief is viewing
+  activeScheduleType: string | null;
   step: Step;
 }
 
@@ -47,6 +48,7 @@ export default function App() {
     schedule: null,
     schedules: [],
     activeScheduleId: null,
+    activeScheduleType: null,
     step: 1,
   });
 
@@ -153,6 +155,17 @@ export default function App() {
     setState((s) => ({ ...s, schedules }));
   }, []);
 
+  const deleteSchedule = useCallback(async (id: string) => {
+    await api(`/schedules/${id}`, 'DELETE');
+    const schedules = await api<Schedule[]>('/schedules').catch(() => [] as Schedule[]);
+    setState((s) => ({
+      ...s,
+      schedules,
+      schedule: s.activeScheduleId === id ? null : s.schedule,
+      activeScheduleId: s.activeScheduleId === id ? null : s.activeScheduleId,
+    }));
+  }, []);
+
   const isLoggedIn = Boolean(state.role);
 
   return (
@@ -229,7 +242,7 @@ export default function App() {
                   schedule={state.schedule}
                   onScheduleGenerated={async (sched, scheduleId) => {
                     setSchedule(sched);
-                    setState((s) => ({ ...s, activeScheduleId: scheduleId }));
+                    setState((s) => ({ ...s, activeScheduleId: scheduleId, activeScheduleType: (sched as { type?: string }).type ?? 'cuh_pmh' }));
                     await reloadScheduleList();
                     goStep(4);
                   }}
@@ -250,6 +263,7 @@ export default function App() {
                   onBlockChanged={setBlock}
                   onScheduleSelected={loadScheduleById}
                   onScheduleListChanged={reloadScheduleList}
+                  onScheduleDeleted={deleteSchedule}
                   onRegenerate={() => goStep(3)}
                   showToast={showToast}
                 />

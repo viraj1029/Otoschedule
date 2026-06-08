@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import type { CMCScheduleData, Resident } from '@/types';
 import { parseDate, fmtShort, dk, addDays, HOLIDAYS, HOLIDAY_NAMES } from '@/lib/scheduler';
 
@@ -33,10 +34,27 @@ function getBlockMonths(bStart: string, bEnd: string): { year: number; month: nu
 interface Props {
   schedule: CMCScheduleData;
   residents: Resident[];
+  role?: string;
+  onOverride?: (dateKey: string, newRes: Resident) => void;
 }
 
-export default function CMCScheduleView({ schedule, residents: _residents }: Props) {
+export default function CMCScheduleView({ schedule, residents, role, onOverride }: Props) {
   const { days, counts, hours, bStart, bEnd } = schedule;
+  const [overrideState, setOverrideState] = useState<{ open: boolean; dateKey: string; currentRes: Resident | null }>({ open: false, dateKey: '', currentRes: null });
+  const [newResId, setNewResId] = useState('');
+
+  function handleOverrideClick(dateKey: string, currentRes: Resident) {
+    setNewResId(currentRes.id);
+    setOverrideState({ open: true, dateKey, currentRes });
+  }
+
+  function saveOverride() {
+    if (!overrideState.dateKey || !newResId || !onOverride) return;
+    const res = residents.find(r => r.id === newResId);
+    if (!res) return;
+    onOverride(overrideState.dateKey, res);
+    setOverrideState({ open: false, dateKey: '', currentRes: null });
+  }
 
   // Build a lookup: dateKey → CMCDay
   const dayMap: Record<string, typeof days[0]> = {};
@@ -79,15 +97,23 @@ export default function CMCScheduleView({ schedule, residents: _residents }: Pro
               : isWknd ? 'rgba(0,0,0,0.04)'
               : undefined;
             return (
-              <div key={key} style={{
-                background: bgColor, minHeight: 72, borderRadius: 6,
-                border: isPW ? '1px solid rgba(234,179,8,0.4)' : '1px solid var(--border)',
-                padding: '6px 7px', display: 'flex', flexDirection: 'column', gap: 4,
-              }}>
+              <div
+                key={key}
+                style={{
+                  background: bgColor, minHeight: 72, borderRadius: 6,
+                  border: isPW ? '1px solid rgba(234,179,8,0.4)' : '1px solid var(--border)',
+                  padding: '6px 7px', display: 'flex', flexDirection: 'column', gap: 4,
+                  cursor: role === 'chief' && onOverride && entry ? 'pointer' : 'default',
+                }}
+                onClick={() => { if (role === 'chief' && onOverride && entry) handleOverrideClick(key, entry.res); }}
+              >
                 <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted2)', display: 'flex', justifyContent: 'space-between' }}>
                   <span>{day}</span>
-                  {isPW && <span style={{ fontSize: 9, fontWeight: 700, color: '#92400e', letterSpacing: 0.5 }}>PW</span>}
-                  {isHol && <span style={{ fontSize: 9, color: 'var(--orange)' }}>🎉</span>}
+                  <span style={{ display: 'flex', gap: 3 }}>
+                    {isPW && <span style={{ fontSize: 9, fontWeight: 700, color: '#92400e', letterSpacing: 0.5 }}>PW</span>}
+                    {isHol && <span style={{ fontSize: 9, color: 'var(--orange)' }}>🎉</span>}
+                    {entry?.override && <span style={{ fontSize: 9, color: 'var(--orange)', fontWeight: 700 }}>OV</span>}
+                  </span>
                 </div>
                 {entry ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -223,6 +249,39 @@ export default function CMCScheduleView({ schedule, residents: _residents }: Pro
 
       {/* Unused to avoid TS lint — remove if needed */}
       <span style={{ display: 'none' }}>{DOW_SHORT[0]}{fmtShort(bEnd)}</span>
+
+      {/* Override modal */}
+      {overrideState.open && (
+        <div className="modal-bg open">
+          <div className="modal">
+            <div className="mh">
+              <div>
+                <div className="mt">Override CMC Assignment</div>
+                <div className="ms">{overrideState.dateKey}</div>
+              </div>
+              <button className="mx" onClick={() => setOverrideState({ open: false, dateKey: '', currentRes: null })}>✕</button>
+            </div>
+            <div className="mb">
+              <div className="fl">
+                <label className="flb">Current: {overrideState.currentRes?.name ?? '—'}</label>
+              </div>
+              <div className="fl">
+                <label className="flb">Assign to</label>
+                <select value={newResId} onChange={(e) => setNewResId(e.target.value)}>
+                  <option value="">— select resident —</option>
+                  {residents.filter(r => r.status === 'active' && r.pgy >= 2 && r.pgy <= 4).map((r) => (
+                    <option key={r.id} value={r.id}>{r.name} (PGY-{r.pgy})</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="mf">
+              <button className="btn bgh" onClick={() => setOverrideState({ open: false, dateKey: '', currentRes: null })}>Cancel</button>
+              <button className="btn bg" onClick={saveOverride} disabled={!newResId}>Save Override</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
