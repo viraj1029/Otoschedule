@@ -731,12 +731,13 @@ export function generateCMCSchedule(
   });
 
   const cmcDays: CMCDay[] = [];
-  const counts:      Record<string, number> = {};
-  const hours:       Record<string, number> = {};
-  const traumaHours: Record<string, number> = {};
-  const wdCount:     Record<string, number> = {}; // weekday shifts only
-  const pwCount:     Record<string, number> = {}; // power weekends only
-  pool.forEach((r) => { counts[r.id] = 0; hours[r.id] = 0; traumaHours[r.id] = 0; wdCount[r.id] = 0; pwCount[r.id] = 0; });
+  const counts:         Record<string, number> = {};
+  const hours:          Record<string, number> = {};
+  const traumaHours:    Record<string, number> = {};
+  const wdCount:        Record<string, number> = {}; // weekday shifts only
+  const pwCount:        Record<string, number> = {}; // power weekends only
+  const lastWkdayDate:  Record<string, string>  = {}; // last weekday shift date per resident
+  pool.forEach((r) => { counts[r.id] = 0; hours[r.id] = 0; traumaHours[r.id] = 0; wdCount[r.id] = 0; pwCount[r.id] = 0; lastWkdayDate[r.id] = '1900-01-01'; });
 
   // Available weekdays (Mon–Thu) per resident
   const wdAvail: Record<string, number> = {};
@@ -778,7 +779,7 @@ export function generateCMCSchedule(
     traumaAvail[r.id] = Math.max(cnt, 1);
   });
 
-  // Weekday pick: sort by wdCount/wdAvail (trauma proportion primary on trauma days)
+  // Weekday pick: sort by wdCount/wdAvail; tiebreak by longest gap since last weekday shift
   function pickWeekday(candidates: Resident[], isTraumaDay: boolean): Resident {
     return [...candidates].sort((a, b) => {
       if (isTraumaDay) {
@@ -786,7 +787,11 @@ export function generateCMCSchedule(
         const bProp = traumaHours[b.id] / traumaAvail[b.id];
         if (Math.abs(aProp - bProp) > 1e-9) return aProp - bProp;
       }
-      return wdCount[a.id] / wdAvail[a.id] - wdCount[b.id] / wdAvail[b.id];
+      const ratioA = wdCount[a.id] / wdAvail[a.id];
+      const ratioB = wdCount[b.id] / wdAvail[b.id];
+      if (Math.abs(ratioA - ratioB) > 1e-9) return ratioA - ratioB;
+      // Tiebreak: prefer whoever has gone longest since their last weekday shift
+      return lastWkdayDate[a.id].localeCompare(lastWkdayDate[b.id]);
     })[0];
   }
 
@@ -851,21 +856,8 @@ export function generateCMCSchedule(
     if (dow >= 1 && dow <= 4) {
       const dateKey = dk(d);
       const isTraumaDay = TRAUMA_WEEKS.has(dateKey);
-      const excluded = new Set<string>();
-
-      // Hard: no consecutive weekdays
-      if (lastWkdayId) excluded.add(lastWkdayId);
-      // Soft: Thu → exclude upcoming power weekend person
-      if (dow === 4) { const pw = pwByFri.get(dk(addDays(d, 1))); if (pw) excluded.add(pw.id); }
-      // Soft: Mon → exclude person who just did the power weekend
-      if (dow === 1) { const pw = pwByFri.get(dk(addDays(d, -3))); if (pw) excluded.add(pw.id); }
-
-      let avail = pool.filter((r) => !offMap[r.id].has(dateKey) && !excluded.has(r.id));
-      if (!avail.length) {
-        // Relax soft PW-adjacency but keep hard no-consecutive
-        const noConsec = lastWkdayId ? new Set([lastWkdayId]) : new Set<string>();
-        avail = pool.filter((r) => !offMap[r.id].has(dateKey) && !noConsec.has(r.id));
-      }
+      // Hard: no consecutive weekdays — exclude whoever worked yesterday
+      let avail = pool.filter((r) => !offMap[r.id].has(dateKey) && r.id !== lastWkdayId);
       if (!avail.length) avail = pool.filter((r) => !offMap[r.id].has(dateKey));
       if (!avail.length) avail = [...pool];
 
@@ -874,6 +866,7 @@ export function generateCMCSchedule(
       counts[pick.id]++;
       hours[pick.id] += 12;
       wdCount[pick.id]++;
+      lastWkdayDate[pick.id] = dateKey;
       if (isTraumaDay) traumaHours[pick.id] += 12;
       lastWkdayId = pick.id;
     } else {
@@ -946,10 +939,11 @@ export function generateVASchedule(
   while (weekMon.getDay() !== 1) weekMon = addDays(weekMon, -1);
 
   const vaWeeks: VAWeek[] = [];
-  const counts: Record<string, number> = {};
-  const days:   Record<string, number> = {};
-  const hours:  Record<string, number> = {};
-  pool.forEach((r) => { counts[r.id] = 0; days[r.id] = 0; hours[r.id] = 0; });
+  const counts:       Record<string, number> = {};
+  const days:         Record<string, number> = {};
+  const hours:        Record<string, number> = {};
+  const lastWeekDate: Record<string, string>  = {}; // last week start date per resident
+  pool.forEach((r) => { counts[r.id] = 0; days[r.id] = 0; hours[r.id] = 0; lastWeekDate[r.id] = '1900-01-01'; });
 
   let lastId: string | null = null;
 
@@ -960,12 +954,16 @@ export function generateVASchedule(
     if (wSDate > bEnd) break;
 
     // Pick: sort by local proportion (days worked / days available so far from bStart to now)
+    // Tiebreak by longest gap since last week assigned, then lastId anti-repeat
     const sorted = [...pool].sort((a, b) => {
       const aDaysAvail = wSDate > bStart ? availableDaysInRange(a, bStart, addDays(wSDate, -1)) : 0;
       const bDaysAvail = wSDate > bStart ? availableDaysInRange(b, bStart, addDays(wSDate, -1)) : 0;
       const aProp = aDaysAvail > 0 ? days[a.id] / aDaysAvail : 0;
       const bProp = bDaysAvail > 0 ? days[b.id] / bDaysAvail : 0;
       if (Math.abs(aProp - bProp) > 1e-9) return aProp - bProp;
+      // Tiebreak: prefer whoever went longest without a week (earlier lastWeekDate = higher priority)
+      const cmp = lastWeekDate[a.id].localeCompare(lastWeekDate[b.id]);
+      if (cmp !== 0) return cmp;
       if (a.id !== lastId && b.id === lastId) return -1;
       if (b.id !== lastId && a.id === lastId) return 1;
       return 0;
@@ -977,6 +975,7 @@ export function generateVASchedule(
 
     vaWeeks.push({ wS: dk(wSDate), wE: dk(wEDate), res: pick, override: false });
     counts[pick.id]++;
+    lastWeekDate[pick.id] = dk(wSDate);
 
     // Tally days and hours
     let d2 = new Date(wSDate);
