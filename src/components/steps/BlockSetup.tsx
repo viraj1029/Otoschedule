@@ -86,11 +86,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
   }
 
   const sorted = [...residents].sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
-  function isResearch(r: Resident) {
-    return r.rotations?.some((rot) => rot.hospital === 'Research') ?? r.status === 'research';
-  }
-  const res = residents.filter((r) => r.pgy >= 4 && isResearch(r));
-  const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active' && !isResearch(r));
+  const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active');
   const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
 
   function hasRotationAt(r: Resident, hosp: Hospital) {
@@ -183,7 +179,6 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
                 </tr>
               ) : sorted.map((r) => {
                 const statusBadge =
-                  isResearch(r) ? <span className="bdg bpk">Research</span> :
                   r.status === 'active' ? <span className="bdg bm">Active</span> :
                   <span className="bdg bo">Away</span>;
                 return (
@@ -197,7 +192,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
                     <td><span className={`bdg ${r.pgy >= 4 ? 'bg2' : 'bb'}`}>PGY-{r.pgy}</span></td>
                     <td>
                       <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-                        {isResearch(r) ? 'Research (backup)' : r.pgy >= 4 ? 'Senior Call' : 'Junior Call'}
+                        {r.pgy >= 4 ? 'Senior Call' : 'Junior Call'}
                       </span>
                     </td>
                     <td>{statusBadge}</td>
@@ -254,8 +249,8 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
       {/* Pool summary */}
       <div className="srow" style={{ gridTemplateColumns: 'repeat(6,1fr)', marginBottom: 20 }}>
         {[
-          { l: 'Seniors Active', v: srs.length, c: 'var(--gold)' },
-          { l: 'Research Sr', v: res.length, c: 'var(--pink)' },
+          { l: 'Seniors', v: srs.length, c: 'var(--gold)' },
+          { l: 'Research Rot', v: residents.filter((r) => r.rotations?.some((rot) => rot.hospital === 'Research')).length, c: 'var(--pink)' },
           { l: 'Juniors PGY-2/3', v: jrs.length, c: 'var(--blue)' },
           { l: 'CUH', v: residents.filter((r) => r.status !== 'away' && hasRotationAt(r, 'CUH')).length, c: 'var(--green)' },
           { l: 'PMH', v: residents.filter((r) => r.status !== 'away' && hasRotationAt(r, 'PMH')).length, c: 'var(--purple)' },
