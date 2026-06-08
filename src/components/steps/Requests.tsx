@@ -27,12 +27,118 @@ function getResRequests(allRequests: Request[], resIds: string[]) {
   const set = new Set(resIds);
   const mine = allRequests.filter((r) => set.has(r.resident_id));
   const vacDays = new Set(mine.filter((r) => r.type === 'vacation').map((r) => r.date));
+  const vacOfficial = new Set(mine.filter((r) => r.type === 'vacation_official').map((r) => r.date));
   const weekends = new Set(mine.filter((r) => r.type === 'weekend').map((r) => r.date));
   const holidayReqs = new Set(mine.filter((r) => r.type === 'holiday').map((r) => r.date));
-  // date+type → actual resident_id that owns the request (for correct delete routing)
   const reqOwner = new Map<string, string>();
   mine.forEach((r) => reqOwner.set(`${r.date}:${r.type}`, r.resident_id));
-  return { vacDays, weekends, holidayReqs, reqOwner };
+  return { vacDays, vacOfficial, weekends, holidayReqs, reqOwner };
+}
+
+function VacationsView({ residents, allRequests, bStart }: {
+  residents: Resident[];
+  allRequests: Request[];
+  bStart: Date;
+}) {
+  const acYear = bStart.getMonth() >= 6 ? bStart.getFullYear() : bStart.getFullYear() - 1;
+  const quarters = [
+    { label: `Jul – Sep ${acYear}`, start: `${acYear}-07-01`, end: `${acYear}-09-30` },
+    { label: `Oct – Dec ${acYear}`, start: `${acYear}-10-01`, end: `${acYear}-12-31` },
+    { label: `Jan – Mar ${acYear + 1}`, start: `${acYear + 1}-01-01`, end: `${acYear + 1}-03-31` },
+    { label: `Apr – Jun ${acYear + 1}`, start: `${acYear + 1}-04-01`, end: `${acYear + 1}-06-30` },
+  ];
+
+  // Deduplicate by person_id, collect all rotation records per person
+  const personMap = new Map<string, Resident[]>();
+  for (const r of residents) {
+    const key = r.person_id ?? r.id;
+    if (!personMap.has(key)) personMap.set(key, []);
+    personMap.get(key)!.push(r);
+  }
+
+  // For a date, find the hospital from the resident's rotation records
+  function hospitalForDate(records: Resident[], dateStr: string): 'CUH' | 'PMH' {
+    const match = records.find(
+      (r) => dateStr >= (r.rotation_start ?? '0000-01-01') && dateStr <= (r.rotation_end ?? '9999-12-31'),
+    );
+    return match?.hospital ?? records[0].hospital;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {quarters.map((q) => {
+        // For each person, collect official vacation dates in this quarter
+        const cuh: { res: Resident; dates: string[] }[] = [];
+        const pmh: { res: Resident; dates: string[] }[] = [];
+
+        for (const [, records] of personMap) {
+          const allResIds = new Set(records.map((r) => r.id));
+          const officialDates = allRequests
+            .filter((r) => allResIds.has(r.resident_id) && r.type === 'vacation_official' && r.date >= q.start && r.date <= q.end)
+            .map((r) => r.date)
+            .sort();
+          if (officialDates.length === 0) continue;
+
+          const rep = records[0];
+          // Group dates by hospital
+          const cuhDates = officialDates.filter((d) => hospitalForDate(records, d) === 'CUH');
+          const pmhDates = officialDates.filter((d) => hospitalForDate(records, d) === 'PMH');
+          if (cuhDates.length) cuh.push({ res: rep, dates: cuhDates });
+          if (pmhDates.length) pmh.push({ res: rep, dates: pmhDates });
+        }
+
+        cuh.sort((a, b) => a.res.name.localeCompare(b.res.name));
+        pmh.sort((a, b) => a.res.name.localeCompare(b.res.name));
+
+        const hasAny = cuh.length > 0 || pmh.length > 0;
+        return (
+          <div key={q.label} className="card">
+            <div className="ch"><div className="ct">{q.label}</div></div>
+            <div className="cb">
+              {!hasAny && (
+                <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>No official vacation days scheduled</div>
+              )}
+              {(['CUH', 'PMH'] as const).map((hosp) => {
+                const list = hosp === 'CUH' ? cuh : pmh;
+                if (list.length === 0) return null;
+                return (
+                  <div key={hosp} style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                      {hosp}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {list.map(({ res, dates }) => (
+                        <div key={res.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                          <div style={{
+                            width: 24, height: 24, borderRadius: '50%', background: res.color,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 9, fontWeight: 700, color: '#000', flexShrink: 0, marginTop: 1,
+                          }}>
+                            {res.name.trim().split(/\s+/).map((p: string) => p[0]).join('').slice(0, 2).toUpperCase()}
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3 }}>{res.name}</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                              {dates.map((d) => (
+                                <span key={d} className="bdg bo" style={{ fontSize: 10 }}>
+                                  {fmtShort(d)} ({DOW[parseDate(d).getDay()]})
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                          <span className="bdg bm" style={{ fontSize: 9, flexShrink: 0 }}>PGY-{res.pgy}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function initials(name: string): string {
@@ -69,6 +175,7 @@ export default function Requests({
   const [resFilter, setResFilter] = useState<'all' | 'senior' | 'junior'>('all');
 
   const [resTab, setResTab] = useState<'requests' | 'schedule'>('requests');
+  const [chiefTab, setChiefTab] = useState<'requests' | 'vacations'>('requests');
 
   // If resident and schedule is published, show schedule view instead
   const isResidentWithPublishedSchedule =
@@ -86,11 +193,10 @@ export default function Requests({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [block?.start_date]);
 
-  async function toggleDay(date: string, type: 'vacation' | 'weekend' | 'holiday', resId: string) {
+  async function toggleDay(date: string, type: Request['type'], resId: string) {
     try {
-      const body: Record<string, string> = { date, type, residentId: resId };
-      const result = await api<{ action: string; date: string; type: string }>(
-        '/requests/toggle', 'POST', body,
+      const result = await api<{ action: string }>(
+        '/requests/toggle', 'POST', { date, type, residentId: resId },
       );
       if (result.action === 'removed') {
         onRequestsChanged(allRequests.filter(
@@ -104,6 +210,25 @@ export default function Requests({
       }
     } catch (e) {
       showToast((e as Error).message, true);
+    }
+  }
+
+  // 3-state weekday cycle for resident view: empty → prefer-off → official vacation → empty
+  async function cycleWeekday(key: string, isOff: boolean, isOfficial: boolean, officialUsed: number) {
+    const resId = resIdForDate(key);
+    if (isOfficial) {
+      const ownerResId = reqOwner.get(`${key}:vacation_official`) ?? resId;
+      await toggleDay(key, 'vacation_official', ownerResId);
+    } else if (isOff) {
+      if (officialUsed < 5) {
+        const ownerResId = reqOwner.get(`${key}:vacation`) ?? resId;
+        await toggleDay(key, 'vacation', ownerResId);
+        await toggleDay(key, 'vacation_official', resId);
+      } else {
+        showToast('5-day official vacation limit reached — click again to clear', true);
+      }
+    } else {
+      await toggleDay(key, 'vacation', resId);
     }
   }
 
@@ -139,12 +264,17 @@ export default function Requests({
     return matching?.id ?? personResIds[0] ?? activeResId;
   }
 
-  const { vacDays, weekends, holidayReqs, reqOwner } = personResIds.length
+  const { vacDays, vacOfficial, weekends, holidayReqs, reqOwner } = personResIds.length
     ? getResRequests(allRequests, personResIds)
-    : { vacDays: new Set<string>(), weekends: new Set<string>(), holidayReqs: new Set<string>(), reqOwner: new Map<string, string>() };
+    : { vacDays: new Set<string>(), vacOfficial: new Set<string>(), weekends: new Set<string>(), holidayReqs: new Set<string>(), reqOwner: new Map<string, string>() };
 
   const vacUsed = [...vacDays].filter((d) => {
     const dd = parseDate(d); return dd >= bStart && dd <= bEnd && !HOLIDAYS.has(d);
+  }).length;
+
+  const officialVacUsed = [...vacOfficial].filter((d) => {
+    const dd = parseDate(d); const dow = dd.getDay();
+    return dd >= bStart && dd <= bEnd && !HOLIDAYS.has(d) && dow !== 0 && dow !== 6;
   }).length;
 
   // Build all-residents request map for chief "all" view
@@ -164,7 +294,8 @@ export default function Requests({
   const dim = new Date(calYear, calMonth + 1, 0).getDate();
   const today = new Date();
 
-  const allDaysList: { d: string; t: 'vac' | 'wk' | 'hol'; resId: string }[] = [
+  const allDaysList: { d: string; t: 'vac' | 'voff' | 'wk' | 'hol'; resId: string }[] = [
+    ...[...vacOfficial].map((d) => ({ d, t: 'voff' as const, resId: reqOwner.get(`${d}:vacation_official`) ?? activeResId })),
     ...[...vacDays].map((d) => ({ d, t: 'vac' as const, resId: reqOwner.get(`${d}:vacation`) ?? activeResId })),
     ...[...weekends].map((d) => ({ d, t: 'wk' as const, resId: reqOwner.get(`${d}:weekend`) ?? activeResId })),
     ...[...holidayReqs].map((d) => ({ d, t: 'hol' as const, resId: reqOwner.get(`${d}:holiday`) ?? activeResId })),
@@ -215,8 +346,20 @@ export default function Requests({
         These block those days from the generated schedule. Requests are saved immediately to the server.
       </div>
 
-      {/* Chief resident selector */}
+      {/* Chief sub-tab switcher */}
       {role === 'chief' && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+          <button className={`btn bsm${chiefTab === 'requests' ? ' bg' : ' bgh'}`} onClick={() => setChiefTab('requests')}>
+            ✏️ Requests
+          </button>
+          <button className={`btn bsm${chiefTab === 'vacations' ? ' bg' : ' bgh'}`} onClick={() => setChiefTab('vacations')}>
+            🏖️ Vacations
+          </button>
+        </div>
+      )}
+
+      {/* Chief resident selector */}
+      {role === 'chief' && chiefTab === 'requests' && (
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 18, flexWrap: 'wrap' }}>
           <div className="fl" style={{ flex: '0 0 260px' }}>
             <label className="flb">Viewing requests for</label>
@@ -265,6 +408,12 @@ export default function Requests({
         </div>
       )}
 
+      {/* Chief Vacations tab */}
+      {role === 'chief' && chiefTab === 'vacations' && (
+        <VacationsView residents={residents} allRequests={allRequests} bStart={bStart} />
+      )}
+
+      {(role !== 'chief' || chiefTab === 'requests') && (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 18, alignItems: 'start' }}>
         {/* Calendar */}
         <div className="card">
@@ -325,28 +474,33 @@ export default function Requests({
                 }
 
                 const isVac = vacDays.has(key);
+                const isVacOff = vacOfficial.has(key);
                 const isWkReq = weekends.has(key);
                 const isHolReq = holidayReqs.has(key);
                 let cls = 'rc';
                 if (!inBlock) cls += ' rcoff';
                 else if (isHol && isHolReq) cls += ' rcholreq';
                 else if (isHol) cls += ' rchol';
+                else if (isVacOff) cls += ' rcvacoff';
                 else if (isVac) cls += ' rcvac';
                 else if (isWkReq) cls += ' rcwk';
                 else if (isWk) cls += ' rcwe';
                 const clickable = inBlock && activeResId;
                 const type = isHol ? 'holiday' : isWk ? 'weekend' : 'vacation';
-                // For toggling: use the owner of the existing request (delete) or the
-                // rotation-window-appropriate record (add).
-                const toggleResId = (isVac || isWkReq || isHolReq)
+                const toggleResId = (isVac || isVacOff || isWkReq || isHolReq)
                   ? (reqOwner.get(`${key}:${type}`) ?? resIdForDate(key))
                   : resIdForDate(key);
+                // Resident weekday cells use 3-state cycle; all others use simple toggle
+                const handleClick = !clickable ? undefined :
+                  (role === 'resident' && !isWk && !isHol)
+                    ? () => cycleWeekday(key, isVac, isVacOff, officialVacUsed)
+                    : () => toggleDay(key, type, toggleResId);
                 return (
                   <div
                     key={key}
                     className={cls}
                     style={isToday ? { fontWeight: 700, color: 'var(--text)' } : {}}
-                    onClick={clickable ? () => toggleDay(key, type, toggleResId) : undefined}
+                    onClick={handleClick}
                   >
                     {day}
                   </div>
@@ -355,7 +509,8 @@ export default function Requests({
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12, fontSize: 11, color: 'var(--muted)' }}>
               {[
-                { cls: 'rcvac', label: 'Day off / unavailable' },
+                { cls: 'rcvac', label: 'Prefer off / unavailable' },
+                ...(role === 'resident' ? [{ cls: 'rcvacoff', label: 'Official vacation (5-day limit)' }] : []),
                 { cls: 'rcwk', label: 'Weekend off' },
                 { cls: 'rchol', label: 'Holiday (click to request off)' },
                 { cls: 'rcholreq', label: 'Holiday requested off' },
@@ -375,8 +530,16 @@ export default function Requests({
           <div className="card">
             <div className="ch"><div className="ct">My Requests</div></div>
             <div className="cb" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {role === 'resident' && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>Official vacation</span>
+                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: officialVacUsed >= 5 ? 'var(--red)' : 'var(--orange)' }}>
+                    {officialVacUsed} / 5
+                  </span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 12, color: 'var(--muted)' }}>Days off requested</span>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>Prefer off / unavailable</span>
                 <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12 }}>{vacUsed}</span>
               </div>
               <div>
@@ -391,8 +554,8 @@ export default function Requests({
                   <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>No days selected</div>
                 ) : allDaysList.map(({ d, t, resId }) => (
                   <div key={d + t} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span className={`bdg ${t === 'vac' ? 'bb' : t === 'hol' ? 'bo' : 'bp'}`} style={{ fontSize: 9 }}>
-                      {t === 'vac' ? 'VAC' : t === 'hol' ? 'HOL' : 'WKD'}
+                    <span className={`bdg ${t === 'voff' ? 'bo' : t === 'vac' ? 'bb' : t === 'hol' ? 'bo' : 'bp'}`} style={{ fontSize: 9 }}>
+                      {t === 'voff' ? 'OFFCL' : t === 'vac' ? 'VAC' : t === 'hol' ? 'HOL' : 'WKD'}
                     </span>
                     <span style={{ fontSize: 11, fontFamily: "'JetBrains Mono',monospace", flex: 1 }}>
                       {fmtShort(d)} ({DOW[parseDate(d).getDay()]})
@@ -401,7 +564,7 @@ export default function Requests({
                       <button
                         className="bico"
                         style={{ width: 20, height: 20, fontSize: 10 }}
-                        onClick={() => toggleDay(d, t === 'vac' ? 'vacation' : t === 'hol' ? 'holiday' : 'weekend', resId)}
+                        onClick={() => toggleDay(d, t === 'voff' ? 'vacation_official' : t === 'vac' ? 'vacation' : t === 'hol' ? 'holiday' : 'weekend', resId)}
                       >
                         ✕
                       </button>
@@ -442,8 +605,9 @@ export default function Requests({
           )}
         </div>
       </div>
+      )}
 
-      {role === 'chief' && onBack && onNext && (
+      {role === 'chief' && onBack && onNext && chiefTab === 'requests' && (
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 22 }}>
           <button className="btn bgh" onClick={onBack}>← Back</button>
           <button className="btn bg" onClick={onNext}>Continue to Generate →</button>
