@@ -802,11 +802,12 @@ export function generateCMCSchedule(
   }
 
   // ── Step 2: Assign Mon–Thu weekdays ──────────────────────────────────────────
+  // Hard constraint: no resident on consecutive weekdays.
   let rotIdx = 0;
+  let lastWkdayId: string | null = null; // person who worked the previous Mon-Thu day
 
-  function pickRoundRobin(available: Resident[], isTraumaDay: boolean): Resident {
+  function pickWeekday(available: Resident[], isTraumaDay: boolean): Resident {
     if (isTraumaDay) {
-      // On trauma days always pick whoever has the lowest trauma proportion
       return traumaSort(available, true)[0];
     }
     for (let i = 0; i < pool.length; i++) {
@@ -829,26 +830,42 @@ export function generateCMCSchedule(
       const isTraumaDay = TRAUMA_WEEKS.has(dateKey);
       const excluded = new Set<string>();
 
+      // Hard: no consecutive weekdays
+      if (lastWkdayId) excluded.add(lastWkdayId);
+
+      // Soft: Thu person shouldn't also do upcoming Fri-Sun power weekend
       if (dow === 4) {
         const upFriKey = dk(addDays(d, 1));
         const pw = pwByFri.get(upFriKey);
         if (pw) excluded.add(pw.id);
       }
+      // Soft: Mon person shouldn't be the one who just did the Fri-Sun power weekend
       if (dow === 1) {
         const prevFriKey = dk(addDays(d, -3));
         const pw = pwByFri.get(prevFriKey);
         if (pw) excluded.add(pw.id);
       }
 
+      // Relax soft constraints if they leave nobody available, but keep the hard no-consecutive rule
       let avail = pool.filter((r) => !offMap[r.id].has(dateKey) && !excluded.has(r.id));
-      if (!avail.length) avail = pool.filter((r) => !offMap[r.id].has(dateKey));
-      if (!avail.length) avail = [...pool];
+      if (!avail.length) {
+        // Relax PW adjacency but keep no-consecutive
+        const noConsec = new Set([lastWkdayId].filter(Boolean) as string[]);
+        avail = pool.filter((r) => !offMap[r.id].has(dateKey) && !noConsec.has(r.id));
+      }
+      if (!avail.length) avail = pool.filter((r) => !offMap[r.id].has(dateKey)); // everyone off except vacation
+      if (!avail.length) avail = [...pool]; // absolute fallback
 
-      const pick = pickRoundRobin(avail, isTraumaDay);
+      const pick = pickWeekday(avail, isTraumaDay);
       cmcDays.push({ dateKey, res: pick, shiftHrs: 12, isPowerWeekend: false, override: false });
       counts[pick.id]++;
       hours[pick.id] += 12;
       if (isTraumaDay) traumaHours[pick.id] += 12;
+      lastWkdayId = pick.id;
+    } else {
+      // Friday starts a power weekend — reset lastWkdayId so Monday after the
+      // weekend doesn't carry the Thursday constraint across the gap
+      if (dow === 5) lastWkdayId = null;
     }
     d = addDays(d, 1);
   }
