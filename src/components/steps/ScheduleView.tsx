@@ -225,7 +225,7 @@ export default function ScheduleView({
           <div
             key={key + pfx}
             className={`ccell${isWk ? ' cwk' : ''}${isHol ? ' chol' : ''}${isSel ? ' csel' : ''}`}
-            style={isTrauma && !isWk ? { background: 'rgba(239,68,68,0.08)' } : isTrauma ? { background: 'rgba(239,68,68,0.12)' } : undefined}
+            style={isTrauma && !isWk ? { background: 'rgba(239,68,68,0.20)' } : isTrauma ? { background: 'rgba(239,68,68,0.28)' } : undefined}
             onClick={handleClick}
           >
             <div className={`cdate${isToday ? ' tod' : ''}`}>

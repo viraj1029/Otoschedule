@@ -30,7 +30,7 @@ export interface Request {
   resident_id: string;
   block_id: string;
   date: string; // YYYY-MM-DD
-  type: 'vacation' | 'weekend' | 'holiday';
+  type: 'vacation' | 'vacation_official' | 'weekend' | 'holiday';
   created_at?: string;
 }
 
@@ -95,6 +95,7 @@ export interface ScheduleData {
   jrTHwknd?: Record<string, number>;
   jrTHwkday?: Record<string, number>;
   jrTD?: Record<string, number>;
+  jrAvailDays?: Record<string, number>;
 }
 
 // ─── Session / auth ───────────────────────────────────────────────────────────

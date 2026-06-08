@@ -110,6 +110,7 @@ export function generateSchedule(
   bEndStr: string,
   blockPublished: boolean,
   mode: ScheduleMode = 'merged',
+  carryIn: Record<string, { hours: number; availDays: number }> = {},
 ): ScheduleData {
   const srs = residents
     .filter((r) => r.pgy >= 4 && r.status === 'active')
@@ -132,7 +133,7 @@ export function generateSchedule(
   const offMap: Record<string, Set<string>> = {};
   const rotDays: Record<string, number> = {}; // effective rotation days within block
   residents.forEach((r) => {
-    const vac = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'vacation').map((req) => req.date));
+    const vac = new Set(requests.filter((req) => req.resident_id === r.id && (req.type === 'vacation' || req.type === 'vacation_official')).map((req) => req.date));
     const wk  = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'weekend').map((req) => req.date));
     const hol = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'holiday').map((req) => req.date));
     offMap[r.id] = new Set([...vac, ...wk, ...hol]);
@@ -426,6 +427,11 @@ export function generateSchedule(
   const jrTHwkday: Record<string, number> = {}; // trauma weekday hours
   const jrTD: Record<string, number> = {};    // trauma call days
 
+  // Hoisted so jrAvailDays can be included in the return value.
+  const rotWkndDays: Record<string, number> = {};
+  const rotWkdayDays: Record<string, number> = {};
+  const rotAvailDays: Record<string, number> = {};
+
   if (needJr) {
   jrs.forEach((r) => { jrC[r.id] = 0; jrH[r.id] = 0; jrHwknd[r.id] = 0; jrHwkday[r.id] = 0; jrDwknd[r.id] = 0; jrDwkday[r.id] = 0; jrTH[r.id] = 0; jrTHwknd[r.id] = 0; jrTHwkday[r.id] = 0; jrTD[r.id] = 0; });
   const processed = new Set<string>();
@@ -433,9 +439,6 @@ export function generateSchedule(
   // Compute available (non-off) rotation day counts for proportional equity sorting.
   // Using available days (not raw rotation window) ensures residents with more vacation
   // don't get assigned at higher density on their working days.
-  const rotWkndDays: Record<string, number> = {};
-  const rotWkdayDays: Record<string, number> = {};
-  const rotAvailDays: Record<string, number> = {};
   jrs.forEach((r) => {
     let wknd = 0, wkday = 0;
     const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
@@ -457,13 +460,25 @@ export function generateSchedule(
   });
 
   // Pick junior: enforce rest gap (2 days preferred, 1 day minimum), balance weekend/weekday separately
+  // Precompute each resident's effective rotation window for fast eligibility checks.
+  const rotEffStart: Record<string, Date> = {};
+  const rotEffEnd: Record<string, Date> = {};
+  jrs.forEach((r) => {
+    const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
+    const rE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
+    rotEffStart[r.id] = rS < bStart ? bStart : rS;
+    rotEffEnd[r.id]   = rE > bEnd   ? bEnd   : rE;
+  });
+
   function pickJr(key: string, ex: string | null = null, isWeekendSlot = false, skipGap = false, isTraumaDay = false): Resident {
     const d = parseDate(key);
 
     function sortFn(a: Resident, b: Resident) {
-      // Primary: total hours per available day — directly matches the equity chart metric.
-      const ar = jrH[a.id] / rotAvailDays[a.id];
-      const br = jrH[b.id] / rotAvailDays[b.id];
+      // Primary: cumulative hours-per-available-day across all blocks in the academic year.
+      const aC = carryIn[a.person_id ?? ''] ?? { hours: 0, availDays: 0 };
+      const bC = carryIn[b.person_id ?? ''] ?? { hours: 0, availDays: 0 };
+      const ar = (aC.hours + jrH[a.id]) / (aC.availDays + rotAvailDays[a.id]);
+      const br = (bC.hours + jrH[b.id]) / (bC.availDays + rotAvailDays[b.id]);
       if (Math.abs(ar - br) > 0.001) return ar - br;
       // Secondary for weekend slots: prefer fewer weekend hours per available weekend day.
       if (isWeekendSlot) {
@@ -472,7 +487,12 @@ export function generateSchedule(
         if (Math.abs(awr - bwr) > 0.001) return awr - bwr;
       }
       if (isTraumaDay) return jrTH[a.id] - jrTH[b.id];
-      return jrC[a.id] - jrC[b.id];
+      // Final tiebreaker: date-seeded hash so no single resident dominates all ties.
+      let h = 2166136261;
+      for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619) >>> 0;
+      const hA = (Math.imul(h ^ a.id.charCodeAt(0), 16777619) >>> 0);
+      const hB = (Math.imul(h ^ b.id.charCodeAt(0), 16777619) >>> 0);
+      return hA - hB;
     }
 
     function daysSince(r: Resident): number {
@@ -485,19 +505,36 @@ export function generateSchedule(
       return Math.round((d.getTime() - parseDate(lastWeekendKey[r.id]).getTime()) / 86400000);
     }
 
-    // Progressive gap relaxation: prefer ≥3 days (q4+), fallback to ≥2 (q3), ≥1, then any
-    const minGaps = skipGap ? [0] : [3, 2, 1, 0];
+    // Progressive gap relaxation: prefer ≥3 days, fallback to ≥2, then ≥1.
+    // Never relaxes to 0 — back-to-back shifts are handled only in the fallback below.
+    const minGaps = skipGap ? [1] : [3, 2, 1];
     for (const minGap of minGaps) {
-      const eligible = jrs.filter((r) => r.id !== ex && !offMap[r.id].has(key) && daysSince(r) >= minGap);
+      const eligible = jrs.filter((r) =>
+        r.id !== ex &&
+        !offMap[r.id].has(key) &&
+        d >= rotEffStart[r.id] && d <= rotEffEnd[r.id] &&
+        daysSince(r) >= minGap,
+      );
       if (!eligible.length) continue;
       if (isWeekendSlot) {
-        // Prefer residents who haven't worked a weekend in the last 7 days (no consecutive weekends)
-        const noConsec = eligible.filter((r) => daysSinceLastWeekend(r) >= 7);
-        if (noConsec.length) return noConsec.sort(sortFn)[0];
+        // Progressive weekend spacing: strongly prefer skipping a full weekend (≥14 days),
+        // fall back to no-consecutive-weekend (≥8 days), then any eligible.
+        for (const minWknd of [14, 8]) {
+          const noConsec = eligible.filter((r) => daysSinceLastWeekend(r) >= minWknd);
+          if (noConsec.length) return noConsec.sort(sortFn)[0];
+        }
       }
       return eligible.sort(sortFn)[0];
     }
-    return jrs.sort(sortFn)[0]; // absolute fallback
+    // Fallback: gap relaxed but still prefer ≥1 day (no back-to-back) if at all possible.
+    const inWindow = jrs.filter((r) =>
+      r.id !== ex &&
+      !offMap[r.id].has(key) &&
+      d >= rotEffStart[r.id] && d <= rotEffEnd[r.id],
+    );
+    const withGap = inWindow.filter((r) => daysSince(r) >= 1);
+    const pool = withGap.length ? withGap : inWindow.length ? inWindow : jrs;
+    return pool.sort(sortFn)[0];
   }
 
   function addJD(key: string, res: Resident, type: JuniorDayType, paired = false, cuhR: Resident | null = null) {
@@ -606,5 +643,6 @@ export function generateSchedule(
     jrTHwknd,
     jrTHwkday,
     jrTD,
+    jrAvailDays: rotAvailDays,
   };
 }

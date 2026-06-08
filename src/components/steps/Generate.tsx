@@ -61,6 +61,8 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
   async function generateAndSave() {
     setGenerating(true);
     try {
+      // Fetch cross-block carry-in hours (archives prior block if needed, returns cumulative data)
+      const carryIn = await api<Record<string, { hours: number; availDays: number }>>('/jr-carry');
       const scheduleData = generateSchedule(
         residents,
         allRequests,
@@ -69,6 +71,7 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
         block?.end_date ?? '2026-09-30',
         block?.published ?? false,
         mode,
+        carryIn,
       );
       await api('/schedule/generate', 'POST', { scheduleData });
       onScheduleGenerated(scheduleData);
