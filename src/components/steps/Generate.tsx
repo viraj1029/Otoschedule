@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import type { Block, Resident, Request, ScheduleData } from '@/types';
-import { parseDate, generateSchedule } from '@/lib/scheduler';
+import type { Block, Resident, Request, ScheduleData, AnyScheduleData } from '@/types';
+import { parseDate, generateSchedule, generateCMCSchedule, generateVASchedule } from '@/lib/scheduler';
 import type { ScheduleMode } from '@/lib/scheduler';
 import { api } from '../App';
 
@@ -10,8 +10,8 @@ interface Props {
   block: Block | null;
   residents: Resident[];
   allRequests: Request[];
-  schedule: ScheduleData | null;
-  onScheduleGenerated: (sched: ScheduleData, scheduleId: string) => void;
+  schedule: AnyScheduleData | null;
+  onScheduleGenerated: (sched: AnyScheduleData, scheduleId: string) => void;
   onBack: () => void;
   showToast: (msg: string, err?: boolean) => void;
 }
@@ -102,27 +102,21 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
   async function generateAndSave() {
     if (!schedStart || !schedEnd) { showToast('Set start and end dates', true); return; }
     if (parseDate(schedStart) > parseDate(schedEnd)) { showToast('Start must be before end', true); return; }
-
-    if (hospitalGroup === 'CMC') {
-      showToast('CMC schedule generation coming soon', true); return;
-    }
-    if (hospitalGroup === 'VA') {
-      showToast('VA schedule generation coming soon', true); return;
-    }
-
     setGenerating(true);
     try {
-      const carryIn = await api<Record<string, { hours: number; availDays: number }>>('/jr-carry');
-      const scheduleData = generateSchedule(
-        residents,
-        allRequests,
-        scheduleName,
-        schedStart,
-        schedEnd,
-        false,
-        mode,
-        carryIn,
-      );
+      let scheduleData: AnyScheduleData;
+
+      if (hospitalGroup === 'CMC') {
+        if (!cmcPool.length) throw new Error('No active residents with a CMC rotation in this period');
+        scheduleData = generateCMCSchedule(cmcPool, allRequests, scheduleName, schedStart, schedEnd);
+      } else if (hospitalGroup === 'VA') {
+        if (!vaPool.length) throw new Error('No active residents with a VA rotation in this period');
+        scheduleData = generateVASchedule(vaPool, allRequests, scheduleName, schedStart, schedEnd);
+      } else {
+        const carryIn = await api<Record<string, { hours: number; availDays: number }>>('/jr-carry');
+        scheduleData = generateSchedule(residents, allRequests, scheduleName, schedStart, schedEnd, false, mode, carryIn);
+      }
+
       const result = await api<{ ok: boolean; id: string }>('/schedule/generate', 'POST', {
         scheduleData,
         name: scheduleName,

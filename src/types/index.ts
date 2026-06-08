@@ -98,6 +98,7 @@ export interface ResBkpDay {
 }
 
 export interface ScheduleData {
+  type?: 'cuh_pmh';  // undefined = legacy CUH/PMH schedule
   bStart: string;
   bEnd: string;
   blockName: string;
@@ -117,7 +118,54 @@ export interface ScheduleData {
   jrTHwkday?: Record<string, number>;
   jrTD?: Record<string, number>;
   jrAvailDays?: Record<string, number>;
+  _scheduleId?: string;  // injected by GET /api/schedule
 }
+
+// ─── CMC schedule types ───────────────────────────────────────────────────────
+
+export interface CMCDay {
+  dateKey: string;
+  res: Resident;
+  shiftHrs: number;
+  isPowerWeekend: boolean;  // true for Fri/Sat/Sun power weekend
+  override: boolean;
+}
+
+export interface CMCScheduleData {
+  type: 'cmc';
+  bStart: string;
+  bEnd: string;
+  blockName: string;
+  days: CMCDay[];
+  counts: Record<string, number>;  // call days per resident
+  hours: Record<string, number>;   // call hours per resident
+  published: boolean;
+  _scheduleId?: string;
+}
+
+// ─── VA schedule types ────────────────────────────────────────────────────────
+
+export interface VAWeek {
+  wS: string;
+  wE: string;
+  res: Resident;
+  override: boolean;
+}
+
+export interface VAScheduleData {
+  type: 'va';
+  bStart: string;
+  bEnd: string;
+  blockName: string;
+  weeks: VAWeek[];
+  counts: Record<string, number>;  // call weeks per resident
+  days: Record<string, number>;    // call days per resident
+  hours: Record<string, number>;   // call hours per resident
+  published: boolean;
+  _scheduleId?: string;
+}
+
+export type AnyScheduleData = ScheduleData | CMCScheduleData | VAScheduleData;
 
 // ─── Session / auth ───────────────────────────────────────────────────────────
 

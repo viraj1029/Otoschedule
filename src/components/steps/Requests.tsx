@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { Block, Resident, Request, Role, ScheduleData, Hospital } from '@/types';
+import type { Block, Resident, Request, Role, ScheduleData, AnyScheduleData, Hospital } from '@/types';
 import { HOLIDAYS, parseDate, fmtShort } from '@/lib/scheduler';
 import { api } from '../App';
 import ScheduleView from './ScheduleView';
@@ -20,7 +20,7 @@ interface Props {
   onBack: (() => void) | null;
   onNext: (() => void) | null;
   showToast: (msg: string, err?: boolean) => void;
-  schedule?: ScheduleData | null;
+  schedule?: AnyScheduleData | null;
 }
 
 function getResRequests(allRequests: Request[], resIds: string[]) {

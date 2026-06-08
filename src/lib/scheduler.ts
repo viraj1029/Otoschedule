@@ -11,6 +11,10 @@ import type {
   JuniorDayType,
   ResBkpWeek,
   ResBkpDay,
+  CMCDay,
+  CMCScheduleData,
+  VAWeek,
+  VAScheduleData,
 } from '@/types';
 
 // ─── US Federal Holidays (static set matching the original) ──────────────────
@@ -670,5 +674,256 @@ export function generateSchedule(
     jrTHwkday,
     jrTD,
     jrAvailDays: rotAvailDays,
+  };
+}
+
+// ─── CMC Schedule ─────────────────────────────────────────────────────────────
+
+export function generateCMCSchedule(
+  residents: Resident[],
+  requests: Request[],
+  blockName: string,
+  bStartStr: string,
+  bEndStr: string,
+): CMCScheduleData {
+  const pool = residents
+    .filter((r) => r.status === 'active')
+    .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
+  if (!pool.length) throw new Error('No active residents in CMC pool for this period');
+
+  const bStart = parseDate(bStartStr);
+  const bEnd   = parseDate(bEndStr);
+
+  // Build off map: vacation requests for each resident
+  const offMap: Record<string, Set<string>> = {};
+  pool.forEach((r) => {
+    const vac = new Set(
+      requests
+        .filter((req) => req.resident_id === r.id && (req.type === 'vacation' || req.type === 'vacation_official'))
+        .map((req) => req.date),
+    );
+    // Also mark dates outside the resident's CMC rotation segments as off
+    const cmcSegs = r.rotations?.filter((s) => s.hospital === 'CMC') ?? [];
+    if (cmcSegs.length > 0) {
+      let d = new Date(bStart);
+      while (d <= bEnd) {
+        const dstr = dk(d);
+        if (!cmcSegs.some((seg) => dstr >= seg.start_date && dstr <= seg.end_date)) vac.add(dstr);
+        d = addDays(d, 1);
+      }
+    }
+    offMap[r.id] = vac;
+  });
+
+  const cmcDays: CMCDay[] = [];
+  const counts: Record<string, number> = {};
+  const hours:  Record<string, number> = {};
+  pool.forEach((r) => { counts[r.id] = 0; hours[r.id] = 0; });
+
+  // ── Step 1: Assign power weekends (Fri+Sat+Sun) ──────────────────────────────
+  // Collect all Fridays in the period
+  const fridays: Date[] = [];
+  let fd = new Date(bStart);
+  while (fd <= bEnd) {
+    if (fd.getDay() === 5) fridays.push(new Date(fd));
+    fd = addDays(fd, 1);
+  }
+
+  const pwByFri = new Map<string, Resident>(); // fri dateKey → person
+  let lastPwId: string | null = null;
+
+  for (const fri of fridays) {
+    const friKey = dk(fri);
+    const satKey = dk(addDays(fri, 1));
+    const sunKey = dk(addDays(fri, 2));
+
+    // Pick: not last PW person, not on vacation on all 3 days
+    let candidates = pool.filter(
+      (r) => r.id !== lastPwId && !(offMap[r.id].has(friKey) && offMap[r.id].has(satKey) && offMap[r.id].has(sunKey)),
+    );
+    if (!candidates.length) candidates = pool.filter((r) => r.id !== lastPwId);
+    if (!candidates.length) candidates = [...pool];
+
+    const pick = candidates.sort((a, b) => hours[a.id] - hours[b.id])[0];
+    pwByFri.set(friKey, pick);
+    lastPwId = pick.id;
+
+    for (const [key, hrs] of [[friKey, 12], [satKey, 24], [sunKey, 24]] as [string, number][]) {
+      const d = parseDate(key);
+      if (d >= bStart && d <= bEnd) {
+        cmcDays.push({ dateKey: key, res: pick, shiftHrs: hrs, isPowerWeekend: true, override: false });
+        counts[pick.id]++;
+        hours[pick.id] += hrs;
+      }
+    }
+  }
+
+  // ── Step 2: Assign Mon–Thu weekdays ──────────────────────────────────────────
+  // Round-robin: maintain a rotation index through the pool
+  let rotIdx = 0;
+
+  function pickRoundRobin(available: Resident[]): Resident {
+    for (let i = 0; i < pool.length; i++) {
+      const c = pool[(rotIdx + i) % pool.length];
+      if (available.find((r) => r.id === c.id)) {
+        rotIdx = (pool.findIndex((r) => r.id === c.id) + 1) % pool.length;
+        return c;
+      }
+    }
+    // Fallback: fewest hours
+    const fb = [...available].sort((a, b) => hours[a.id] - hours[b.id])[0];
+    rotIdx = (pool.findIndex((r) => r.id === fb.id) + 1) % pool.length;
+    return fb;
+  }
+
+  let d = new Date(bStart);
+  while (d <= bEnd) {
+    const dow = d.getDay();
+    if (dow >= 1 && dow <= 4) { // Mon=1 … Thu=4
+      const dateKey = dk(d);
+      const excluded = new Set<string>();
+
+      if (dow === 4) { // Thu: exclude upcoming power weekend person
+        const upFriKey = dk(addDays(d, 1));
+        const pw = pwByFri.get(upFriKey);
+        if (pw) excluded.add(pw.id);
+      }
+      if (dow === 1) { // Mon: exclude previous power weekend person
+        const prevFriKey = dk(addDays(d, -3));
+        const pw = pwByFri.get(prevFriKey);
+        if (pw) excluded.add(pw.id);
+      }
+
+      let avail = pool.filter((r) => !offMap[r.id].has(dateKey) && !excluded.has(r.id));
+      if (!avail.length) avail = pool.filter((r) => !offMap[r.id].has(dateKey)); // relax Thu/Mon constraint
+      if (!avail.length) avail = [...pool]; // everyone on vacation, fallback
+
+      const pick = pickRoundRobin(avail);
+      cmcDays.push({ dateKey, res: pick, shiftHrs: 12, isPowerWeekend: false, override: false });
+      counts[pick.id]++;
+      hours[pick.id] += 12;
+    }
+    d = addDays(d, 1);
+  }
+
+  cmcDays.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+
+  return {
+    type: 'cmc',
+    bStart: bStartStr,
+    bEnd: bEndStr,
+    blockName,
+    days: cmcDays,
+    counts,
+    hours,
+    published: false,
+  };
+}
+
+// ─── VA Schedule ──────────────────────────────────────────────────────────────
+
+export function generateVASchedule(
+  residents: Resident[],
+  requests: Request[],
+  blockName: string,
+  bStartStr: string,
+  bEndStr: string,
+): VAScheduleData {
+  const pool = residents
+    .filter((r) => r.status === 'active')
+    .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
+  if (pool.length < 1) throw new Error('No active residents in VA pool for this period');
+
+  const bStart = parseDate(bStartStr);
+  const bEnd   = parseDate(bEndStr);
+
+  // Build off map: vacation requests for each resident
+  const offMap: Record<string, Set<string>> = {};
+  pool.forEach((r) => {
+    const vac = new Set(
+      requests
+        .filter((req) => req.resident_id === r.id && (req.type === 'vacation' || req.type === 'vacation_official'))
+        .map((req) => req.date),
+    );
+    // Mark dates outside VA rotation segments as off
+    const vaSegs = r.rotations?.filter((s) => s.hospital === 'VA') ?? [];
+    if (vaSegs.length > 0) {
+      let d2 = new Date(bStart);
+      while (d2 <= bEnd) {
+        const dstr = dk(d2);
+        if (!vaSegs.some((seg) => dstr >= seg.start_date && dstr <= seg.end_date)) vac.add(dstr);
+        d2 = addDays(d2, 1);
+      }
+    }
+    offMap[r.id] = vac;
+  });
+
+  // Count available days per resident in a date range
+  function availableDaysInRange(r: Resident, wS: Date, wE: Date): number {
+    let cnt = 0, d = new Date(wS);
+    while (d <= wE) { if (!offMap[r.id].has(dk(d))) cnt++; d = addDays(d, 1); }
+    return cnt;
+  }
+
+  // Build weeks: find the Monday on or before bStart, then step by 7
+  let weekMon = new Date(bStart);
+  while (weekMon.getDay() !== 1) weekMon = addDays(weekMon, -1);
+
+  const vaWeeks: VAWeek[] = [];
+  const counts: Record<string, number> = {};
+  const days:   Record<string, number> = {};
+  const hours:  Record<string, number> = {};
+  pool.forEach((r) => { counts[r.id] = 0; days[r.id] = 0; hours[r.id] = 0; });
+
+  let lastId: string | null = null;
+
+  while (weekMon <= bEnd) {
+    const wSDate = weekMon < bStart ? new Date(bStart) : new Date(weekMon);
+    const wEDate = (() => { const e = addDays(weekMon, 6); return e > bEnd ? new Date(bEnd) : e; })();
+
+    if (wSDate > bEnd) break;
+
+    // Pick: prefer alternating; fall back to whoever has more available days
+    const sorted = [...pool].sort((a, b) => {
+      const aDays = days[a.id];
+      const bDays = days[b.id];
+      if (aDays !== bDays) return aDays - bDays; // fewest days first
+      // Tiebreak: prefer not last person
+      if (a.id !== lastId && b.id === lastId) return -1;
+      if (b.id !== lastId && a.id === lastId) return 1;
+      return 0;
+    });
+
+    // Find a candidate who has at least 1 available day this week
+    let pick = sorted.find((r) => availableDaysInRange(r, wSDate, wEDate) > 0);
+    if (!pick) pick = sorted[0]; // everyone on vacation, assign anyway
+
+    vaWeeks.push({ wS: dk(wSDate), wE: dk(wEDate), res: pick, override: false });
+    counts[pick.id]++;
+
+    // Tally days and hours
+    let d2 = new Date(wSDate);
+    while (d2 <= wEDate) {
+      days[pick.id]++;
+      const dow = d2.getDay();
+      const isWknd = dow === 0 || dow === 6;
+      hours[pick.id] += (isWknd || HOLIDAYS.has(dk(d2))) ? 24 : 12;
+      d2 = addDays(d2, 1);
+    }
+
+    lastId = pick.id;
+    weekMon = addDays(weekMon, 7);
+  }
+
+  return {
+    type: 'va',
+    bStart: bStartStr,
+    bEnd: bEndStr,
+    blockName,
+    weeks: vaWeeks,
+    counts,
+    days,
+    hours,
+    published: false,
   };
 }

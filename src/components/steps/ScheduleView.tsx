@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, type ReactElement } from 'react';
-import type { Block, Resident, Request, ScheduleData, Schedule, Tab, Role } from '@/types';
+import type { Block, Resident, Request, ScheduleData, CMCScheduleData, VAScheduleData, AnyScheduleData, Schedule, Tab, Role } from '@/types';
+import CMCScheduleView from './CMCScheduleView';
+import VAScheduleView from './VAScheduleView';
 import { HOLIDAYS, HOLIDAY_NAMES, TRAUMA_WEEKS, parseDate, fmtShort, dk, addDays } from '@/lib/scheduler';
 import { api } from '../App';
 import OverrideModal from '../modals/OverrideModal';
@@ -10,14 +12,14 @@ const MONTHS = ['January','February','March','April','May','June','July','August
 const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
 interface Props {
-  schedule: ScheduleData | null;
+  schedule: AnyScheduleData | null;
   schedules?: Schedule[];          // all schedule metadata (chief only)
   activeScheduleId?: string | null;
   residents: Resident[];
   allRequests: Request[];
   block: Block | null;
   role: Role;
-  onScheduleChanged: (s: ScheduleData | null) => void;
+  onScheduleChanged: (s: AnyScheduleData | null) => void;
   onBlockChanged: (b: Block | null) => void;
   onScheduleSelected?: (id: string) => void;
   onScheduleListChanged?: () => void;
@@ -77,22 +79,10 @@ export default function ScheduleView({
     );
   }
 
-  // Build maps
-  const jrMap: Record<string, typeof schedule.juniorDays[0]> = {};
-  schedule.juniorDays.forEach((d) => (jrMap[d.dateKey] = d));
-  const srMap: Record<string, typeof schedule.seniorWeeks[0]> = {};
-  schedule.seniorWeeks.forEach((w) => {
-    let d = parseDate(w.wS);
-    const end = parseDate(w.wE);
-    while (d <= end) { srMap[dk(d)] = w; d = addDays(d, 1); }
-  });
-  const resBkpDayKeys = new Set(schedule.resBkpDayKeys ?? []);
-
   async function togglePublish() {
     const next = !published;
     setPublished(next);
-    // Use the active schedule ID (injected as _scheduleId in the data) or fall back to block-level
-    const scheduleId = (schedule as ScheduleData & { _scheduleId?: string })?._scheduleId ?? activeScheduleId;
+    const scheduleId = (schedule as AnyScheduleData & { _scheduleId?: string })?._scheduleId ?? activeScheduleId;
     await api('/block/publish', 'POST', { published: next, scheduleId });
     if (block) onBlockChanged({ ...block, published: next });
     if (schedule) onScheduleChanged({ ...schedule, published: next });
@@ -103,6 +93,79 @@ export default function ScheduleView({
   function fmtDate(s: string) {
     return parseDate(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
+
+  // ── CMC / VA early-return views ───────────────────────────────────────────────
+  if (schedule.type === 'cmc' || schedule.type === 'va') {
+    return (
+      <div>
+        {/* Schedule selector */}
+        {role === 'chief' && schedules.length > 1 && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>SCHEDULE</span>
+            {schedules.map((s) => {
+              const isActive = s.id === activeScheduleId || s.id === (schedule as AnyScheduleData & { _scheduleId?: string })?._scheduleId;
+              return (
+                <button
+                  key={s.id}
+                  className={`btn bsm${isActive ? ' bg' : ' bgh'}`}
+                  onClick={() => !isActive && onScheduleSelected?.(s.id)}
+                  style={{ position: 'relative' }}
+                >
+                  {s.name}
+                  {s.published && <span style={{ marginLeft: 5, fontSize: 9, color: 'var(--green)', fontWeight: 700 }}>●</span>}
+                </button>
+              );
+            })}
+            <button className="btn bsm bgh" onClick={onRegenerate} style={{ marginLeft: 'auto' }}>＋ New Schedule</button>
+          </div>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <div className="page-title">
+            {schedule.blockName}
+            <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 600, color: schedule.type === 'cmc' ? 'var(--blue)' : 'var(--orange)', verticalAlign: 'middle' }}>
+              {schedule.type === 'cmc' ? 'CMC' : 'VA'}
+            </span>
+          </div>
+          {role === 'chief' && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              {schedules.length <= 1 && (
+                <button className="btn bgh bsm" onClick={onRegenerate}>← Regenerate</button>
+              )}
+              <button
+                className={`btn bsm ${published ? 'bg' : 'bgh'}`}
+                onClick={togglePublish}
+              >
+                {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="page-sub">{fmtDate(schedule.bStart)} → {fmtDate(schedule.bEnd)}</div>
+
+        {schedule.type === 'cmc' && (
+          <CMCScheduleView schedule={schedule as CMCScheduleData} residents={residents} />
+        )}
+        {schedule.type === 'va' && (
+          <VAScheduleView schedule={schedule as VAScheduleData} residents={residents} />
+        )}
+      </div>
+    );
+  }
+
+  // ── CUH/PMH schedule (existing logic) ────────────────────────────────────────
+  // TypeScript narrows `schedule` to ScheduleData after the CMC/VA early returns above.
+  const cuhSched = schedule as ScheduleData;
+
+  // Build maps
+  const jrMap: Record<string, typeof cuhSched.juniorDays[0]> = {};
+  cuhSched.juniorDays.forEach((d) => (jrMap[d.dateKey] = d));
+  const srMap: Record<string, typeof cuhSched.seniorWeeks[0]> = {};
+  cuhSched.seniorWeeks.forEach((w) => {
+    let d = parseDate(w.wS);
+    const end = parseDate(w.wE);
+    while (d <= end) { srMap[dk(d)] = w; d = addDays(d, 1); }
+  });
+  const resBkpDayKeys = new Set(cuhSched.resBkpDayKeys ?? []);
 
   // ── Calendar rendering (shared by screen + print) ────────────────────────────
   function buildChips(key: string, isWk: boolean, isHol: boolean, isTrauma = false): string {
@@ -123,7 +186,7 @@ export default function ScheduleView({
       chips += rc(jr.res.color, label);
 
       if (isWk || isHol) {
-        const ov = (schedule!.roundingOverrides ?? {})[key];
+        const ov = (cuhSched.roundingOverrides ?? {})[key];
         if (dow === 6) {
           // Saturday
           const friJr = jrMap[dk(addDays(parseDate(key), -1))];
@@ -193,7 +256,7 @@ export default function ScheduleView({
 
     if (sr) chips += rc(sr.res.color, `${sr.isBackup ? '🔬' : '🔶'} ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}`);
     if (isResBkpDay) {
-      const rb = (schedule!.resBkpDays ?? []).find((d) => d.dateKey === key);
+      const rb = (cuhSched.resBkpDays ?? []).find((d) => d.dateKey === key);
       if (rb) chips += rc(rb.res.color, `🔬 ${rb.res.name} (bkp)`);
     }
     return chips;
@@ -255,10 +318,10 @@ export default function ScheduleView({
               <RoundingEditor
                 dateKey={key}
                 residents={residents}
-                currentOverride={(schedule!.roundingOverrides ?? {})[key]}
+                currentOverride={(cuhSched.roundingOverrides ?? {})[key]}
                 onSave={async (cuhResId, pmhResId) => {
                   await api('/schedule/rounding', 'POST', { dateKey: key, cuhResId, pmhResId });
-                  onScheduleChanged({ ...schedule!, roundingOverrides: { ...(schedule!.roundingOverrides ?? {}), [key]: { cuhResId, pmhResId } } });
+                  onScheduleChanged({ ...cuhSched,roundingOverrides: { ...(cuhSched.roundingOverrides ?? {}), [key]: { cuhResId, pmhResId } } });
                   setEditingRounding(null);
                 }}
               />
@@ -276,7 +339,7 @@ export default function ScheduleView({
 
   // ── Senior tab ────────────────────────────────────────────────────────────────
   function renderSeniorTab() {
-    return schedule!.seniorWeeks.map((w, i) => (
+    return cuhSched.seniorWeeks.map((w, i) => (
       <div key={i} className="wrow" style={w.isBackup ? { borderLeft: '3px solid var(--pink)' } : {}}>
         <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: 'var(--muted)', lineHeight: 1.7 }}>
           {fmtShort(w.wS)}<br />→ {fmtShort(w.wE)}
@@ -305,7 +368,7 @@ export default function ScheduleView({
       weekday: 'Weekday', 'fri-pair': 'Fri (paired)', 'sun-pair': 'Sun (paired)',
       saturday: 'Saturday 24h', sunday: 'Sunday',
     };
-    return schedule!.juniorDays.map((jd, i) => {
+    return cuhSched.juniorDays.map((jd, i) => {
       const d = parseDate(jd.dateKey);
       const dow = DOW[d.getDay()];
       const isHol = HOLIDAYS.has(jd.dateKey);
@@ -353,8 +416,8 @@ export default function ScheduleView({
   // ── Hours tab ─────────────────────────────────────────────────────────────────
   function getBlockMonths() {
     const months: { year: number; month: number }[] = [];
-    let d = parseDate(schedule!.bStart);
-    const end = parseDate(schedule!.bEnd);
+    let d = parseDate(cuhSched.bStart);
+    const end = parseDate(cuhSched.bEnd);
     while (d <= end) {
       const y = d.getFullYear(), m = d.getMonth();
       if (!months.find((x) => x.year === y && x.month === m)) months.push({ year: y, month: m });
@@ -369,16 +432,16 @@ export default function ScheduleView({
     const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active')
       .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
     const bd = jrs.map((res) => {
-      const days = schedule!.juniorDays.filter((d) => d.res.id === res.id);
+      const days = cuhSched.juniorDays.filter((d) => d.res.id === res.id);
       const s12 = days.filter((d) => d.shiftHrs === 12).length;
       const s24 = days.filter((d) => d.shiftHrs === 24).length;
       const total = days.reduce((a, d) => a + d.shiftHrs, 0);
       return { res, s12, s24, total };
     });
-    const tWd = schedule!.juniorDays.filter((d) => !d.isWeekend && !HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
-    const tSat = schedule!.juniorDays.filter((d) => parseDate(d.dateKey).getDay() === 6 && !HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
-    const tSun = schedule!.juniorDays.filter((d) => parseDate(d.dateKey).getDay() === 0 && !HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
-    const tHol = schedule!.juniorDays.filter((d) => HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
+    const tWd = cuhSched.juniorDays.filter((d) => !d.isWeekend && !HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
+    const tSat = cuhSched.juniorDays.filter((d) => parseDate(d.dateKey).getDay() === 6 && !HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
+    const tSun = cuhSched.juniorDays.filter((d) => parseDate(d.dateKey).getDay() === 0 && !HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
+    const tHol = cuhSched.juniorDays.filter((d) => HOLIDAYS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
 
     const months = getBlockMonths();
     const curHrs = hrsMonth ?? months[0];
@@ -387,13 +450,13 @@ export default function ScheduleView({
     const wks = Math.ceil(dim / 7);
 
     const monthRows = jrs.map((res) => {
-      const days = schedule!.juniorDays.filter((d) => d.res.id === res.id && d.dateKey.startsWith(prefix));
+      const days = cuhSched.juniorDays.filter((d) => d.res.id === res.id && d.dateKey.startsWith(prefix));
       const s12 = days.filter((d) => d.shiftHrs === 12).length;
       const s24 = days.filter((d) => d.shiftHrs === 24).length;
       const total = days.reduce((a, d) => a + d.shiftHrs, 0);
       return { res, s12, s24, total };
     });
-    const mAll = schedule!.juniorDays.filter((d) => d.dateKey.startsWith(prefix));
+    const mAll = cuhSched.juniorDays.filter((d) => d.dateKey.startsWith(prefix));
     const mTotal = mAll.reduce((a, d) => a + d.shiftHrs, 0);
     const ms12 = mAll.filter((d) => d.shiftHrs === 12).length;
     const ms24 = mAll.filter((d) => d.shiftHrs === 24).length;
@@ -419,7 +482,7 @@ export default function ScheduleView({
     }
 
     const allSrStats = srs.map((res) => {
-      const weeks = schedule!.seniorWeeks.filter((w) => w.res.id === res.id);
+      const weeks = cuhSched.seniorWeeks.filter((w) => w.res.id === res.id);
       const { totalDays, weekendDays, holidayDays } = countWeekDays(weeks);
       return { res, weeks: weeks.length, totalDays, weekendDays, holidayDays, isResearch: res.status === 'research' };
     });
@@ -531,13 +594,13 @@ export default function ScheduleView({
               </thead>
               <tbody>
                 {jrs.map((res) => {
-                  const wkndDays = schedule!.juniorDays.filter((d) => d.res.id === res.id && (d.isWeekend || HOLIDAYS.has(d.dateKey)));
-                  const wkdayDays = schedule!.juniorDays.filter((d) => d.res.id === res.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey));
+                  const wkndDays = cuhSched.juniorDays.filter((d) => d.res.id === res.id && (d.isWeekend || HOLIDAYS.has(d.dateKey)));
+                  const wkdayDays = cuhSched.juniorDays.filter((d) => d.res.id === res.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey));
                   const wkndHrs = wkndDays.reduce((a, d) => a + d.shiftHrs, 0);
                   const wkdayHrs = wkdayDays.reduce((a, d) => a + d.shiftHrs, 0);
-                  const roundingWknds = schedule!.juniorDays.filter((d) => d.cuhRounder?.id === res.id).length;
-                  const traumaHrs = schedule!.jrTH?.[res.id] ?? 0;
-                  const traumaDays = schedule!.jrTD?.[res.id] ?? 0;
+                  const roundingWknds = cuhSched.juniorDays.filter((d) => d.cuhRounder?.id === res.id).length;
+                  const traumaHrs = cuhSched.jrTH?.[res.id] ?? 0;
+                  const traumaDays = cuhSched.jrTD?.[res.id] ?? 0;
                   return (
                     <tr key={res.id}>
                       <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{avatar(res)}<span style={{ fontWeight: 500 }}>{res.name}</span></div></td>
@@ -554,13 +617,13 @@ export default function ScheduleView({
                   );
                 })}
                 {(() => {
-                  const totWkndD = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.res.id === r.id && (d.isWeekend || HOLIDAYS.has(d.dateKey))).length, 0);
-                  const totWkndH = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.res.id === r.id && (d.isWeekend || HOLIDAYS.has(d.dateKey))).reduce((s, d) => s + d.shiftHrs, 0), 0);
-                  const totWkdD = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).length, 0);
-                  const totWkdH = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).reduce((s, d) => s + d.shiftHrs, 0), 0);
-                  const totRounding = jrs.reduce((a, r) => a + schedule!.juniorDays.filter((d) => d.cuhRounder?.id === r.id).length, 0);
-                  const totTraumaH = jrs.reduce((a, r) => a + (schedule!.jrTH?.[r.id] ?? 0), 0);
-                  const totTraumaD = jrs.reduce((a, r) => a + (schedule!.jrTD?.[r.id] ?? 0), 0);
+                  const totWkndD = jrs.reduce((a, r) => a + cuhSched.juniorDays.filter((d) => d.res.id === r.id && (d.isWeekend || HOLIDAYS.has(d.dateKey))).length, 0);
+                  const totWkndH = jrs.reduce((a, r) => a + cuhSched.juniorDays.filter((d) => d.res.id === r.id && (d.isWeekend || HOLIDAYS.has(d.dateKey))).reduce((s, d) => s + d.shiftHrs, 0), 0);
+                  const totWkdD = jrs.reduce((a, r) => a + cuhSched.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).length, 0);
+                  const totWkdH = jrs.reduce((a, r) => a + cuhSched.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).reduce((s, d) => s + d.shiftHrs, 0), 0);
+                  const totRounding = jrs.reduce((a, r) => a + cuhSched.juniorDays.filter((d) => d.cuhRounder?.id === r.id).length, 0);
+                  const totTraumaH = jrs.reduce((a, r) => a + (cuhSched.jrTH?.[r.id] ?? 0), 0);
+                  const totTraumaD = jrs.reduce((a, r) => a + (cuhSched.jrTD?.[r.id] ?? 0), 0);
                   return (
                     <tr style={{ background: 'rgba(0,0,0,.04)' }}>
                       <td colSpan={2} style={{ fontWeight: 600, fontSize: 12, padding: '10px 12px' }}>TOTAL</td>
@@ -636,10 +699,10 @@ export default function ScheduleView({
       : null;
 
     function computeJrStats() {
-      const days = schedule!.juniorDays.filter(
+      const days = cuhSched.juniorDays.filter(
         (d) => d.res.id === currentResId! && (!prefix || d.dateKey.startsWith(prefix)),
       );
-      const cuhRdrDays = schedule!.juniorDays.filter(
+      const cuhRdrDays = cuhSched.juniorDays.filter(
         (d) => d.cuhRounder?.id === currentResId! && (!prefix || d.dateKey.startsWith(prefix)),
       );
       const wkday  = days.filter((d) => !d.isWeekend && !HOLIDAYS.has(d.dateKey));
@@ -657,7 +720,7 @@ export default function ScheduleView({
     }
 
     function computeSrStats() {
-      const srWeeks = schedule!.seniorWeeks.filter((w) => w.res.id === currentResId!);
+      const srWeeks = cuhSched.seniorWeeks.filter((w) => w.res.id === currentResId!);
       let wkdayCount = 0, wkndCount = 0, holCount = 0;
       srWeeks.forEach((w) => {
         let d = parseDate(w.wS); const end = parseDate(w.wE);
@@ -806,13 +869,13 @@ export default function ScheduleView({
   function renderEquityTab() {
     const srs = residents.filter((r) => r.pgy >= 4 && (r.status === 'active' || r.status === 'research'));
     const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
-    const bStart = parseDate(schedule!.bStart);
-    const bEnd = parseDate(schedule!.bEnd);
+    const bStart = parseDate(cuhSched.bStart);
+    const bEnd = parseDate(cuhSched.bEnd);
 
     const srWkdays: Record<string, number> = {};
     const srWkends: Record<string, number> = {};
     srs.forEach((r) => { srWkdays[r.id] = 0; srWkends[r.id] = 0; });
-    schedule!.seniorWeeks.forEach((w) => {
+    cuhSched.seniorWeeks.forEach((w) => {
       if (!srs.find((r) => r.id === w.res.id)) return;
       let d = parseDate(w.wS); const end = parseDate(w.wE);
       while (d <= end) {
@@ -824,10 +887,10 @@ export default function ScheduleView({
     });
 
     const jrH: Record<string, number> = {};
-    jrs.forEach((r) => { jrH[r.id] = schedule!.juniorDays.filter((d) => d.res.id === r.id).reduce((a, d) => a + d.shiftHrs, 0); });
+    jrs.forEach((r) => { jrH[r.id] = cuhSched.juniorDays.filter((d) => d.res.id === r.id).reduce((a, d) => a + d.shiftHrs, 0); });
 
     const jrH24: Record<string, number> = {};
-    jrs.forEach((r) => { jrH24[r.id] = schedule!.juniorDays.filter((d) => d.res.id === r.id && d.shiftHrs === 24).length; });
+    jrs.forEach((r) => { jrH24[r.id] = cuhSched.juniorDays.filter((d) => d.res.id === r.id && d.shiftHrs === 24).length; });
 
     // Available days: rotation window minus any off/vacation requests.
     // Matches the scheduler's normalization so the chart reflects actual call density.
@@ -862,7 +925,7 @@ export default function ScheduleView({
         </div>
         <div className="card">
           <div className="ch"><div className="ct">Junior Trauma Hours</div></div>
-          <div className="cb">{eqBars(jrs.map((r) => ({ name: r.name, val: schedule!.jrTH?.[r.id] ?? 0, color: r.color })), 'h')}</div>
+          <div className="cb">{eqBars(jrs.map((r) => ({ name: r.name, val: cuhSched.jrTH?.[r.id] ?? 0, color: r.color })), 'h')}</div>
         </div>
         <div className="card">
           <div className="ch"><div className="ct">24h Shifts</div></div>
@@ -904,7 +967,7 @@ export default function ScheduleView({
         const sr = srMap[key];
         if (sr) parts.push(`Sr: ${sr.res.name}${sr.isBackup ? ' (bkp)' : ''}`);
         if (resBkpDayKeys.has(key)) {
-          const rb = (schedule!.resBkpDays ?? []).find((x) => x.dateKey === key);
+          const rb = (cuhSched.resBkpDays ?? []).find((x) => x.dateKey === key);
           if (rb) parts.push(`Bkp: ${rb.res.name}`);
         }
         const jr = jrMap[key];
@@ -925,18 +988,18 @@ export default function ScheduleView({
       XLSX.utils.book_append_sheet(wb, ws, monthName.slice(0, 3));
     });
 
-    XLSX.writeFile(wb, `${schedule!.blockName.replace(/[^a-z0-9]/gi, '_')}_schedule.xlsx`);
+    XLSX.writeFile(wb, `${cuhSched.blockName.replace(/[^a-z0-9]/gi, '_')}_schedule.xlsx`);
     showToast('Excel exported');
   }
 
   function exportICS() {
     let ics = 'BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//OTO Scheduler//UTSW//EN\n';
-    schedule!.juniorDays.forEach((jd) => {
+    cuhSched.juniorDays.forEach((jd) => {
       const ds = jd.dateKey.replace(/-/g, '');
       const de = dk(addDays(parseDate(jd.dateKey), 1)).replace(/-/g, '');
       ics += `BEGIN:VEVENT\nDTSTART;VALUE=DATE:${ds}\nDTEND;VALUE=DATE:${de}\nSUMMARY:Jr Call – ${jd.res.name} · ${jd.shiftHrs}h\nEND:VEVENT\n`;
     });
-    schedule!.seniorWeeks.forEach((w) => {
+    cuhSched.seniorWeeks.forEach((w) => {
       const ds = w.wS.replace(/-/g, '');
       const de = dk(addDays(parseDate(w.wE), 1)).replace(/-/g, '');
       ics += `BEGIN:VEVENT\nDTSTART;VALUE=DATE:${ds}\nDTEND;VALUE=DATE:${de}\nSUMMARY:${w.isBackup ? 'Research Backup' : 'Sr Call'} – ${w.res.name}\nEND:VEVENT\n`;
