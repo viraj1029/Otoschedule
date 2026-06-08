@@ -866,8 +866,22 @@ export function generateCMCSchedule(
     if (dow >= 1 && dow <= 4) {
       const dateKey = dk(d);
       const isTraumaDay = TRAUMA_WEEKS.has(dateKey);
-      // Hard: no consecutive weekdays — exclude whoever worked yesterday
-      let avail = pool.filter((r) => !offMap[r.id].has(dateKey) && r.id !== lastWkdayId);
+      // Hard constraints:
+      //   1. No consecutive weekdays (exclude yesterday's person)
+      //   2. Thu → exclude the upcoming power weekend person
+      //   3. Mon → exclude the person who just did the power weekend
+      const pwExcludeId =
+        dow === 4 ? (pwByFri.get(dk(addDays(d, 1)))?.id ?? null) :
+        dow === 1 ? (pwByFri.get(dk(addDays(d, -3)))?.id ?? null) :
+        null;
+
+      let avail = pool.filter(
+        (r) => !offMap[r.id].has(dateKey) && r.id !== lastWkdayId && r.id !== pwExcludeId,
+      );
+      // Relax no-consecutive if needed, but always keep PW exclusion
+      if (!avail.length) {
+        avail = pool.filter((r) => !offMap[r.id].has(dateKey) && r.id !== pwExcludeId);
+      }
       if (!avail.length) avail = pool.filter((r) => !offMap[r.id].has(dateKey));
       if (!avail.length) avail = [...pool];
 
