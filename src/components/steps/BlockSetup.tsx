@@ -40,9 +40,9 @@ function avatar(res: Resident, size = 26) {
 }
 
 export default function BlockSetup({ block, residents, onBlockSaved, onResidentsChanged, onNext, showToast }: Props) {
-  const [blockName, setBlockName] = useState(block?.name ?? 'CUH/PMH Block — Q3 2026');
+  const [blockName, setBlockName] = useState(block?.name ?? 'OTO Call — 2026–2027');
   const [startDate, setStartDate] = useState(block?.start_date ?? '2026-07-01');
-  const [endDate, setEndDate] = useState(block?.end_date ?? '2026-09-30');
+  const [endDate, setEndDate] = useState(block?.end_date ?? '2027-06-30');
   const [newChiefPw, setNewChiefPw] = useState('');
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [editResident, setEditResident] = useState<Resident | null>(null);
@@ -98,33 +98,34 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
 
   return (
     <div>
-      <div className="page-title">Block Setup</div>
+      <div className="page-title">Year Setup</div>
       <div className="page-sub">
-        Configure the block and build the call pool. Each resident gets a unique PIN for blinded
-        request submission. Changes are saved to the database automatically.
+        Configure the academic year container and build the call pool. The year dates define the
+        full resident request window (Jul 1 – Jun 30). Individual schedule periods are set at
+        generation time. Each resident gets a unique PIN for blinded request submission.
       </div>
 
       <div style={{ marginBottom: 18 }}>
         {/* Block config card */}
         <div className="card">
           <div className="ch">
-            <div className="ct">Block Configuration</div>
+            <div className="ct">Year Configuration</div>
             <button className="btn bgh bsm" onClick={saveBlock}>Save</button>
           </div>
           <div className="cb">
             <div className="fg f2" style={{ marginBottom: 14 }}>
               <div className="fl">
-                <label className="flb">Start Date</label>
+                <label className="flb">Academic Year Start</label>
                 <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
               </div>
               <div className="fl">
-                <label className="flb">End Date</label>
+                <label className="flb">Academic Year End</label>
                 <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
               </div>
             </div>
             <div className="fg f2" style={{ marginBottom: 14 }}>
               <div className="fl">
-                <label className="flb">Block Name</label>
+                <label className="flb">Year Name</label>
                 <input type="text" value={blockName} onChange={(e) => setBlockName(e.target.value)} />
               </div>
               <div className="fl">
@@ -137,7 +138,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
                 />
               </div>
             </div>
-            <span className="slabel">Federal Holidays in Block (all 24h shifts)</span>
+            <span className="slabel">Federal Holidays in Academic Year (all 24h shifts)</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {inBlockHolidays.length > 0
                 ? inBlockHolidays.map((h) => (

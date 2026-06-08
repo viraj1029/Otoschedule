@@ -71,6 +71,23 @@ export async function initDb() {
     )
   `;
 
+  // Add named sub-schedule columns (idempotent)
+  await sql`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS name TEXT DEFAULT 'Schedule'`;
+  await sql`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS start_date TEXT`;
+  await sql`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS end_date TEXT`;
+  await sql`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT FALSE`;
+
+  // Backfill the legacy sched_block_main record with block dates and published state
+  await sql`
+    UPDATE schedules s
+    SET name = b.name,
+        start_date = b.start_date,
+        end_date = b.end_date,
+        published = b.published
+    FROM blocks b
+    WHERE s.block_id = b.id AND s.start_date IS NULL
+  `;
+
   // Per-person carry-over hours across blocks within an academic year (Jul–Jun).
   await sql`
     CREATE TABLE IF NOT EXISTS jr_carry (

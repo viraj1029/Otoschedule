@@ -3,11 +3,21 @@
 export interface Block {
   id: string;
   name: string;
+  start_date: string; // YYYY-MM-DD — academic year start (Jul 1)
+  end_date: string;   // YYYY-MM-DD — academic year end (Jun 30)
+  published: boolean; // true if any sub-schedule is published
+  created_at?: string;
+  // chief_password is never sent to the client
+}
+
+export interface Schedule {
+  id: string;
+  block_id: string;
+  name: string;
   start_date: string; // YYYY-MM-DD
   end_date: string;   // YYYY-MM-DD
   published: boolean;
-  created_at?: string;
-  // chief_password is never sent to the client
+  generated_at?: string;
 }
 
 export interface Resident {
