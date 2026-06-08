@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { Block, Resident, Request, ScheduleData, Schedule, Step, Role } from '@/types';
+import type { Block, Resident, Request, AnyScheduleData, Schedule, Step, Role } from '@/types';
 import LoginGate from './LoginGate';
 import TopBar from './TopBar';
 import BlockSetup from './steps/BlockSetup';
@@ -17,7 +17,7 @@ export interface AppState {
   block: Block | null;
   residents: Resident[];
   allRequests: Request[];
-  schedule: ScheduleData | null;
+  schedule: AnyScheduleData | null;
   schedules: Schedule[];       // list of all schedule metadata
   activeScheduleId: string | null; // which schedule the chief is viewing
   step: Step;
@@ -62,7 +62,7 @@ export default function App() {
       api<Block | null>('/block').catch(() => null),
       api<Resident[]>('/residents').catch(() => [] as Resident[]),
       api<Request[]>('/requests').catch(() => [] as Request[]),
-      api<ScheduleData | null>('/schedule').catch(() => null),
+      api<AnyScheduleData | null>('/schedule').catch(() => null),
       api<Schedule[]>('/schedules').catch(() => [] as Schedule[]),
     ]);
     setState((s) => ({ ...s, block: block ?? s.block, residents, allRequests, schedule, schedules }));
@@ -135,13 +135,13 @@ export default function App() {
     setState((s) => ({ ...s, block }));
   }, []);
 
-  const setSchedule = useCallback((schedule: ScheduleData | null) => {
+  const setSchedule = useCallback((schedule: AnyScheduleData | null) => {
     setState((s) => ({ ...s, schedule }));
   }, []);
 
   const loadScheduleById = useCallback(async (id: string) => {
     try {
-      const sched = await api<ScheduleData | null>(`/schedule?id=${id}`);
+      const sched = await api<AnyScheduleData | null>(`/schedule?id=${id}`);
       setState((s) => ({ ...s, schedule: sched, activeScheduleId: id }));
     } catch {
       // ignore

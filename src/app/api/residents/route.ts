@@ -4,6 +4,8 @@ import { getSession } from '@/lib/session';
 import { v4 as uuidv4 } from 'uuid';
 import { initDb } from '@/lib/init-db';
 
+function rotId() { return 'rot_' + uuidv4().replace(/-/g, '').slice(0, 10); }
+
 const DEFAULT_BLOCK_ID = 'block_main';
 
 const COLORS = [
@@ -12,8 +14,14 @@ const COLORS = [
   '#38bdf8', '#4ade80',
 ];
 
-// Flat resident view: persons data joined with block-specific assignment.
-// COALESCE falls back to the residents columns for legacy rows without person_id.
+type ResidentRow = {
+  id: string; block_id: string; name: string; pgy: number; pin: string; color: string;
+  person_id: string | null; hospital: string; status: string; sort_order: number;
+  rotation_start: string | null; rotation_end: string | null;
+};
+type RotationRow = { id: string; resident_id: string; hospital: string; start_date: string; end_date: string };
+
+// Flat resident view: persons data joined with block-specific assignment + rotation segments.
 async function fetchResidents() {
   const { rows } = await sql`
     SELECT
@@ -34,7 +42,24 @@ async function fetchResidents() {
     WHERE r.block_id = ${DEFAULT_BLOCK_ID}
     ORDER BY COALESCE(p.pgy, r.pgy) DESC, COALESCE(p.name, r.name) ASC
   `;
-  return rows;
+  const resRows = rows as ResidentRow[];
+
+  // Fetch rotation segments for all residents in the block via a JOIN
+  const { rows: rots } = await sql`
+    SELECT rot.id, rot.resident_id, rot.hospital, rot.start_date, rot.end_date
+    FROM rotations rot
+    JOIN residents res ON res.id = rot.resident_id
+    WHERE res.block_id = ${DEFAULT_BLOCK_ID}
+    ORDER BY rot.start_date ASC
+  `;
+  const rotRows = rots as RotationRow[];
+
+  const rotsByResident: Record<string, RotationRow[]> = {};
+  for (const rot of rotRows) {
+    (rotsByResident[rot.resident_id] ??= []).push(rot);
+  }
+
+  return resRows.map((r) => ({ ...r, rotations: rotsByResident[r.id] ?? [] }));
 }
 
 export async function GET() {
@@ -64,7 +89,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Chief access required' }, { status: 401 });
   }
 
-  const { name, pgy, hospital, status, rotation_start, rotation_end, personId: existingPersonId } = await req.json();
+  const { name, pgy, hospital = 'CUH', status, rotation_start, rotation_end, personId: existingPersonId, rotations: initialRotations } = await req.json();
 
   // Ensure the block row exists
   const { rows: blockRows } = await sql`SELECT id FROM blocks WHERE id = ${DEFAULT_BLOCK_ID}`;
@@ -125,6 +150,18 @@ export async function POST(req: Request) {
     VALUES
       (${id}, ${personId}, ${DEFAULT_BLOCK_ID}, ${resName}, ${resPgy}, ${hospital}, ${status}, ${pin}, ${color}, ${allRes.length}, ${rStart}, ${rEnd})
   `;
+
+  // Insert initial rotation segments if provided
+  if (Array.isArray(initialRotations)) {
+    for (const rot of initialRotations as { hospital: string; start_date: string; end_date: string }[]) {
+      if (rot.hospital && rot.start_date && rot.end_date) {
+        await sql`
+          INSERT INTO rotations (id, resident_id, hospital, start_date, end_date)
+          VALUES (${rotId()}, ${id}, ${rot.hospital}, ${rot.start_date}, ${rot.end_date})
+        `;
+      }
+    }
+  }
 
   return NextResponse.json({ id, pin, name: resName });
 }

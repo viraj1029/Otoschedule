@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import type { Block, Resident, Request, ScheduleData } from '@/types';
-import { parseDate, generateSchedule } from '@/lib/scheduler';
+import type { Block, Resident, Request, AnyScheduleData } from '@/types';
+import { parseDate, generateSchedule, generateCMCSchedule, generateVASchedule } from '@/lib/scheduler';
 import type { ScheduleMode } from '@/lib/scheduler';
 import { api } from '../App';
 
@@ -10,8 +10,8 @@ interface Props {
   block: Block | null;
   residents: Resident[];
   allRequests: Request[];
-  schedule: ScheduleData | null;
-  onScheduleGenerated: (sched: ScheduleData, scheduleId: string) => void;
+  schedule: AnyScheduleData | null;
+  onScheduleGenerated: (sched: AnyScheduleData, scheduleId: string) => void;
   onBack: () => void;
   showToast: (msg: string, err?: boolean) => void;
 }
@@ -67,9 +67,19 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
     if (!nameEdited) setScheduleName(defaultScheduleName(schedStart, v));
   }
 
-  const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active');
-  const resR = residents.filter((r) => r.pgy >= 4 && r.status === 'research');
-  const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
+  const [hospitalGroup, setHospitalGroup] = useState<'CUH_PMH' | 'CMC' | 'VA'>('CUH_PMH');
+
+  function hasHospRotation(r: typeof residents[0], hosp: string) {
+    if (r.rotations && r.rotations.length > 0)
+      return r.rotations.some((seg) => seg.hospital === hosp && parseDate(seg.start_date) <= parseDate(schedEnd) && parseDate(seg.end_date) >= parseDate(schedStart));
+    return r.hospital === hosp;
+  }
+
+  const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active' && (hasHospRotation(r, 'CUH') || hasHospRotation(r, 'PMH')));
+  const resR = residents.filter((r) => r.pgy >= 4 && r.status === 'research' && (hasHospRotation(r, 'CUH') || hasHospRotation(r, 'PMH')));
+  const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active' && (hasHospRotation(r, 'CUH') || hasHospRotation(r, 'PMH')));
+  const cmcPool = residents.filter((r) => r.pgy >= 2 && r.pgy <= 4 && r.status === 'active' && hasHospRotation(r, 'CMC'));
+  const vaPool  = residents.filter((r) => (r.pgy === 2 || r.pgy === 4) && r.status === 'active' && hasHospRotation(r, 'VA'));
 
   function poolList(pool: Resident[]) {
     if (!pool.length) return (
@@ -94,17 +104,19 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
     if (parseDate(schedStart) > parseDate(schedEnd)) { showToast('Start must be before end', true); return; }
     setGenerating(true);
     try {
-      const carryIn = await api<Record<string, { hours: number; availDays: number }>>('/jr-carry');
-      const scheduleData = generateSchedule(
-        residents,
-        allRequests,
-        scheduleName,
-        schedStart,
-        schedEnd,
-        false,
-        mode,
-        carryIn,
-      );
+      let scheduleData: AnyScheduleData;
+
+      if (hospitalGroup === 'CMC') {
+        if (!cmcPool.length) throw new Error('No active residents with a CMC rotation in this period');
+        scheduleData = generateCMCSchedule(cmcPool, allRequests, scheduleName, schedStart, schedEnd);
+      } else if (hospitalGroup === 'VA') {
+        if (!vaPool.length) throw new Error('No active residents with a VA rotation in this period');
+        scheduleData = generateVASchedule(vaPool, allRequests, scheduleName, schedStart, schedEnd);
+      } else {
+        const carryIn = await api<Record<string, { hours: number; availDays: number }>>('/jr-carry');
+        scheduleData = generateSchedule(residents, allRequests, scheduleName, schedStart, schedEnd, false, mode, carryIn);
+      }
+
       const result = await api<{ ok: boolean; id: string }>('/schedule/generate', 'POST', {
         scheduleData,
         name: scheduleName,
@@ -156,45 +168,22 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18, marginBottom: 18 }}>
-        <div className="card">
-          <div className="ch">
-            <div className="ct">Senior Pool</div>
-            <span className="bdg bg2">{srs.length} residents</span>
-          </div>
-          <div className="cb">{poolList(srs)}</div>
-        </div>
-        <div className="card">
-          <div className="ch">
-            <div className="ct">Research Senior</div>
-            <span className="bdg bpk">{resR.length} resident{resR.length !== 1 ? 's' : ''}</span>
-          </div>
-          <div className="cb">{poolList(resR)}</div>
-        </div>
-        <div className="card">
-          <div className="ch">
-            <div className="ct">Junior Pool</div>
-            <span className="bdg bb">{jrs.length} residents</span>
-          </div>
-          <div className="cb">{poolList(jrs)}</div>
-        </div>
-      </div>
-
+      {/* Hospital group selector */}
       <div className="card" style={{ marginBottom: 18 }}>
-        <div className="ch"><div className="ct">Schedule Type</div></div>
+        <div className="ch"><div className="ct">Hospital Group</div></div>
         <div className="cb" style={{ display: 'flex', gap: 10 }}>
           {([
-            { id: 'merged', label: '⚡ Merged (Senior + Junior)', desc: 'Generates both senior call weeks and junior call days together.' },
-            { id: 'senior', label: '🔶 Senior Only', desc: 'Generates senior call weeks only. No junior days.' },
-            { id: 'junior', label: '🔷 Junior Only', desc: 'Generates junior call days only. No senior weeks.' },
-          ] as { id: ScheduleMode; label: string; desc: string }[]).map(({ id, label, desc }) => (
+            { id: 'CUH_PMH', label: 'CUH / PMH', desc: 'Main call pool — seniors (PGY 4+) and juniors (PGY 2–3) at UT Southwestern hospitals.' },
+            { id: 'CMC',     label: 'CMC',        desc: "Children's Medical Center — PGY 2/3/4 on CMC rotation. Q3 weekdays + power weekends." },
+            { id: 'VA',      label: 'VA',          desc: 'Veterans Affairs — PGY 2 + PGY 4 on VA rotation. Weekly alternating call.' },
+          ] as { id: 'CUH_PMH' | 'CMC' | 'VA'; label: string; desc: string }[]).map(({ id, label, desc }) => (
             <div
               key={id}
-              onClick={() => setMode(id)}
+              onClick={() => setHospitalGroup(id)}
               style={{
                 flex: 1, padding: '12px 14px', borderRadius: 'var(--r)',
-                border: `2px solid ${mode === id ? 'var(--blue)' : 'var(--border)'}`,
-                background: mode === id ? 'var(--blue-dim)' : 'var(--s2)',
+                border: `2px solid ${hospitalGroup === id ? 'var(--blue)' : 'var(--border)'}`,
+                background: hospitalGroup === id ? 'var(--blue-dim)' : 'var(--s2)',
                 cursor: 'pointer', transition: 'all .15s',
               }}
             >
@@ -204,6 +193,82 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
           ))}
         </div>
       </div>
+
+      {/* Pool preview cards */}
+      {hospitalGroup === 'CUH_PMH' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18, marginBottom: 18 }}>
+          <div className="card">
+            <div className="ch">
+              <div className="ct">Senior Pool</div>
+              <span className="bdg bg2">{srs.length} residents</span>
+            </div>
+            <div className="cb">{poolList(srs)}</div>
+          </div>
+          <div className="card">
+            <div className="ch">
+              <div className="ct">Research Senior</div>
+              <span className="bdg bpk">{resR.length} resident{resR.length !== 1 ? 's' : ''}</span>
+            </div>
+            <div className="cb">{poolList(resR)}</div>
+          </div>
+          <div className="card">
+            <div className="ch">
+              <div className="ct">Junior Pool</div>
+              <span className="bdg bb">{jrs.length} residents</span>
+            </div>
+            <div className="cb">{poolList(jrs)}</div>
+          </div>
+        </div>
+      )}
+      {hospitalGroup === 'CMC' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 18, marginBottom: 18 }}>
+          <div className="card">
+            <div className="ch">
+              <div className="ct">CMC Call Pool</div>
+              <span className="bdg bb">{cmcPool.length} residents</span>
+            </div>
+            <div className="cb">{poolList(cmcPool)}</div>
+          </div>
+        </div>
+      )}
+      {hospitalGroup === 'VA' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 18, marginBottom: 18 }}>
+          <div className="card">
+            <div className="ch">
+              <div className="ct">VA Call Pool</div>
+              <span className="bdg bo">{vaPool.length} residents</span>
+            </div>
+            <div className="cb">{poolList(vaPool)}</div>
+          </div>
+        </div>
+      )}
+
+      {hospitalGroup === 'CUH_PMH' && (
+        <div className="card" style={{ marginBottom: 18 }}>
+          <div className="ch"><div className="ct">Schedule Type</div></div>
+          <div className="cb" style={{ display: 'flex', gap: 10 }}>
+            {([
+              { id: 'merged', label: '⚡ Merged (Senior + Junior)', desc: 'Generates both senior call weeks and junior call days together.' },
+              { id: 'senior', label: '🔶 Senior Only', desc: 'Generates senior call weeks only. No junior days.' },
+              { id: 'junior', label: '🔷 Junior Only', desc: 'Generates junior call days only. No senior weeks.' },
+            ] as { id: ScheduleMode; label: string; desc: string }[]).map(({ id, label, desc }) => (
+              <div
+                key={id}
+                onClick={() => setMode(id)}
+                style={{
+                  flex: 1, padding: '12px 14px', borderRadius: 'var(--r)',
+                  border: `2px solid ${mode === id ? 'var(--blue)' : 'var(--border)'}`,
+                  background: mode === id ? 'var(--blue-dim)' : 'var(--s2)',
+                  cursor: 'pointer', transition: 'all .15s',
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{label}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <button className="btn bgh" onClick={onBack}>← Back</button>
