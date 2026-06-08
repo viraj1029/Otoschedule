@@ -460,6 +460,16 @@ export function generateSchedule(
   });
 
   // Pick junior: enforce rest gap (2 days preferred, 1 day minimum), balance weekend/weekday separately
+  // Precompute each resident's effective rotation window for fast eligibility checks.
+  const rotEffStart: Record<string, Date> = {};
+  const rotEffEnd: Record<string, Date> = {};
+  jrs.forEach((r) => {
+    const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
+    const rE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
+    rotEffStart[r.id] = rS < bStart ? bStart : rS;
+    rotEffEnd[r.id]   = rE > bEnd   ? bEnd   : rE;
+  });
+
   function pickJr(key: string, ex: string | null = null, isWeekendSlot = false, skipGap = false, isTraumaDay = false): Resident {
     const d = parseDate(key);
 
@@ -477,7 +487,12 @@ export function generateSchedule(
         if (Math.abs(awr - bwr) > 0.001) return awr - bwr;
       }
       if (isTraumaDay) return jrTH[a.id] - jrTH[b.id];
-      return jrC[a.id] - jrC[b.id];
+      // Final tiebreaker: date-seeded hash so no single resident dominates all ties.
+      let h = 2166136261;
+      for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619) >>> 0;
+      const hA = (Math.imul(h ^ a.id.charCodeAt(0), 16777619) >>> 0);
+      const hB = (Math.imul(h ^ b.id.charCodeAt(0), 16777619) >>> 0);
+      return hA - hB;
     }
 
     function daysSince(r: Resident): number {
@@ -493,7 +508,12 @@ export function generateSchedule(
     // Progressive gap relaxation: prefer ≥3 days (q4+), fallback to ≥2 (q3), ≥1, then any
     const minGaps = skipGap ? [0] : [3, 2, 1, 0];
     for (const minGap of minGaps) {
-      const eligible = jrs.filter((r) => r.id !== ex && !offMap[r.id].has(key) && daysSince(r) >= minGap);
+      const eligible = jrs.filter((r) =>
+        r.id !== ex &&
+        !offMap[r.id].has(key) &&
+        d >= rotEffStart[r.id] && d <= rotEffEnd[r.id] &&
+        daysSince(r) >= minGap,
+      );
       if (!eligible.length) continue;
       if (isWeekendSlot) {
         // Prefer residents who haven't worked a weekend in the last 7 days (no consecutive weekends)
