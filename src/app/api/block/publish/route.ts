@@ -10,9 +10,25 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Chief access required' }, { status: 401 });
   }
 
-  const { published } = await req.json();
+  const { published, scheduleId } = await req.json();
 
-  await sql`UPDATE blocks SET published = ${Boolean(published)} WHERE id = ${DEFAULT_BLOCK_ID}`;
+  if (scheduleId) {
+    // Publish or unpublish a specific schedule
+    await sql`
+      UPDATE schedules SET published = ${Boolean(published)}
+      WHERE id = ${scheduleId} AND block_id = ${DEFAULT_BLOCK_ID}
+    `;
+    // Keep blocks.published in sync: true if any schedule is published
+    const { rows } = await sql`
+      SELECT EXISTS(SELECT 1 FROM schedules WHERE block_id = ${DEFAULT_BLOCK_ID} AND published = TRUE) AS any_published
+    `;
+    await sql`
+      UPDATE blocks SET published = ${rows[0].any_published} WHERE id = ${DEFAULT_BLOCK_ID}
+    `;
+  } else {
+    // Legacy: publish/unpublish at block level (affects all schedules)
+    await sql`UPDATE blocks SET published = ${Boolean(published)} WHERE id = ${DEFAULT_BLOCK_ID}`;
+  }
 
   return NextResponse.json({ ok: true });
 }

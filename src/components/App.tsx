@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { Block, Resident, Request, ScheduleData, Step, Role } from '@/types';
+import type { Block, Resident, Request, AnyScheduleData, Schedule, Step, Role } from '@/types';
 import LoginGate from './LoginGate';
 import TopBar from './TopBar';
 import BlockSetup from './steps/BlockSetup';
@@ -17,7 +17,10 @@ export interface AppState {
   block: Block | null;
   residents: Resident[];
   allRequests: Request[];
-  schedule: ScheduleData | null;
+  schedule: AnyScheduleData | null;
+  schedules: Schedule[];       // list of all schedule metadata
+  activeScheduleId: string | null; // which schedule the chief is viewing
+  activeScheduleType: string | null;
   step: Step;
 }
 
@@ -43,6 +46,9 @@ export default function App() {
     residents: [],
     allRequests: [],
     schedule: null,
+    schedules: [],
+    activeScheduleId: null,
+    activeScheduleType: null,
     step: 1,
   });
 
@@ -54,13 +60,14 @@ export default function App() {
   }, []);
 
   const loadData = useCallback(async () => {
-    const [block, residents, allRequests, schedule] = await Promise.all([
+    const [block, residents, allRequests, schedule, schedules] = await Promise.all([
       api<Block | null>('/block').catch(() => null),
       api<Resident[]>('/residents').catch(() => [] as Resident[]),
       api<Request[]>('/requests').catch(() => [] as Request[]),
-      api<ScheduleData | null>('/schedule').catch(() => null),
+      api<AnyScheduleData | null>('/schedule').catch(() => null),
+      api<Schedule[]>('/schedules').catch(() => [] as Schedule[]),
     ]);
-    setState((s) => ({ ...s, block: block ?? s.block, residents, allRequests, schedule }));
+    setState((s) => ({ ...s, block: block ?? s.block, residents, allRequests, schedule, schedules }));
   }, []);
 
   // Check existing session on mount
@@ -130,8 +137,33 @@ export default function App() {
     setState((s) => ({ ...s, block }));
   }, []);
 
-  const setSchedule = useCallback((schedule: ScheduleData | null) => {
+  const setSchedule = useCallback((schedule: AnyScheduleData | null) => {
     setState((s) => ({ ...s, schedule }));
+  }, []);
+
+  const loadScheduleById = useCallback(async (id: string) => {
+    try {
+      const sched = await api<AnyScheduleData | null>(`/schedule?id=${id}`);
+      setState((s) => ({ ...s, schedule: sched, activeScheduleId: id }));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const reloadScheduleList = useCallback(async () => {
+    const schedules = await api<Schedule[]>('/schedules').catch(() => [] as Schedule[]);
+    setState((s) => ({ ...s, schedules }));
+  }, []);
+
+  const deleteSchedule = useCallback(async (id: string) => {
+    await api(`/schedules/${id}`, 'DELETE');
+    const schedules = await api<Schedule[]>('/schedules').catch(() => [] as Schedule[]);
+    setState((s) => ({
+      ...s,
+      schedules,
+      schedule: s.activeScheduleId === id ? null : s.schedule,
+      activeScheduleId: s.activeScheduleId === id ? null : s.activeScheduleId,
+    }));
   }, []);
 
   const isLoggedIn = Boolean(state.role);
@@ -208,8 +240,10 @@ export default function App() {
                   residents={state.residents}
                   allRequests={state.allRequests}
                   schedule={state.schedule}
-                  onScheduleGenerated={(sched) => {
+                  onScheduleGenerated={async (sched, scheduleId) => {
                     setSchedule(sched);
+                    setState((s) => ({ ...s, activeScheduleId: scheduleId, activeScheduleType: (sched as { type?: string }).type ?? 'cuh_pmh' }));
+                    await reloadScheduleList();
                     goStep(4);
                   }}
                   onBack={() => goStep(2)}
@@ -219,12 +253,17 @@ export default function App() {
               {state.role === 'chief' && state.step === 4 && (
                 <ScheduleView
                   schedule={state.schedule}
+                  schedules={state.schedules}
+                  activeScheduleId={state.activeScheduleId}
                   residents={state.residents}
                   allRequests={state.allRequests}
                   block={state.block}
                   role="chief"
                   onScheduleChanged={setSchedule}
                   onBlockChanged={setBlock}
+                  onScheduleSelected={loadScheduleById}
+                  onScheduleListChanged={reloadScheduleList}
+                  onScheduleDeleted={deleteSchedule}
                   onRegenerate={() => goStep(3)}
                   showToast={showToast}
                 />

@@ -44,20 +44,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ action: 'removed', date, type });
   }
 
-  // Adding — check vacation cap
-  if (type === 'vacation') {
-    const { rows: countRows } = await sql`
-      SELECT COUNT(*) as cnt FROM requests
-      WHERE resident_id = ${residentId}
-        AND block_id = ${DEFAULT_BLOCK_ID}
-        AND type = 'vacation'
-    `;
-    const count = Number(countRows[0]?.cnt ?? 0);
-    if (count >= 5) {
-      return NextResponse.json({ error: 'Vacation cap reached (5 days max)' }, { status: 400 });
-    }
-  }
-
   const id = uuidv4();
   await sql`
     INSERT INTO requests (id, resident_id, block_id, date, type)

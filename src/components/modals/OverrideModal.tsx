@@ -2,14 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import type { Resident, ScheduleData } from '@/types';
-import { HOLIDAYS, parseDate, dk } from '@/lib/scheduler';
+import { HOLIDAYS, parseDate, dk, addDays } from '@/lib/scheduler';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 interface Props {
   open: boolean;
-  dateKey: string | null;
+  dateKeys: string[];
   schedule: ScheduleData;
   residents: Resident[];
   onSave: (updated: ScheduleData) => void;
@@ -17,35 +17,104 @@ interface Props {
   showToast: (msg: string, err?: boolean) => void;
 }
 
-export default function OverrideModal({ open, dateKey, schedule, residents, onSave, onClose, showToast }: Props) {
+function removeSeniorDays(updated: ScheduleData, keys: string[]) {
+  const sorted = [...keys].sort();
+  const ranges: { start: string; end: string }[] = [];
+  let rStart = sorted[0], rEnd = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = parseDate(sorted[i - 1]);
+    const curr = parseDate(sorted[i]);
+    if ((curr.getTime() - prev.getTime()) / 86400000 === 1) {
+      rEnd = sorted[i];
+    } else {
+      ranges.push({ start: rStart, end: rEnd });
+      rStart = rEnd = sorted[i];
+    }
+  }
+  ranges.push({ start: rStart, end: rEnd });
+
+  for (const range of ranges) {
+    const newWeeks: ScheduleData['seniorWeeks'] = [];
+    for (const w of updated.seniorWeeks) {
+      if (w.wE < range.start || w.wS > range.end) { newWeeks.push(w); continue; }
+      if (w.wS < range.start) newWeeks.push({ ...w, wE: dk(addDays(parseDate(range.start), -1)) });
+      if (w.wE > range.end) newWeeks.push({ ...w, wS: dk(addDays(parseDate(range.end), 1)) });
+    }
+    updated.seniorWeeks = newWeeks.sort((a, b) => a.wS.localeCompare(b.wS));
+  }
+}
+
+function applyMultiDayOverride(updated: ScheduleData, keys: string[], newRes: Resident) {
+  const sorted = [...keys].sort();
+
+  // Build contiguous ranges from sorted keys
+  const ranges: { start: string; end: string }[] = [];
+  let rStart = sorted[0], rEnd = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = parseDate(sorted[i - 1]);
+    const curr = parseDate(sorted[i]);
+    const diff = (curr.getTime() - prev.getTime()) / 86400000;
+    if (diff === 1) {
+      rEnd = sorted[i];
+    } else {
+      ranges.push({ start: rStart, end: rEnd });
+      rStart = rEnd = sorted[i];
+    }
+  }
+  ranges.push({ start: rStart, end: rEnd });
+
+  for (const range of ranges) {
+    const newWeeks: ScheduleData['seniorWeeks'] = [];
+    for (const w of updated.seniorWeeks) {
+      if (w.wE < range.start || w.wS > range.end) {
+        newWeeks.push(w);
+        continue;
+      }
+      // Part before range
+      if (w.wS < range.start) {
+        newWeeks.push({ ...w, wE: dk(addDays(parseDate(range.start), -1)) });
+      }
+      // Overlap — assign to new resident
+      const overS = w.wS > range.start ? w.wS : range.start;
+      const overE = w.wE < range.end ? w.wE : range.end;
+      newWeeks.push({ wS: overS, wE: overE, res: newRes, isBackup: w.isBackup, override: true });
+      // Part after range
+      if (w.wE > range.end) {
+        newWeeks.push({ ...w, wS: dk(addDays(parseDate(range.end), 1)) });
+      }
+    }
+    updated.seniorWeeks = newWeeks.sort((a, b) => a.wS.localeCompare(b.wS));
+  }
+}
+
+export default function OverrideModal({ open, dateKeys, schedule, residents, onSave, onClose, showToast }: Props) {
   const [srId, setSrId] = useState('');
   const [jrId, setJrId] = useState('');
   const [note, setNote] = useState('');
 
   useEffect(() => {
     if (open) { setSrId(''); setJrId(''); setNote(''); }
-  }, [open, dateKey]);
+  }, [open, dateKeys.join(',')]);
 
   function saveOverride() {
-    if (!dateKey || !schedule) return;
+    if (!dateKeys.length || !schedule) return;
     const updated = JSON.parse(JSON.stringify(schedule)) as ScheduleData;
 
-    if (srId) {
+    if (srId === '__remove__') {
+      removeSeniorDays(updated, dateKeys);
+    } else if (srId) {
       const res = residents.find((r) => r.id === srId);
-      if (res) {
-        updated.seniorWeeks.forEach((w) => {
-          if (dateKey >= w.wS && dateKey <= w.wE) {
-            w.res = res;
-            w.override = true;
-          }
-        });
-      }
+      if (res) applyMultiDayOverride(updated, dateKeys, res);
     }
-    if (jrId) {
+    if (jrId === '__remove__') {
+      updated.juniorDays = updated.juniorDays.filter((d) => !dateKeys.includes(d.dateKey));
+    } else if (jrId) {
       const res = residents.find((r) => r.id === jrId);
       if (res) {
-        const jd = updated.juniorDays.find((d) => d.dateKey === dateKey);
-        if (jd) { jd.res = res; jd.override = true; }
+        dateKeys.forEach((key) => {
+          const jd = updated.juniorDays.find((d) => d.dateKey === key);
+          if (jd) { jd.res = res; jd.override = true; }
+        });
       }
     }
     onSave(updated);
@@ -53,16 +122,19 @@ export default function OverrideModal({ open, dateKey, schedule, residents, onSa
     onClose();
   }
 
-  if (!open || !dateKey) return null;
+  if (!open || !dateKeys.length) return null;
 
-  const d = parseDate(dateKey);
   const srs = residents.filter((r) => r.pgy >= 4 && r.status !== 'away');
   const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
 
-  function fmtDate(s: string) {
+  function fmtDateKey(s: string) {
     const d = parseDate(s);
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return `${DOW[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`;
   }
+
+  const subtitle = dateKeys.length === 1
+    ? `${fmtDateKey(dateKeys[0])}${HOLIDAYS.has(dateKeys[0]) ? ' 🎉 Holiday' : ''}`
+    : `${dateKeys.length} days selected (${fmtDateKey(dateKeys[0])} – ${fmtDateKey(dateKeys[dateKeys.length - 1])})`;
 
   return (
     <div className="modal-bg open">
@@ -70,11 +142,7 @@ export default function OverrideModal({ open, dateKey, schedule, residents, onSa
         <div className="mh">
           <div>
             <div className="mt">Override Assignment</div>
-            <div className="ms">
-              {DOW[d.getDay()]}, {MONTHS[d.getMonth()]} {d.getDate()} —{' '}
-              {fmtDate(dateKey)}
-              {HOLIDAYS.has(dateKey) ? ' 🎉 Holiday' : ''}
-            </div>
+            <div className="ms">{subtitle}</div>
           </div>
           <button className="mx" onClick={onClose}>✕</button>
         </div>
@@ -84,6 +152,7 @@ export default function OverrideModal({ open, dateKey, schedule, residents, onSa
               <label className="flb">Senior on Call</label>
               <select value={srId} onChange={(e) => setSrId(e.target.value)}>
                 <option value="">— no change —</option>
+                <option value="__remove__">✕ Remove (no coverage)</option>
                 {srs.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.name} (PGY-{r.pgy})
@@ -95,6 +164,7 @@ export default function OverrideModal({ open, dateKey, schedule, residents, onSa
               <label className="flb">Junior on Call</label>
               <select value={jrId} onChange={(e) => setJrId(e.target.value)}>
                 <option value="">— no change —</option>
+                <option value="__remove__">✕ Remove (no coverage)</option>
                 {jrs.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.name} (PGY-{r.pgy})
