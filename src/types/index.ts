@@ -20,19 +20,30 @@ export interface Schedule {
   generated_at?: string;
 }
 
+export type Hospital = 'CUH' | 'PMH' | 'CMC' | 'VA';
+
+export interface Rotation {
+  id: string;
+  resident_id: string;
+  hospital: Hospital;
+  start_date: string; // YYYY-MM-DD
+  end_date: string;   // YYYY-MM-DD
+}
+
 export interface Resident {
   id: string;
   person_id?: string;    // links to global persons table
   block_id: string;
   name: string;
   pgy: number;
-  hospital: 'CUH' | 'PMH';
+  hospital: Hospital;   // primary / legacy hospital field
   status: 'active' | 'research' | 'away';
   pin: string;
   color: string;
   sort_order: number;
-  rotation_start?: string | null;
-  rotation_end?: string | null;
+  rotation_start?: string | null;  // legacy — superseded by rotations[]
+  rotation_end?: string | null;    // legacy — superseded by rotations[]
+  rotations?: Rotation[];          // rotation segments from the rotations table
 }
 
 export interface Request {

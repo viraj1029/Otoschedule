@@ -102,6 +102,19 @@ export const TRAUMA_WEEKS = buildTraumaSet();
 
 export type ScheduleMode = 'merged' | 'senior' | 'junior';
 
+// Returns true if the resident has a CUH or PMH rotation segment overlapping [periodStart, periodEnd].
+// Falls back to checking r.hospital if no segments are defined.
+function hasMainHospitalRotation(r: Resident, periodStart: Date, periodEnd: Date): boolean {
+  if (r.rotations && r.rotations.length > 0) {
+    return r.rotations.some((seg) =>
+      (seg.hospital === 'CUH' || seg.hospital === 'PMH') &&
+      parseDate(seg.start_date) <= periodEnd &&
+      parseDate(seg.end_date)   >= periodStart,
+    );
+  }
+  return r.hospital === 'CUH' || r.hospital === 'PMH';
+}
+
 export function generateSchedule(
   residents: Resident[],
   requests: Request[],
@@ -112,41 +125,54 @@ export function generateSchedule(
   mode: ScheduleMode = 'merged',
   carryIn: Record<string, { hours: number; availDays: number }> = {},
 ): ScheduleData {
-  const srs = residents
+  const bStart = parseDate(bStartStr);
+  const bEnd   = parseDate(bEndStr);
+
+  // Filter to residents who have a CUH/PMH rotation overlapping this schedule period
+  const eligibleResidents = residents.filter((r) => hasMainHospitalRotation(r, bStart, bEnd));
+
+  const srs = eligibleResidents
     .filter((r) => r.pgy >= 4 && r.status === 'active')
     .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
-  const resR = residents.filter((r) => r.pgy >= 4 && r.status === 'research');
-  const jrs = residents
+  const resR = eligibleResidents.filter((r) => r.pgy >= 4 && r.status === 'research');
+  const jrs = eligibleResidents
     .filter((r) => r.pgy <= 3 && r.status === 'active')
     .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
 
   const needSr = mode === 'merged' || mode === 'senior';
   const needJr = mode === 'merged' || mode === 'junior';
 
-  if (needSr && !srs.length) throw new Error('Need at least 1 active senior (PGY 4+) to generate a senior schedule');
-  if (needJr && !jrs.length) throw new Error('Need at least 1 active junior (PGY 1–3) to generate a junior schedule');
-
-  const bStart = parseDate(bStartStr);
-  const bEnd = parseDate(bEndStr);
+  if (needSr && !srs.length) throw new Error('Need at least 1 active senior (PGY 4+) in a CUH/PMH rotation for this period');
+  if (needJr && !jrs.length) throw new Error('Need at least 1 active junior (PGY 1–3) in a CUH/PMH rotation for this period');
 
   // Build off-map: residentId → Set<dateKey> (requests + off-rotation dates)
   const offMap: Record<string, Set<string>> = {};
   const rotDays: Record<string, number> = {}; // effective rotation days within block
-  residents.forEach((r) => {
+  eligibleResidents.forEach((r) => {
     const vac = new Set(requests.filter((req) => req.resident_id === r.id && (req.type === 'vacation' || req.type === 'vacation_official')).map((req) => req.date));
     const wk  = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'weekend').map((req) => req.date));
     const hol = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'holiday').map((req) => req.date));
     offMap[r.id] = new Set([...vac, ...wk, ...hol]);
 
-    // Block dates outside the resident's rotation window
-    const rotStart = r.rotation_start ? parseDate(r.rotation_start) : bStart;
-    const rotEnd   = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
-    const effStart = rotStart < bStart ? bStart : rotStart;
-    const effEnd   = rotEnd   > bEnd   ? bEnd   : rotEnd;
+    // Block dates outside the resident's rotation window.
+    // Use rotation segments if available; otherwise fall back to legacy fields.
+    const segs = r.rotations && r.rotations.length > 0 ? r.rotations : null;
     let cnt = 0;
     let dd = new Date(bStart);
     while (dd <= bEnd) {
-      if (dd < effStart || dd > effEnd) offMap[r.id].add(dk(dd));
+      let onRotation: boolean;
+      if (segs) {
+        onRotation = segs.some((seg) => {
+          const s = parseDate(seg.start_date);
+          const e = parseDate(seg.end_date);
+          return dd >= s && dd <= e;
+        });
+      } else {
+        const rotStart = r.rotation_start ? parseDate(r.rotation_start) : bStart;
+        const rotEnd   = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
+        onRotation = dd >= rotStart && dd <= rotEnd;
+      }
+      if (!onRotation) offMap[r.id].add(dk(dd));
       else cnt++;
       dd = addDays(dd, 1);
     }

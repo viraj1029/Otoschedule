@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { Block, Resident, Request, Role, ScheduleData } from '@/types';
+import type { Block, Resident, Request, Role, ScheduleData, Hospital } from '@/types';
 import { HOLIDAYS, parseDate, fmtShort } from '@/lib/scheduler';
 import { api } from '../App';
 import ScheduleView from './ScheduleView';
@@ -48,49 +48,51 @@ function VacationsView({ residents, allRequests, bStart }: {
     { label: `Apr – Jun ${acYear + 1}`, start: `${acYear + 1}-04-01`, end: `${acYear + 1}-06-30` },
   ];
 
-  // Deduplicate by person_id, collect all rotation records per person
-  const personMap = new Map<string, Resident[]>();
+  // One record per person (after migration, duplicates are merged)
+  const personMap = new Map<string, Resident>();
   for (const r of residents) {
     const key = r.person_id ?? r.id;
-    if (!personMap.has(key)) personMap.set(key, []);
-    personMap.get(key)!.push(r);
+    if (!personMap.has(key)) personMap.set(key, r);
   }
 
-  // For a date, find the hospital from the resident's rotation records
-  function hospitalForDate(records: Resident[], dateStr: string): 'CUH' | 'PMH' {
-    const match = records.find(
-      (r) => dateStr >= (r.rotation_start ?? '0000-01-01') && dateStr <= (r.rotation_end ?? '9999-12-31'),
-    );
-    return match?.hospital ?? records[0].hospital;
+  // For a date, find the hospital from the resident's rotation segments
+  function hospitalForDate(rep: Resident, dateStr: string): Hospital {
+    if (rep.rotations && rep.rotations.length > 0) {
+      const seg = rep.rotations.find((s) => dateStr >= s.start_date && dateStr <= s.end_date);
+      return (seg?.hospital ?? rep.hospital) as Hospital;
+    }
+    return rep.hospital;
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       {quarters.map((q) => {
-        // For each person, collect official vacation dates in this quarter
-        const cuh: { res: Resident; dates: string[] }[] = [];
-        const pmh: { res: Resident; dates: string[] }[] = [];
+        // For each person, collect official vacation dates in this quarter grouped by hospital
+        const byHospital = new Map<Hospital, { res: Resident; dates: string[] }[]>();
 
-        for (const [, records] of personMap) {
-          const allResIds = new Set(records.map((r) => r.id));
+        for (const [, rep] of personMap) {
           const officialDates = allRequests
-            .filter((r) => allResIds.has(r.resident_id) && r.type === 'vacation_official' && r.date >= q.start && r.date <= q.end)
+            .filter((r) => r.resident_id === rep.id && r.type === 'vacation_official' && r.date >= q.start && r.date <= q.end)
             .map((r) => r.date)
             .sort();
           if (officialDates.length === 0) continue;
 
-          const rep = records[0];
-          // Group dates by hospital
-          const cuhDates = officialDates.filter((d) => hospitalForDate(records, d) === 'CUH');
-          const pmhDates = officialDates.filter((d) => hospitalForDate(records, d) === 'PMH');
-          if (cuhDates.length) cuh.push({ res: rep, dates: cuhDates });
-          if (pmhDates.length) pmh.push({ res: rep, dates: pmhDates });
+          // Group dates by which hospital covers that date
+          const byHosp: Record<string, string[]> = {};
+          for (const d of officialDates) {
+            const h = hospitalForDate(rep, d);
+            (byHosp[h] ??= []).push(d);
+          }
+          for (const [hosp, dates] of Object.entries(byHosp)) {
+            if (!byHospital.has(hosp as Hospital)) byHospital.set(hosp as Hospital, []);
+            byHospital.get(hosp as Hospital)!.push({ res: rep, dates });
+          }
         }
 
-        cuh.sort((a, b) => a.res.name.localeCompare(b.res.name));
-        pmh.sort((a, b) => a.res.name.localeCompare(b.res.name));
+        for (const list of byHospital.values()) list.sort((a, b) => a.res.name.localeCompare(b.res.name));
 
-        const hasAny = cuh.length > 0 || pmh.length > 0;
+        const hasAny = byHospital.size > 0;
+        const hospOrder: Hospital[] = ['CUH', 'PMH', 'CMC', 'VA'];
         return (
           <div key={q.label} className="card">
             <div className="ch"><div className="ct">{q.label}</div></div>
@@ -98,8 +100,8 @@ function VacationsView({ residents, allRequests, bStart }: {
               {!hasAny && (
                 <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>No official vacation days scheduled</div>
               )}
-              {(['CUH', 'PMH'] as const).map((hosp) => {
-                const list = hosp === 'CUH' ? cuh : pmh;
+              {hospOrder.map((hosp) => {
+                const list = byHospital.get(hosp) ?? [];
                 if (list.length === 0) return null;
                 return (
                   <div key={hosp} style={{ marginBottom: 16 }}>

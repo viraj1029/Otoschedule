@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { Block, Resident } from '@/types';
+import type { Block, Resident, Hospital } from '@/types';
 import { HOLIDAYS, parseDate, fmtShort } from '@/lib/scheduler';
 import { api } from '../App';
 import AddResidentModal from '../modals/AddResidentModal';
@@ -90,6 +90,10 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
   const res = residents.filter((r) => r.pgy >= 4 && r.status === 'research');
   const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
 
+  function hasRotationAt(r: Resident, hosp: Hospital) {
+    return r.rotations?.some((rot) => rot.hospital === hosp) ?? r.hospital === hosp;
+  }
+
   const bStart = parseDate(startDate);
   const bEnd = parseDate(endDate);
   const inBlockHolidays = [...HOLIDAYS]
@@ -164,7 +168,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
           <table className="ptable">
             <thead>
               <tr>
-                <th>Name</th><th>PGY</th><th>Role</th><th>Hospital</th><th>Status</th><th>Rotation</th><th>PIN</th><th></th>
+                <th>Name</th><th>PGY</th><th>Role</th><th>Status</th><th>Rotations</th><th>PIN</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -193,15 +197,21 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
                         {r.status === 'research' ? 'Research (backup)' : r.pgy >= 4 ? 'Senior Call' : 'Junior Call'}
                       </span>
                     </td>
-                    <td><span className={`bdg ${r.hospital === 'CUH' ? 'bgr' : 'bp'}`}>{r.hospital}</span></td>
                     <td>{statusBadge}</td>
                     <td>
-                      {r.rotation_start || r.rotation_end ? (
-                        <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: "'JetBrains Mono',monospace" }}>
-                          {r.rotation_start ? fmtShort(r.rotation_start) : '…'} → {r.rotation_end ? fmtShort(r.rotation_end) : '…'}
-                        </span>
+                      {r.rotations && r.rotations.length > 0 ? (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {r.rotations.map((rot) => {
+                            const hospColor: Record<Hospital, string> = { CUH: 'bgr', PMH: 'bp', CMC: 'bb', VA: 'bo' };
+                            return (
+                              <span key={rot.id} className={`bdg ${hospColor[rot.hospital]}`} title={`${rot.start_date} → ${rot.end_date}`}>
+                                {rot.hospital} {fmtShort(rot.start_date)}–{fmtShort(rot.end_date)}
+                              </span>
+                            );
+                          })}
+                        </div>
                       ) : (
-                        <span style={{ fontSize: 11, color: 'var(--muted2)', fontStyle: 'italic' }}>Full block</span>
+                        <span style={{ fontSize: 11, color: 'var(--muted2)', fontStyle: 'italic' }}>No segments</span>
                       )}
                     </td>
                     <td>
@@ -239,13 +249,14 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
       </div>
 
       {/* Pool summary */}
-      <div className="srow" style={{ gridTemplateColumns: 'repeat(5,1fr)', marginBottom: 20 }}>
+      <div className="srow" style={{ gridTemplateColumns: 'repeat(6,1fr)', marginBottom: 20 }}>
         {[
           { l: 'Seniors Active', v: srs.length, c: 'var(--gold)' },
           { l: 'Research Sr', v: res.length, c: 'var(--pink)' },
           { l: 'Juniors PGY-2/3', v: jrs.length, c: 'var(--blue)' },
-          { l: 'CUH', v: residents.filter((r) => r.hospital === 'CUH' && r.status !== 'away').length, c: 'var(--green)' },
-          { l: 'PMH', v: residents.filter((r) => r.hospital === 'PMH' && r.status !== 'away').length, c: 'var(--purple)' },
+          { l: 'CUH', v: residents.filter((r) => r.status !== 'away' && hasRotationAt(r, 'CUH')).length, c: 'var(--green)' },
+          { l: 'PMH', v: residents.filter((r) => r.status !== 'away' && hasRotationAt(r, 'PMH')).length, c: 'var(--purple)' },
+          { l: 'CMC', v: residents.filter((r) => r.status !== 'away' && hasRotationAt(r, 'CMC')).length, c: 'var(--blue)' },
         ].map((s) => (
           <div key={s.l} className="sc">
             <div className="sn" style={{ color: s.c }}>{s.v}</div>
@@ -263,6 +274,8 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
         onClose={() => setEditResident(null)}
         onSaved={onResidentsChanged}
         showToast={showToast}
+        blockStart={startDate}
+        blockEnd={endDate}
       />
       <AddResidentModal
         open={addModalOpen}
@@ -270,6 +283,8 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
         onAdded={handleAdded}
         showToast={showToast}
         existingResidents={residents}
+        blockStart={startDate}
+        blockEnd={endDate}
       />
       <PinDisplayModal
         open={pinModal.open}
