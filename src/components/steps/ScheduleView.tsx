@@ -718,6 +718,16 @@ export default function ScheduleView({
     if (!currentResId || !schedule) return null;
     const res = residents.find((r) => r.id === currentResId);
     if (!res) return null;
+    if (!cuhSched) {
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--muted)', flexDirection: 'column', gap: 12 }}>
+          <div>Personal stats are based on the CUH/PMH schedule.</div>
+          {schedules.some((s) => (s.schedule_type ?? 'cuh_pmh') === 'cuh_pmh') && (
+            <button className="btn bsm bgh" onClick={() => switchToTab('cuh_pmh')}>Load CUH/PMH Schedule</button>
+          )}
+        </div>
+      );
+    }
     const isJunior = res.pgy <= 3;
     const months = getBlockMonths();
     const prefix = statsMonth

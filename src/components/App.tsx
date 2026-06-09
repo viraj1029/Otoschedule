@@ -232,6 +232,8 @@ export default function App() {
                   onNext={null}
                   showToast={showToast}
                   schedule={state.schedule}
+                  schedules={state.schedules}
+                  onScheduleSelected={loadScheduleById}
                 />
               )}
               {state.role === 'chief' && state.step === 3 && (

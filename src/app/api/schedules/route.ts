@@ -10,12 +10,20 @@ export async function GET() {
     return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
   }
 
-  const { rows } = await sql`
-    SELECT id, block_id, name, start_date, end_date, published, generated_at, schedule_type
-    FROM schedules
-    WHERE block_id = ${DEFAULT_BLOCK_ID}
-    ORDER BY generated_at DESC
-  `;
+  const isResident = session.role === 'resident';
+  const { rows } = isResident
+    ? await sql`
+        SELECT id, block_id, name, start_date, end_date, published, generated_at, schedule_type
+        FROM schedules
+        WHERE block_id = ${DEFAULT_BLOCK_ID} AND published = TRUE
+        ORDER BY generated_at DESC
+      `
+    : await sql`
+        SELECT id, block_id, name, start_date, end_date, published, generated_at, schedule_type
+        FROM schedules
+        WHERE block_id = ${DEFAULT_BLOCK_ID}
+        ORDER BY generated_at DESC
+      `;
 
   return NextResponse.json(rows);
 }

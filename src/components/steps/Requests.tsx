@@ -21,6 +21,8 @@ interface Props {
   onNext: (() => void) | null;
   showToast: (msg: string, err?: boolean) => void;
   schedule?: AnyScheduleData | null;
+  schedules?: import('@/types').Schedule[];
+  onScheduleSelected?: (id: string) => void;
 }
 
 function getResRequests(allRequests: Request[], resIds: string[]) {
@@ -185,7 +187,7 @@ function avatar(res: Resident, size = 26) {
 
 export default function Requests({
   block, residents, allRequests, role, currentResId, currentResidentFull,
-  onRequestsChanged, onBack, onNext, showToast, schedule,
+  onRequestsChanged, onBack, onNext, showToast, schedule, schedules, onScheduleSelected,
 }: Props) {
   const bStart = block ? parseDate(block.start_date) : parseDate('2026-07-01');
   const bEnd = block ? parseDate(block.end_date) : parseDate('2026-09-30');
@@ -372,12 +374,14 @@ export default function Requests({
       {isResidentWithPublishedSchedule && resTab === 'schedule' && schedule && (
         <ScheduleView
           schedule={schedule}
+          schedules={schedules}
           residents={residents}
           allRequests={allRequests}
           block={block}
           role="resident"
           onScheduleChanged={() => {}}
           onBlockChanged={() => {}}
+          onScheduleSelected={onScheduleSelected}
           onRegenerate={() => {}}
           showToast={showToast}
           currentResId={currentResId}
