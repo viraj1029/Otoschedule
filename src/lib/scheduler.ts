@@ -11,6 +11,10 @@ import type {
   JuniorDayType,
   ResBkpWeek,
   ResBkpDay,
+  CMCDay,
+  CMCScheduleData,
+  VAWeek,
+  VAScheduleData,
 } from '@/types';
 
 // ─── US Federal Holidays (static set matching the original) ──────────────────
@@ -102,6 +106,33 @@ export const TRAUMA_WEEKS = buildTraumaSet();
 
 export type ScheduleMode = 'merged' | 'senior' | 'junior';
 
+// Returns true if the resident has a CUH, PMH, or Research rotation segment overlapping [periodStart, periodEnd].
+// Research residents (PGY4+) count as CUH/PMH eligible because they do backup weeks there.
+// Falls back to checking r.hospital / r.status if no segments are defined.
+function hasMainHospitalRotation(r: Resident, periodStart: Date, periodEnd: Date): boolean {
+  if (r.rotations && r.rotations.length > 0) {
+    return r.rotations.some((seg) =>
+      (seg.hospital === 'CUH' || seg.hospital === 'PMH' ||
+       (seg.hospital === 'Research' && r.pgy >= 4)) &&
+      parseDate(seg.start_date) <= periodEnd &&
+      parseDate(seg.end_date)   >= periodStart,
+    );
+  }
+  return r.hospital === 'CUH' || r.hospital === 'PMH' || r.status === 'research';
+}
+
+// Returns true if the resident is on a Research rotation overlapping [periodStart, periodEnd].
+function hasResearchRotation(r: Resident, periodStart: Date, periodEnd: Date): boolean {
+  if (r.rotations && r.rotations.length > 0) {
+    return r.rotations.some((seg) =>
+      seg.hospital === 'Research' &&
+      parseDate(seg.start_date) <= periodEnd &&
+      parseDate(seg.end_date)   >= periodStart,
+    );
+  }
+  return r.status === 'research'; // legacy fallback
+}
+
 export function generateSchedule(
   residents: Resident[],
   requests: Request[],
@@ -110,42 +141,77 @@ export function generateSchedule(
   bEndStr: string,
   blockPublished: boolean,
   mode: ScheduleMode = 'merged',
+  carryIn: Record<string, { hours: number; availDays: number }> = {},
 ): ScheduleData {
-  const srs = residents
-    .filter((r) => r.pgy >= 4 && r.status === 'active')
+  const bStart = parseDate(bStartStr);
+  const bEnd   = parseDate(bEndStr);
+
+  // Filter to residents who have a CUH/PMH rotation overlapping this schedule period
+  const eligibleResidents = residents.filter((r) => hasMainHospitalRotation(r, bStart, bEnd));
+
+  const resR = eligibleResidents.filter((r) => r.pgy >= 4 && hasResearchRotation(r, bStart, bEnd));
+  const resRIds = new Set(resR.map((r) => r.id));
+  const srs = eligibleResidents
+    .filter((r) => r.pgy >= 4 && r.status === 'active' && !resRIds.has(r.id))
     .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
-  const resR = residents.filter((r) => r.pgy >= 4 && r.status === 'research');
-  const jrs = residents
+  const jrs = eligibleResidents
     .filter((r) => r.pgy <= 3 && r.status === 'active')
     .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
 
   const needSr = mode === 'merged' || mode === 'senior';
   const needJr = mode === 'merged' || mode === 'junior';
 
-  if (needSr && !srs.length) throw new Error('Need at least 1 active senior (PGY 4+) to generate a senior schedule');
-  if (needJr && !jrs.length) throw new Error('Need at least 1 active junior (PGY 1–3) to generate a junior schedule');
-
-  const bStart = parseDate(bStartStr);
-  const bEnd = parseDate(bEndStr);
+  if (needSr && !srs.length) throw new Error('Need at least 1 active senior (PGY 4+) in a CUH/PMH rotation for this period');
+  if (needJr && !jrs.length) throw new Error('Need at least 1 active junior (PGY 1–3) in a CUH/PMH rotation for this period');
 
   // Build off-map: residentId → Set<dateKey> (requests + off-rotation dates)
   const offMap: Record<string, Set<string>> = {};
   const rotDays: Record<string, number> = {}; // effective rotation days within block
-  residents.forEach((r) => {
-    const vac = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'vacation').map((req) => req.date));
+  eligibleResidents.forEach((r) => {
+    const vac = new Set(requests.filter((req) => req.resident_id === r.id && (req.type === 'vacation' || req.type === 'vacation_official')).map((req) => req.date));
     const wk  = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'weekend').map((req) => req.date));
     const hol = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'holiday').map((req) => req.date));
     offMap[r.id] = new Set([...vac, ...wk, ...hol]);
 
-    // Block dates outside the resident's rotation window
-    const rotStart = r.rotation_start ? parseDate(r.rotation_start) : bStart;
-    const rotEnd   = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
-    const effStart = rotStart < bStart ? bStart : rotStart;
-    const effEnd   = rotEnd   > bEnd   ? bEnd   : rotEnd;
+    // Block dates outside the resident's CUH/PMH/Research rotation window.
+    // Only CUH, PMH, and Research (for PGY4+) segments count as "on rotation" here —
+    // VA and CMC segments do NOT make a resident available for this schedule.
+    const cuhPmhSegs = r.rotations && r.rotations.length > 0
+      ? r.rotations.filter((seg) =>
+          seg.hospital === 'CUH' || seg.hospital === 'PMH' ||
+          (seg.hospital === 'Research' && r.pgy >= 4))
+      : null;
+
+    // Dates covered by CMC or VA segments are never available for CUH/PMH call,
+    // regardless of legacy fields. Build this set once for the safety-net check below.
+    const otherHospSegs = (r.rotations ?? []).filter((seg) => seg.hospital === 'CMC' || seg.hospital === 'VA');
+
     let cnt = 0;
     let dd = new Date(bStart);
     while (dd <= bEnd) {
-      if (dd < effStart || dd > effEnd) offMap[r.id].add(dk(dd));
+      const dstr = dk(dd);
+      let onRotation: boolean;
+      if (cuhPmhSegs && cuhPmhSegs.length > 0) {
+        onRotation = cuhPmhSegs.some((seg) => {
+          const s = parseDate(seg.start_date);
+          const e = parseDate(seg.end_date);
+          return dd >= s && dd <= e;
+        });
+      } else if (r.rotations && r.rotations.length > 0) {
+        // Has rotation segments but none are CUH/PMH/Research — mark all days as off.
+        onRotation = false;
+      } else {
+        // Legacy fallback: use rotation_start/rotation_end fields
+        const rotStart = r.rotation_start ? parseDate(r.rotation_start) : bStart;
+        const rotEnd   = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
+        onRotation = dd >= rotStart && dd <= rotEnd;
+      }
+      // Safety net: always block dates where the resident is on CMC/VA rotation,
+      // even if the legacy fallback or a mis-entered CUH/PMH segment says otherwise.
+      if (onRotation && otherHospSegs.some((seg) => dstr >= seg.start_date && dstr <= seg.end_date)) {
+        onRotation = false;
+      }
+      if (!onRotation) offMap[r.id].add(dstr);
       else cnt++;
       dd = addDays(dd, 1);
     }
@@ -426,46 +492,97 @@ export function generateSchedule(
   const jrTHwkday: Record<string, number> = {}; // trauma weekday hours
   const jrTD: Record<string, number> = {};    // trauma call days
 
+  // Hoisted so jrAvailDays can be included in the return value.
+  const rotWkndDays: Record<string, number> = {};
+  const rotWkdayDays: Record<string, number> = {};
+  const rotAvailDays: Record<string, number> = {};
+  const rotPotentialHours: Record<string, number> = {};
+
   if (needJr) {
   jrs.forEach((r) => { jrC[r.id] = 0; jrH[r.id] = 0; jrHwknd[r.id] = 0; jrHwkday[r.id] = 0; jrDwknd[r.id] = 0; jrDwkday[r.id] = 0; jrTH[r.id] = 0; jrTHwknd[r.id] = 0; jrTHwkday[r.id] = 0; jrTD[r.id] = 0; });
   const processed = new Set<string>();
 
-  // Compute rotation weekend / weekday day counts (for proportional equity sorting)
-  const rotWkndDays: Record<string, number> = {};
-  const rotWkdayDays: Record<string, number> = {};
+  // Compute equity-aligned availability: only subtract official vacation days (not weekend/holiday
+  // opt-out requests). Weekend/holiday opt-outs shrink rotAvailDays, making the resident's
+  // hours/availDays ratio look artificially high, causing the sort to under-assign them.
+  // equityOffMap = offMap entries that are either official vacation OR off-rotation (no request).
+  const allReqDates:      Record<string, Set<string>> = {};
+  const officialVacDates: Record<string, Set<string>> = {};
+  const equityOffMap:     Record<string, Set<string>> = {};
+  jrs.forEach((r) => {
+    allReqDates[r.id]      = new Set(requests.filter((req) => req.resident_id === r.id).map((req) => req.date));
+    officialVacDates[r.id] = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
+    equityOffMap[r.id]     = new Set([...offMap[r.id]].filter((key) =>
+      officialVacDates[r.id].has(key) || !allReqDates[r.id].has(key),
+    ));
+  });
+
   jrs.forEach((r) => {
     let wknd = 0, wkday = 0;
-    const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
-    const rE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
-    const effS = rS < bStart ? bStart : rS;
-    const effE = rE > bEnd   ? bEnd   : rE;
-    let dd = new Date(effS);
-    while (dd <= effE) {
-      const dow = dd.getDay();
-      if (dow === 0 || dow === 6 || HOLIDAYS.has(dk(dd))) wknd++; else wkday++;
+    // Use full block range; equityOffMap already excludes off-rotation dates
+    let dd = new Date(bStart);
+    while (dd <= bEnd) {
+      const key = dk(dd);
+      if (!equityOffMap[r.id].has(key)) {
+        const dow = dd.getDay();
+        if (dow === 0 || dow === 6 || HOLIDAYS.has(key)) wknd++; else wkday++;
+      }
       dd = addDays(dd, 1);
     }
     rotWkndDays[r.id] = Math.max(1, wknd);
     rotWkdayDays[r.id] = Math.max(1, wkday);
+    rotAvailDays[r.id] = Math.max(1, wknd + wkday);
+    rotPotentialHours[r.id] = Math.max(1, wknd * 24 + wkday * 12);
   });
 
   // Pick junior: enforce rest gap (2 days preferred, 1 day minimum), balance weekend/weekday separately
+  // Precompute each resident's effective rotation window for fast eligibility checks.
+  // Use the span of all CUH/PMH segments so residents with multi-segment rotations (e.g. CUH→PMH)
+  // remain eligible for the full period. Fall back to legacy rotation_start/end only when no segments.
+  const rotEffStart: Record<string, Date> = {};
+  const rotEffEnd: Record<string, Date> = {};
+  jrs.forEach((r) => {
+    const cuhPmhSegs = r.rotations && r.rotations.length > 0
+      ? r.rotations.filter((seg) => seg.hospital === 'CUH' || seg.hospital === 'PMH')
+      : null;
+    if (cuhPmhSegs && cuhPmhSegs.length > 0) {
+      const segStart = cuhPmhSegs.reduce((m, s) => { const d = parseDate(s.start_date); return d < m ? d : m; }, parseDate(cuhPmhSegs[0].start_date));
+      const segEnd   = cuhPmhSegs.reduce((m, s) => { const d = parseDate(s.end_date);   return d > m ? d : m; }, parseDate(cuhPmhSegs[0].end_date));
+      rotEffStart[r.id] = segStart < bStart ? bStart : segStart;
+      rotEffEnd[r.id]   = segEnd   > bEnd   ? bEnd   : segEnd;
+    } else {
+      const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
+      const rE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
+      rotEffStart[r.id] = rS < bStart ? bStart : rS;
+      rotEffEnd[r.id]   = rE > bEnd   ? bEnd   : rE;
+    }
+  });
+
   function pickJr(key: string, ex: string | null = null, isWeekendSlot = false, skipGap = false, isTraumaDay = false): Resident {
     const d = parseDate(key);
 
     function sortFn(a: Resident, b: Resident) {
+      // Primary: call utilization ratio (assigned hours / potential hours) — same metric as equity chart.
+      // Carry-in uses availDays from prior blocks; scale to approximate potential hours (×18 avg).
+      const aC = carryIn[a.person_id ?? ''] ?? { hours: 0, availDays: 0 };
+      const bC = carryIn[b.person_id ?? ''] ?? { hours: 0, availDays: 0 };
+      const ar = (aC.hours + jrH[a.id]) / (aC.availDays * 18 + rotPotentialHours[a.id]);
+      const br = (bC.hours + jrH[b.id]) / (bC.availDays * 18 + rotPotentialHours[b.id]);
+      if (Math.abs(ar - br) > 0.001) return ar - br;
+      // Secondary for weekend slots: prefer fewer weekend hours per available weekend day.
       if (isWeekendSlot) {
-        const ar = jrHwknd[a.id] / rotWkndDays[a.id];
-        const br = jrHwknd[b.id] / rotWkndDays[b.id];
-        if (ar !== br) return ar - br;
-        if (isTraumaDay) return jrTH[a.id] - jrTH[b.id];
-        return jrC[a.id] - jrC[b.id];
+        const awr = jrHwknd[a.id] / rotWkndDays[a.id];
+        const bwr = jrHwknd[b.id] / rotWkndDays[b.id];
+        if (Math.abs(awr - bwr) > 0.001) return awr - bwr;
       }
-      const ar = jrHwkday[a.id] / rotWkdayDays[a.id];
-      const br = jrHwkday[b.id] / rotWkdayDays[b.id];
-      if (ar !== br) return ar - br;
       if (isTraumaDay) return jrTH[a.id] - jrTH[b.id];
-      return jrC[a.id] - jrC[b.id];
+      // Final tiebreaker: date-seeded hash using full resident ID for even distribution.
+      let h = 2166136261;
+      for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619) >>> 0;
+      let hA = h, hB = h;
+      for (let i = 0; i < a.id.length; i++) hA = (Math.imul(hA ^ a.id.charCodeAt(i), 16777619) >>> 0);
+      for (let i = 0; i < b.id.length; i++) hB = (Math.imul(hB ^ b.id.charCodeAt(i), 16777619) >>> 0);
+      return hA - hB;
     }
 
     function daysSince(r: Resident): number {
@@ -478,19 +595,36 @@ export function generateSchedule(
       return Math.round((d.getTime() - parseDate(lastWeekendKey[r.id]).getTime()) / 86400000);
     }
 
-    // Progressive gap relaxation: prefer ≥3 days (q4+), fallback to ≥2 (q3), ≥1, then any
-    const minGaps = skipGap ? [0] : [3, 2, 1, 0];
+    // Progressive gap relaxation: prefer ≥3 days, fallback to ≥2, then ≥1.
+    // Never relaxes to 0 — back-to-back shifts are handled only in the fallback below.
+    const minGaps = skipGap ? [1] : [3, 2, 1];
     for (const minGap of minGaps) {
-      const eligible = jrs.filter((r) => r.id !== ex && !offMap[r.id].has(key) && daysSince(r) >= minGap);
+      const eligible = jrs.filter((r) =>
+        r.id !== ex &&
+        !offMap[r.id].has(key) &&
+        d >= rotEffStart[r.id] && d <= rotEffEnd[r.id] &&
+        daysSince(r) >= minGap,
+      );
       if (!eligible.length) continue;
       if (isWeekendSlot) {
-        // Prefer residents who haven't worked a weekend in the last 7 days (no consecutive weekends)
-        const noConsec = eligible.filter((r) => daysSinceLastWeekend(r) >= 7);
-        if (noConsec.length) return noConsec.sort(sortFn)[0];
+        // Progressive weekend spacing: strongly prefer skipping a full weekend (≥14 days),
+        // fall back to no-consecutive-weekend (≥8 days), then any eligible.
+        for (const minWknd of [14, 8]) {
+          const noConsec = eligible.filter((r) => daysSinceLastWeekend(r) >= minWknd);
+          if (noConsec.length) return noConsec.sort(sortFn)[0];
+        }
       }
       return eligible.sort(sortFn)[0];
     }
-    return jrs.sort(sortFn)[0]; // absolute fallback
+    // Fallback: gap relaxed but still prefer ≥1 day (no back-to-back) if at all possible.
+    const inWindow = jrs.filter((r) =>
+      r.id !== ex &&
+      !offMap[r.id].has(key) &&
+      d >= rotEffStart[r.id] && d <= rotEffEnd[r.id],
+    );
+    const withGap = inWindow.filter((r) => daysSince(r) >= 1);
+    const pool = withGap.length ? withGap : inWindow.length ? inWindow : jrs;
+    return pool.sort(sortFn)[0];
   }
 
   function addJD(key: string, res: Resident, type: JuniorDayType, paired = false, cuhR: Resident | null = null) {
@@ -599,5 +733,377 @@ export function generateSchedule(
     jrTHwknd,
     jrTHwkday,
     jrTD,
+    jrAvailDays: rotAvailDays,
+  };
+}
+
+// ─── CMC Schedule ─────────────────────────────────────────────────────────────
+
+export function generateCMCSchedule(
+  residents: Resident[],
+  requests: Request[],
+  blockName: string,
+  bStartStr: string,
+  bEndStr: string,
+): CMCScheduleData {
+  const pool = residents
+    .filter((r) => r.status === 'active')
+    .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
+  if (!pool.length) throw new Error('No active residents in CMC pool for this period');
+
+  const bStart = parseDate(bStartStr);
+  const bEnd   = parseDate(bEndStr);
+
+  // Build off map: vacation requests for each resident
+  const offMap: Record<string, Set<string>> = {};
+  pool.forEach((r) => {
+    const vac = new Set(
+      requests
+        .filter((req) => req.resident_id === r.id && (req.type === 'vacation' || req.type === 'vacation_official'))
+        .map((req) => req.date),
+    );
+    // Also mark dates outside the resident's CMC rotation segments as off
+    const cmcSegs = r.rotations?.filter((s) => s.hospital === 'CMC') ?? [];
+    if (cmcSegs.length > 0) {
+      let d = new Date(bStart);
+      while (d <= bEnd) {
+        const dstr = dk(d);
+        if (!cmcSegs.some((seg) => dstr >= seg.start_date && dstr <= seg.end_date)) vac.add(dstr);
+        d = addDays(d, 1);
+      }
+    }
+    offMap[r.id] = vac;
+  });
+
+  // Equity-aligned availability: only subtract official vacation + off-rotation (not informal vacation).
+  // Used for sort denominators so informal vacation days don't cause under-assignment.
+  const cmcEquityOffMap: Record<string, Set<string>> = {};
+  pool.forEach((r) => {
+    const s = new Set(
+      requests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date),
+    );
+    const cmcSegs = r.rotations?.filter((seg) => seg.hospital === 'CMC') ?? [];
+    if (cmcSegs.length > 0) {
+      let d = new Date(bStart);
+      while (d <= bEnd) {
+        const dstr = dk(d);
+        if (!cmcSegs.some((seg) => dstr >= seg.start_date && dstr <= seg.end_date)) s.add(dstr);
+        d = addDays(d, 1);
+      }
+    }
+    cmcEquityOffMap[r.id] = s;
+  });
+
+  const cmcDays: CMCDay[] = [];
+  const counts:         Record<string, number> = {};
+  const hours:          Record<string, number> = {};
+  const traumaHours:    Record<string, number> = {};
+  const wdCount:        Record<string, number> = {}; // weekday shifts only
+  const pwCount:        Record<string, number> = {}; // power weekends only
+  const lastWkdayDate:  Record<string, string>  = {}; // last weekday shift date per resident
+  pool.forEach((r) => { counts[r.id] = 0; hours[r.id] = 0; traumaHours[r.id] = 0; wdCount[r.id] = 0; pwCount[r.id] = 0; lastWkdayDate[r.id] = '1900-01-01'; });
+
+  // Available weekdays (Mon–Thu) per resident — uses equityOffMap so informal vacation doesn't skew sort
+  const wdAvail: Record<string, number> = {};
+  pool.forEach((r) => {
+    let cnt = 0;
+    let ad = new Date(bStart);
+    while (ad <= bEnd) {
+      const dow = ad.getDay();
+      if (dow >= 1 && dow <= 4 && !cmcEquityOffMap[r.id].has(dk(ad))) cnt++;
+      ad = addDays(ad, 1);
+    }
+    wdAvail[r.id] = Math.max(cnt, 1);
+  });
+
+  // Available power weekends (Fri+Sat+Sun) per resident — uses equityOffMap
+  const pwAvail: Record<string, number> = {};
+  pool.forEach((r) => {
+    let cnt = 0;
+    let fd2 = new Date(bStart);
+    while (fd2 <= bEnd) {
+      if (fd2.getDay() === 5) {
+        const friKey = dk(fd2), satKey = dk(addDays(fd2, 1)), sunKey = dk(addDays(fd2, 2));
+        if (!(cmcEquityOffMap[r.id].has(friKey) && cmcEquityOffMap[r.id].has(satKey) && cmcEquityOffMap[r.id].has(sunKey))) cnt++;
+      }
+      fd2 = addDays(fd2, 1);
+    }
+    pwAvail[r.id] = Math.max(cnt, 1);
+  });
+
+  // Available trauma days per resident — uses equityOffMap
+  const traumaAvail: Record<string, number> = {};
+  pool.forEach((r) => {
+    let cnt = 0;
+    let td = new Date(bStart);
+    while (td <= bEnd) {
+      if (TRAUMA_WEEKS.has(dk(td)) && !cmcEquityOffMap[r.id].has(dk(td))) cnt++;
+      td = addDays(td, 1);
+    }
+    traumaAvail[r.id] = Math.max(cnt, 1);
+  });
+
+  // Weekday pick: sort by wdCount/wdAvail; tiebreak by longest gap since last weekday shift
+  function pickWeekday(candidates: Resident[], isTraumaDay: boolean): Resident {
+    return [...candidates].sort((a, b) => {
+      if (isTraumaDay) {
+        const aProp = traumaHours[a.id] / traumaAvail[a.id];
+        const bProp = traumaHours[b.id] / traumaAvail[b.id];
+        if (Math.abs(aProp - bProp) > 1e-9) return aProp - bProp;
+      }
+      const ratioA = wdCount[a.id] / wdAvail[a.id];
+      const ratioB = wdCount[b.id] / wdAvail[b.id];
+      if (Math.abs(ratioA - ratioB) > 1e-9) return ratioA - ratioB;
+      // Tiebreak: prefer whoever has gone longest since their last weekday shift
+      return lastWkdayDate[a.id].localeCompare(lastWkdayDate[b.id]);
+    })[0];
+  }
+
+  // Power weekend pick: sort by pwCount/pwAvail (trauma proportion primary on trauma weekends)
+  function pickPowerWeekend(candidates: Resident[], isTraumaWeekend: boolean): Resident {
+    return [...candidates].sort((a, b) => {
+      if (isTraumaWeekend) {
+        const aProp = traumaHours[a.id] / traumaAvail[a.id];
+        const bProp = traumaHours[b.id] / traumaAvail[b.id];
+        if (Math.abs(aProp - bProp) > 1e-9) return aProp - bProp;
+      }
+      return pwCount[a.id] / pwAvail[a.id] - pwCount[b.id] / pwAvail[b.id];
+    })[0];
+  }
+
+  // ── Step 1: Assign power weekends (Fri+Sat+Sun) ──────────────────────────────
+  const fridays: Date[] = [];
+  let fd = new Date(bStart);
+  while (fd <= bEnd) {
+    if (fd.getDay() === 5) fridays.push(new Date(fd));
+    fd = addDays(fd, 1);
+  }
+
+  const pwByFri = new Map<string, Resident>();
+  let lastPwId: string | null = null;
+
+  for (const fri of fridays) {
+    const friKey = dk(fri);
+    const satKey = dk(addDays(fri, 1));
+    const sunKey = dk(addDays(fri, 2));
+    const isPwTrauma = TRAUMA_WEEKS.has(friKey) || TRAUMA_WEEKS.has(satKey) || TRAUMA_WEEKS.has(sunKey);
+
+    let candidates = pool.filter(
+      (r) => r.id !== lastPwId && !(offMap[r.id].has(friKey) && offMap[r.id].has(satKey) && offMap[r.id].has(sunKey)),
+    );
+    if (!candidates.length) candidates = pool.filter((r) => r.id !== lastPwId);
+    if (!candidates.length) candidates = [...pool];
+
+    const pick = pickPowerWeekend(candidates, isPwTrauma);
+    pwByFri.set(friKey, pick);
+    lastPwId = pick.id;
+    pwCount[pick.id]++;
+
+    for (const [key, shiftHrs] of [[friKey, 12], [satKey, 24], [sunKey, 24]] as [string, number][]) {
+      const pd = parseDate(key);
+      if (pd >= bStart && pd <= bEnd) {
+        cmcDays.push({ dateKey: key, res: pick, shiftHrs, isPowerWeekend: true, override: false });
+        counts[pick.id]++;
+        hours[pick.id] += shiftHrs;
+        if (TRAUMA_WEEKS.has(key)) traumaHours[pick.id] += shiftHrs;
+      }
+    }
+  }
+
+  // ── Step 2: Assign Mon–Thu weekdays ──────────────────────────────────────────
+  // Hard constraint: no consecutive weekdays (different person every day Mon–Thu).
+  let lastWkdayId: string | null = null;
+
+  let d = new Date(bStart);
+  while (d <= bEnd) {
+    const dow = d.getDay();
+    if (dow >= 1 && dow <= 4) {
+      const dateKey = dk(d);
+      const isTraumaDay = TRAUMA_WEEKS.has(dateKey);
+      // Hard constraints:
+      //   1. No consecutive weekdays (exclude yesterday's person)
+      //   2. Thu → exclude the upcoming power weekend person
+      //   3. Mon → exclude the person who just did the power weekend
+      const pwExcludeId =
+        dow === 4 ? (pwByFri.get(dk(addDays(d, 1)))?.id ?? null) :
+        dow === 1 ? (pwByFri.get(dk(addDays(d, -3)))?.id ?? null) :
+        null;
+
+      let avail = pool.filter(
+        (r) => !offMap[r.id].has(dateKey) && r.id !== lastWkdayId && r.id !== pwExcludeId,
+      );
+      // Relax no-consecutive if needed, but always keep PW exclusion
+      if (!avail.length) {
+        avail = pool.filter((r) => !offMap[r.id].has(dateKey) && r.id !== pwExcludeId);
+      }
+      if (!avail.length) avail = pool.filter((r) => !offMap[r.id].has(dateKey));
+      if (!avail.length) avail = [...pool];
+
+      const pick = pickWeekday(avail, isTraumaDay);
+      cmcDays.push({ dateKey, res: pick, shiftHrs: 12, isPowerWeekend: false, override: false });
+      counts[pick.id]++;
+      hours[pick.id] += 12;
+      wdCount[pick.id]++;
+      lastWkdayDate[pick.id] = dateKey;
+      if (isTraumaDay) traumaHours[pick.id] += 12;
+      lastWkdayId = pick.id;
+    } else {
+      if (dow === 5) lastWkdayId = null;
+    }
+    d = addDays(d, 1);
+  }
+
+  cmcDays.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+
+  return {
+    type: 'cmc',
+    bStart: bStartStr,
+    bEnd: bEndStr,
+    blockName,
+    days: cmcDays,
+    counts,
+    hours,
+    published: false,
+  };
+}
+
+// ─── VA Schedule ──────────────────────────────────────────────────────────────
+
+export function generateVASchedule(
+  residents: Resident[],
+  requests: Request[],
+  blockName: string,
+  bStartStr: string,
+  bEndStr: string,
+): VAScheduleData {
+  const pool = residents
+    .filter((r) => r.status === 'active')
+    .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
+  if (pool.length < 1) throw new Error('No active residents in VA pool for this period');
+
+  const bStart = parseDate(bStartStr);
+  const bEnd   = parseDate(bEndStr);
+
+  // Build off map: vacation requests for each resident
+  const offMap: Record<string, Set<string>> = {};
+  pool.forEach((r) => {
+    const vac = new Set(
+      requests
+        .filter((req) => req.resident_id === r.id && (req.type === 'vacation' || req.type === 'vacation_official'))
+        .map((req) => req.date),
+    );
+    // Mark dates outside VA rotation segments as off
+    const vaSegs = r.rotations?.filter((s) => s.hospital === 'VA') ?? [];
+    if (vaSegs.length > 0) {
+      let d2 = new Date(bStart);
+      while (d2 <= bEnd) {
+        const dstr = dk(d2);
+        if (!vaSegs.some((seg) => dstr >= seg.start_date && dstr <= seg.end_date)) vac.add(dstr);
+        d2 = addDays(d2, 1);
+      }
+    }
+    offMap[r.id] = vac;
+  });
+
+  // Equity-aligned availability: only subtract official vacation + off-rotation (not informal vacation).
+  // Used for sort denominators so informal vacation days don't cause under-assignment.
+  const vaEquityOffMap: Record<string, Set<string>> = {};
+  pool.forEach((r) => {
+    const s = new Set(
+      requests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date),
+    );
+    const vaSegs = r.rotations?.filter((seg) => seg.hospital === 'VA') ?? [];
+    if (vaSegs.length > 0) {
+      let d2 = new Date(bStart);
+      while (d2 <= bEnd) {
+        const dstr = dk(d2);
+        if (!vaSegs.some((seg) => dstr >= seg.start_date && dstr <= seg.end_date)) s.add(dstr);
+        d2 = addDays(d2, 1);
+      }
+    }
+    vaEquityOffMap[r.id] = s;
+  });
+
+  // Eligibility check: uses full offMap (includes informal vacation — can't assign on those days)
+  function availableDaysInRange(r: Resident, wS: Date, wE: Date): number {
+    let cnt = 0, d = new Date(wS);
+    while (d <= wE) { if (!offMap[r.id].has(dk(d))) cnt++; d = addDays(d, 1); }
+    return cnt;
+  }
+
+  // Equity denominator: uses equityOffMap (official vacation + off-rotation only)
+  function equityAvailableDaysInRange(r: Resident, wS: Date, wE: Date): number {
+    let cnt = 0, d = new Date(wS);
+    while (d <= wE) { if (!vaEquityOffMap[r.id].has(dk(d))) cnt++; d = addDays(d, 1); }
+    return cnt;
+  }
+
+  // Build weeks: find the Monday on or before bStart, then step by 7
+  let weekMon = new Date(bStart);
+  while (weekMon.getDay() !== 1) weekMon = addDays(weekMon, -1);
+
+  const vaWeeks: VAWeek[] = [];
+  const counts:       Record<string, number> = {};
+  const days:         Record<string, number> = {};
+  const hours:        Record<string, number> = {};
+  const lastWeekDate: Record<string, string>  = {}; // last week start date per resident
+  pool.forEach((r) => { counts[r.id] = 0; days[r.id] = 0; hours[r.id] = 0; lastWeekDate[r.id] = '1900-01-01'; });
+
+  let lastId: string | null = null;
+
+  while (weekMon <= bEnd) {
+    const wSDate = weekMon < bStart ? new Date(bStart) : new Date(weekMon);
+    const wEDate = (() => { const e = addDays(weekMon, 6); return e > bEnd ? new Date(bEnd) : e; })();
+
+    if (wSDate > bEnd) break;
+
+    // Pick: sort by local proportion (days worked / days available so far from bStart to now)
+    // Tiebreak by longest gap since last week assigned, then lastId anti-repeat
+    const sorted = [...pool].sort((a, b) => {
+      const aDaysAvail = wSDate > bStart ? equityAvailableDaysInRange(a, bStart, addDays(wSDate, -1)) : 0;
+      const bDaysAvail = wSDate > bStart ? equityAvailableDaysInRange(b, bStart, addDays(wSDate, -1)) : 0;
+      const aProp = aDaysAvail > 0 ? days[a.id] / aDaysAvail : 0;
+      const bProp = bDaysAvail > 0 ? days[b.id] / bDaysAvail : 0;
+      if (Math.abs(aProp - bProp) > 1e-9) return aProp - bProp;
+      // Tiebreak: prefer whoever went longest without a week (earlier lastWeekDate = higher priority)
+      const cmp = lastWeekDate[a.id].localeCompare(lastWeekDate[b.id]);
+      if (cmp !== 0) return cmp;
+      if (a.id !== lastId && b.id === lastId) return -1;
+      if (b.id !== lastId && a.id === lastId) return 1;
+      return 0;
+    });
+
+    // Find a candidate who has at least 1 available day this week
+    let pick = sorted.find((r) => availableDaysInRange(r, wSDate, wEDate) > 0);
+    if (!pick) pick = sorted[0]; // everyone on vacation, assign anyway
+
+    vaWeeks.push({ wS: dk(wSDate), wE: dk(wEDate), res: pick, override: false });
+    counts[pick.id]++;
+    lastWeekDate[pick.id] = dk(wSDate);
+
+    // Tally days and hours
+    let d2 = new Date(wSDate);
+    while (d2 <= wEDate) {
+      days[pick.id]++;
+      const dow = d2.getDay();
+      const isWknd = dow === 0 || dow === 6;
+      hours[pick.id] += (isWknd || HOLIDAYS.has(dk(d2))) ? 24 : 12;
+      d2 = addDays(d2, 1);
+    }
+
+    lastId = pick.id;
+    weekMon = addDays(weekMon, 7);
+  }
+
+  return {
+    type: 'va',
+    bStart: bStartStr,
+    bEnd: bEndStr,
+    blockName,
+    weeks: vaWeeks,
+    counts,
+    days,
+    hours,
+    published: false,
   };
 }
