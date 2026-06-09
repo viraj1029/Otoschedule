@@ -761,6 +761,25 @@ export function generateCMCSchedule(
     offMap[r.id] = vac;
   });
 
+  // Equity-aligned availability: only subtract official vacation + off-rotation (not informal vacation).
+  // Used for sort denominators so informal vacation days don't cause under-assignment.
+  const cmcEquityOffMap: Record<string, Set<string>> = {};
+  pool.forEach((r) => {
+    const s = new Set(
+      requests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date),
+    );
+    const cmcSegs = r.rotations?.filter((seg) => seg.hospital === 'CMC') ?? [];
+    if (cmcSegs.length > 0) {
+      let d = new Date(bStart);
+      while (d <= bEnd) {
+        const dstr = dk(d);
+        if (!cmcSegs.some((seg) => dstr >= seg.start_date && dstr <= seg.end_date)) s.add(dstr);
+        d = addDays(d, 1);
+      }
+    }
+    cmcEquityOffMap[r.id] = s;
+  });
+
   const cmcDays: CMCDay[] = [];
   const counts:         Record<string, number> = {};
   const hours:          Record<string, number> = {};
@@ -770,20 +789,20 @@ export function generateCMCSchedule(
   const lastWkdayDate:  Record<string, string>  = {}; // last weekday shift date per resident
   pool.forEach((r) => { counts[r.id] = 0; hours[r.id] = 0; traumaHours[r.id] = 0; wdCount[r.id] = 0; pwCount[r.id] = 0; lastWkdayDate[r.id] = '1900-01-01'; });
 
-  // Available weekdays (Mon–Thu) per resident
+  // Available weekdays (Mon–Thu) per resident — uses equityOffMap so informal vacation doesn't skew sort
   const wdAvail: Record<string, number> = {};
   pool.forEach((r) => {
     let cnt = 0;
     let ad = new Date(bStart);
     while (ad <= bEnd) {
       const dow = ad.getDay();
-      if (dow >= 1 && dow <= 4 && !offMap[r.id].has(dk(ad))) cnt++;
+      if (dow >= 1 && dow <= 4 && !cmcEquityOffMap[r.id].has(dk(ad))) cnt++;
       ad = addDays(ad, 1);
     }
     wdAvail[r.id] = Math.max(cnt, 1);
   });
 
-  // Available power weekends (Fri+Sat+Sun) per resident
+  // Available power weekends (Fri+Sat+Sun) per resident — uses equityOffMap
   const pwAvail: Record<string, number> = {};
   pool.forEach((r) => {
     let cnt = 0;
@@ -791,20 +810,20 @@ export function generateCMCSchedule(
     while (fd2 <= bEnd) {
       if (fd2.getDay() === 5) {
         const friKey = dk(fd2), satKey = dk(addDays(fd2, 1)), sunKey = dk(addDays(fd2, 2));
-        if (!(offMap[r.id].has(friKey) && offMap[r.id].has(satKey) && offMap[r.id].has(sunKey))) cnt++;
+        if (!(cmcEquityOffMap[r.id].has(friKey) && cmcEquityOffMap[r.id].has(satKey) && cmcEquityOffMap[r.id].has(sunKey))) cnt++;
       }
       fd2 = addDays(fd2, 1);
     }
     pwAvail[r.id] = Math.max(cnt, 1);
   });
 
-  // Available trauma days per resident
+  // Available trauma days per resident — uses equityOffMap
   const traumaAvail: Record<string, number> = {};
   pool.forEach((r) => {
     let cnt = 0;
     let td = new Date(bStart);
     while (td <= bEnd) {
-      if (TRAUMA_WEEKS.has(dk(td)) && !offMap[r.id].has(dk(td))) cnt++;
+      if (TRAUMA_WEEKS.has(dk(td)) && !cmcEquityOffMap[r.id].has(dk(td))) cnt++;
       td = addDays(td, 1);
     }
     traumaAvail[r.id] = Math.max(cnt, 1);
@@ -972,10 +991,36 @@ export function generateVASchedule(
     offMap[r.id] = vac;
   });
 
-  // Count available days per resident in a date range
+  // Equity-aligned availability: only subtract official vacation + off-rotation (not informal vacation).
+  // Used for sort denominators so informal vacation days don't cause under-assignment.
+  const vaEquityOffMap: Record<string, Set<string>> = {};
+  pool.forEach((r) => {
+    const s = new Set(
+      requests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date),
+    );
+    const vaSegs = r.rotations?.filter((seg) => seg.hospital === 'VA') ?? [];
+    if (vaSegs.length > 0) {
+      let d2 = new Date(bStart);
+      while (d2 <= bEnd) {
+        const dstr = dk(d2);
+        if (!vaSegs.some((seg) => dstr >= seg.start_date && dstr <= seg.end_date)) s.add(dstr);
+        d2 = addDays(d2, 1);
+      }
+    }
+    vaEquityOffMap[r.id] = s;
+  });
+
+  // Eligibility check: uses full offMap (includes informal vacation — can't assign on those days)
   function availableDaysInRange(r: Resident, wS: Date, wE: Date): number {
     let cnt = 0, d = new Date(wS);
     while (d <= wE) { if (!offMap[r.id].has(dk(d))) cnt++; d = addDays(d, 1); }
+    return cnt;
+  }
+
+  // Equity denominator: uses equityOffMap (official vacation + off-rotation only)
+  function equityAvailableDaysInRange(r: Resident, wS: Date, wE: Date): number {
+    let cnt = 0, d = new Date(wS);
+    while (d <= wE) { if (!vaEquityOffMap[r.id].has(dk(d))) cnt++; d = addDays(d, 1); }
     return cnt;
   }
 
@@ -1001,8 +1046,8 @@ export function generateVASchedule(
     // Pick: sort by local proportion (days worked / days available so far from bStart to now)
     // Tiebreak by longest gap since last week assigned, then lastId anti-repeat
     const sorted = [...pool].sort((a, b) => {
-      const aDaysAvail = wSDate > bStart ? availableDaysInRange(a, bStart, addDays(wSDate, -1)) : 0;
-      const bDaysAvail = wSDate > bStart ? availableDaysInRange(b, bStart, addDays(wSDate, -1)) : 0;
+      const aDaysAvail = wSDate > bStart ? equityAvailableDaysInRange(a, bStart, addDays(wSDate, -1)) : 0;
+      const bDaysAvail = wSDate > bStart ? equityAvailableDaysInRange(b, bStart, addDays(wSDate, -1)) : 0;
       const aProp = aDaysAvail > 0 ? days[a.id] / aDaysAvail : 0;
       const bProp = bDaysAvail > 0 ? days[b.id] / bDaysAvail : 0;
       if (Math.abs(aProp - bProp) > 1e-9) return aProp - bProp;
