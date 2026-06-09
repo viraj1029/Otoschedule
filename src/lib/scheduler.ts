@@ -937,22 +937,21 @@ export function generateCMCSchedule(
         dow === 1 ? (pwByFri.get(dk(addDays(d, -3)))?.id ?? null) :
         null;
 
-      // Residents available for this day (not off, not consecutive)
-      const baseAvail = pool.filter(
-        (r) => !offMap[r.id].has(dateKey) && r.id !== lastWkdayId && r.id !== pwExcludeId,
+      // No-consecutive is a HARD constraint — never relaxed for weekdays.
+      // Relaxation order: weekUsed → pwExclude → off-map (consecutive always kept).
+      const noConsec = pool.filter(
+        (r) => !offMap[r.id].has(dateKey) && r.id !== lastWkdayId,
       );
 
-      // Soft constraint: prefer residents not yet used this week (avoids q2 alternating)
-      const unusedThisWeek = baseAvail.filter((r) => !weekUsedIds.has(r.id));
-
-      let avail = unusedThisWeek.length > 0 ? unusedThisWeek : baseAvail;
-
-      // Relax no-consecutive if needed, but keep PW exclusion
-      if (!avail.length) {
-        const relaxed = pool.filter((r) => !offMap[r.id].has(dateKey) && r.id !== pwExcludeId);
-        const unusedRelaxed = relaxed.filter((r) => !weekUsedIds.has(r.id));
-        avail = unusedRelaxed.length > 0 ? unusedRelaxed : relaxed;
-      }
+      // 1. Ideal: no-consecutive + pwExclude + unused this week
+      let avail = noConsec.filter((r) => r.id !== pwExcludeId && !weekUsedIds.has(r.id));
+      // 2. Relax weekUsed: no-consecutive + pwExclude
+      if (!avail.length) avail = noConsec.filter((r) => r.id !== pwExcludeId);
+      // 3. Relax pwExclude: no-consecutive + unused this week
+      if (!avail.length) avail = noConsec.filter((r) => !weekUsedIds.has(r.id));
+      // 4. Relax both soft constraints: no-consecutive only
+      if (!avail.length) avail = noConsec;
+      // 5. Last resort: everyone available today (consecutive allowed only if unavoidable)
       if (!avail.length) avail = pool.filter((r) => !offMap[r.id].has(dateKey));
       if (!avail.length) avail = [...pool];
 
