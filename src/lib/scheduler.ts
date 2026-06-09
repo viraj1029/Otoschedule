@@ -508,12 +508,9 @@ export function generateSchedule(
 
   jrs.forEach((r) => {
     let wknd = 0, wkday = 0;
-    const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
-    const rE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
-    const effS = rS < bStart ? bStart : rS;
-    const effE = rE > bEnd   ? bEnd   : rE;
-    let dd = new Date(effS);
-    while (dd <= effE) {
+    // Use full block range; equityOffMap already excludes off-rotation dates
+    let dd = new Date(bStart);
+    while (dd <= bEnd) {
       const key = dk(dd);
       if (!equityOffMap[r.id].has(key)) {
         const dow = dd.getDay();
@@ -528,13 +525,25 @@ export function generateSchedule(
 
   // Pick junior: enforce rest gap (2 days preferred, 1 day minimum), balance weekend/weekday separately
   // Precompute each resident's effective rotation window for fast eligibility checks.
+  // Use the span of all CUH/PMH segments so residents with multi-segment rotations (e.g. CUH→PMH)
+  // remain eligible for the full period. Fall back to legacy rotation_start/end only when no segments.
   const rotEffStart: Record<string, Date> = {};
   const rotEffEnd: Record<string, Date> = {};
   jrs.forEach((r) => {
-    const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
-    const rE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
-    rotEffStart[r.id] = rS < bStart ? bStart : rS;
-    rotEffEnd[r.id]   = rE > bEnd   ? bEnd   : rE;
+    const cuhPmhSegs = r.rotations && r.rotations.length > 0
+      ? r.rotations.filter((seg) => seg.hospital === 'CUH' || seg.hospital === 'PMH')
+      : null;
+    if (cuhPmhSegs && cuhPmhSegs.length > 0) {
+      const segStart = cuhPmhSegs.reduce((m, s) => { const d = parseDate(s.start_date); return d < m ? d : m; }, parseDate(cuhPmhSegs[0].start_date));
+      const segEnd   = cuhPmhSegs.reduce((m, s) => { const d = parseDate(s.end_date);   return d > m ? d : m; }, parseDate(cuhPmhSegs[0].end_date));
+      rotEffStart[r.id] = segStart < bStart ? bStart : segStart;
+      rotEffEnd[r.id]   = segEnd   > bEnd   ? bEnd   : segEnd;
+    } else {
+      const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
+      const rE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
+      rotEffStart[r.id] = rS < bStart ? bStart : rS;
+      rotEffEnd[r.id]   = rE > bEnd   ? bEnd   : rE;
+    }
   });
 
   function pickJr(key: string, ex: string | null = null, isWeekendSlot = false, skipGap = false, isTraumaDay = false): Resident {
