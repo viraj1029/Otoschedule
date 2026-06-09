@@ -928,7 +928,7 @@ export default function ScheduleView({
       const rE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
       const effS = rS < bStart ? bStart : rS;
       const effE = rE > bEnd   ? bEnd   : rE;
-      const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id).map((req) => req.date));
+      const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
       let cnt = 0; let pot = 0; let d = new Date(effS);
       while (d <= effE) {
         const key = dk(d);
@@ -984,7 +984,7 @@ export default function ScheduleView({
           <div className="ch">
             <div>
               <div className="ct">Junior Call Utilization Ratio</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Assigned hours ÷ potential call hours (avail days × 12h weekday / 24h weekend·holiday) — equal bars = perfectly equitable</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Assigned hours ÷ potential call hours (rotation window minus official vacation days only) — equal bars = perfectly equitable</div>
             </div>
           </div>
           <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${jrH[r.id]}h / ${jrPotentialHours[r.id]}h potential`, val: jrUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
@@ -1060,7 +1060,7 @@ export default function ScheduleView({
     const vaPotentialHours: Record<string, number> = {};
     pool.forEach((r) => {
       const vaSegs = r.rotations?.filter((s) => s.hospital === 'VA') ?? [];
-      const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && (req.type === 'vacation' || req.type === 'vacation_official')).map((req) => req.date));
+      const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
       let pot = 0; let d = new Date(vaBStart);
       while (d <= vaBEnd) {
         const dstr = dk(d);
@@ -1090,7 +1090,7 @@ export default function ScheduleView({
           <div className="ch">
             <div>
               <div className="ct">VA Call Utilization Ratio</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Assigned hours ÷ potential call hours (avail days × 12h weekday / 24h weekend·holiday) — equal bars = perfectly equitable</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Assigned hours ÷ potential call hours (rotation window minus official vacation days only) — equal bars = perfectly equitable</div>
             </div>
           </div>
           <div className="cb">{eqBars(pool.map((r) => ({ name: `${r.name}  ${vaSched!.hours[r.id] ?? 0}h / ${vaPotentialHours[r.id]}h potential`, val: vaUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
@@ -1331,7 +1331,7 @@ export default function ScheduleView({
     const cmcPotentialHours: Record<string, number> = {};
     pool.forEach((r) => {
       const cmcSegs = r.rotations?.filter((s) => s.hospital === 'CMC') ?? [];
-      const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id).map((req) => req.date));
+      const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
       let cnt = 0; let pot = 0; let d = new Date(bStart);
       while (d <= bEnd) {
         const dstr = dk(d);
@@ -1376,7 +1376,7 @@ export default function ScheduleView({
           <div className="ch">
             <div>
               <div className="ct">CMC Call Utilization Ratio</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Assigned hours ÷ potential call hours (avail days × 12h weekday / 24h weekend·holiday) — equal bars = perfectly equitable</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Assigned hours ÷ potential call hours (rotation window minus official vacation days only) — equal bars = perfectly equitable</div>
             </div>
           </div>
           <div className="cb">{eqBars(pool.map((r) => ({ name: `${r.name}  ${cmcDayData!.hours[r.id] ?? 0}h / ${cmcPotentialHours[r.id]}h potential`, val: cmcUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
