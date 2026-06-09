@@ -182,9 +182,14 @@ export function generateSchedule(
           (seg.hospital === 'Research' && r.pgy >= 4))
       : null;
 
+    // Dates covered by CMC or VA segments are never available for CUH/PMH call,
+    // regardless of legacy fields. Build this set once for the safety-net check below.
+    const otherHospSegs = (r.rotations ?? []).filter((seg) => seg.hospital === 'CMC' || seg.hospital === 'VA');
+
     let cnt = 0;
     let dd = new Date(bStart);
     while (dd <= bEnd) {
+      const dstr = dk(dd);
       let onRotation: boolean;
       if (cuhPmhSegs && cuhPmhSegs.length > 0) {
         onRotation = cuhPmhSegs.some((seg) => {
@@ -201,7 +206,12 @@ export function generateSchedule(
         const rotEnd   = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
         onRotation = dd >= rotStart && dd <= rotEnd;
       }
-      if (!onRotation) offMap[r.id].add(dk(dd));
+      // Safety net: always block dates where the resident is on CMC/VA rotation,
+      // even if the legacy fallback or a mis-entered CUH/PMH segment says otherwise.
+      if (onRotation && otherHospSegs.some((seg) => dstr >= seg.start_date && dstr <= seg.end_date)) {
+        onRotation = false;
+      }
+      if (!onRotation) offMap[r.id].add(dstr);
       else cnt++;
       dd = addDays(dd, 1);
     }
