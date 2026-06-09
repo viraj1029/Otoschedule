@@ -469,7 +469,7 @@ export default function Requests({
       )}
 
       {(role !== 'chief' || chiefTab === 'requests') && (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 18, alignItems: 'start' }}>
+      <div className="req-layout">
         {/* Calendar */}
         <div className="card">
           <div className="ch">

@@ -683,72 +683,86 @@ select {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
 
+/* ── Responsive grid helpers (used in JSX instead of inline gridTemplateColumns) ── */
+.sg2 { display: grid; grid-template-columns: 1fr 1fr; }
+.sg3 { display: grid; grid-template-columns: repeat(3, 1fr); }
+.sg4 { display: grid; grid-template-columns: repeat(4, 1fr); }
+/* Request page: calendar + sidebar */
+.req-layout { display: grid; grid-template-columns: 1fr 340px; gap: 18px; align-items: start; }
+
 /* ── Mobile / responsive ── */
 @media (max-width: 640px) {
   /* Topbar */
-  .topbar { padding: 0 14px; gap: 8px; height: 48px; }
-  .brand { font-size: 14px; }
+  .topbar { padding: 0 12px; gap: 6px; height: 48px; }
+  .brand { font-size: 13px; }
   .brand span { display: none; }
-  .mode-btn { padding: 4px 10px; font-size: 11px; }
+  .mode-btn { padding: 4px 8px; font-size: 11px; }
   .topbar-right { gap: 6px; }
+  /* Truncate resident name badge */
+  .res-badge { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Main content area */
-  .main { padding: 14px 14px 24px; overflow-x: hidden; }
+  .main { padding: 12px 12px 24px; overflow-x: hidden; }
 
   /* Login */
-  .login-card { width: calc(100vw - 28px); padding: 24px 18px; border-radius: 14px; }
+  .login-card { width: calc(100vw - 24px); padding: 22px 16px; border-radius: 14px; }
 
   /* Form grids — stack to single column */
   .f2, .f3 { grid-template-columns: 1fr; }
 
-  /* Tabs — horizontally scrollable */
+  /* Tabs — horizontally scrollable, no wrap */
   .tabrow { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; }
   .tabrow::-webkit-scrollbar { display: none; }
-  .tabbtn { white-space: nowrap; padding: 10px 12px; font-size: 12px; }
+  .tabbtn { white-space: nowrap; padding: 10px 10px; font-size: 12px; }
 
   /* Page typography */
-  .page-title { font-size: 21px; }
-  .page-sub { margin-bottom: 18px; }
+  .page-title { font-size: 20px; }
+  .page-sub { margin-bottom: 16px; font-size: 12px; }
 
   /* Stats row — 2 columns */
   .srow { grid-template-columns: repeat(2, 1fr) !important; }
   .sn { font-size: 22px; }
 
+  /* Responsive grid helpers — collapse on mobile */
+  .sg2 { grid-template-columns: 1fr; }
+  .sg3 { grid-template-columns: 1fr 1fr; }
+  .sg4 { grid-template-columns: 1fr 1fr; }
+  /* Request layout stacks on mobile */
+  .req-layout { grid-template-columns: 1fr; }
+
   /* Calendar — wrap in horizontal scroll */
   .calgrid-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: var(--r-lg); }
-  .calgrid { min-width: 520px; }
+  .calgrid { min-width: 500px; }
 
   /* Request calendar — smaller cells */
   .rcalgrid { gap: 2px; }
   .rc { font-size: 10px; }
 
   /* Senior call week rows */
-  .wrow {
-    grid-template-columns: 1fr auto;
-    grid-template-rows: auto auto;
-  }
-  .wrow > *:first-child { grid-column: 1 / -1; }
+  .wrow { grid-template-columns: 1fr; }
+  .wrow > * { grid-column: 1 / -1 !important; }
 
   /* Junior call day rows */
-  .jday {
-    grid-template-columns: 44px 1fr auto;
-    grid-template-rows: auto auto;
-    gap: 6px 8px;
-  }
-  .jday > *:nth-child(2) { grid-column: 2 / -1; }
+  .jday { grid-template-columns: 44px 1fr; gap: 5px 8px; }
+  .jday > *:nth-child(3) { grid-column: 2 / -1; }
+  .jday > *:nth-child(4) { grid-column: 1 / -1; }
 
   /* Equity bars — narrower name */
-  .ename { width: 60px; font-size: 11px; }
+  .ename { width: 56px; font-size: 11px; }
 
   /* Cards */
   .cb { padding: 12px; }
-  .ch { padding: 12px 14px; }
+  .ch { padding: 11px 12px; }
 
-  /* Hours table — smaller text */
+  /* Tables — scroll horizontally inside their card */
+  .cbt { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .htable { min-width: 380px; }
+  .ptable { min-width: 360px; }
   .htable th, .htable td { padding: 8px 8px; font-size: 11px; }
+  .ptable th, .ptable td { padding: 8px 10px; font-size: 11px; }
 
   /* Toast — full width at bottom */
-  .toast { left: 14px; right: 14px; bottom: 14px; max-width: none; }
+  .toast { left: 12px; right: 12px; bottom: 12px; max-width: none; }
 
   /* Buttons */
   .btn { padding: 9px 14px; font-size: 13px; }

@@ -49,6 +49,7 @@ export default function TopBar({ role, step, residentName, onGoStep, onSignOut }
 
       <div className="topbar-right">
         <div
+          className="res-badge"
           style={{
             fontSize: 11,
             color: role === 'chief' ? 'var(--gold)' : 'var(--blue)',

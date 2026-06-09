@@ -558,7 +558,7 @@ export default function ScheduleView({
             </div>
           </div>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginBottom: 18 }}>
+        <div className="sg2" style={{ gap: 18, marginBottom: 18 }}>
           <div className="card">
             <div className="ch"><div className="ct">Block Total Hours</div></div>
             <div className="cbt">
@@ -940,7 +940,7 @@ export default function ScheduleView({
         {isJunior && jrS && (
           <>
             {/* Hours hero */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 18, background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', overflow: 'hidden' }}>
+            <div className="sg3" style={{ marginBottom: 18, background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', overflow: 'hidden' }}>
               {([
                 { label: 'Total Hours on Call', value: jrS.totalHrs, color: 'var(--green)' },
                 { label: 'Weekday Hours', value: jrS.wkdayHrs, color: 'var(--blue)' },
@@ -957,7 +957,7 @@ export default function ScheduleView({
             </div>
 
             {/* Stat cards grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+            <div className="sg3" style={{ gap: 14 }}>
               {sc('Weekday Call Days', jrS.wkdayCount, 'days', 'var(--blue)', `${jrS.wkdayHrs}h`)}
               {sc('Weekend Call Days', jrS.wkndCount, 'days', 'var(--purple)', `${jrS.wkndHrs}h`)}
               {sc('Holiday Call Days', jrS.holCount, 'days', 'var(--orange)', `${jrS.holHrs}h`)}
@@ -978,7 +978,7 @@ export default function ScheduleView({
 
         {/* Senior stats */}
         {!isJunior && srS && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+          <div className="sg4" style={{ gap: 14 }}>
             {sc('Total Call Days', srS.totalCount, 'days', 'var(--gold)')}
             {sc('Weekday Call Days', srS.wkdayCount, 'days', 'var(--blue)')}
             {sc('Weekend Call Days', srS.wkndCount, 'days', 'var(--purple)')}
@@ -1136,7 +1136,7 @@ export default function ScheduleView({
 
     return (
       <div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 4 }}>
+        <div className="sg4" style={{ gap: 14, marginBottom: 4 }}>
           {sc('VA Call Weeks', myWeeks.length, 'wks', 'var(--gold)')}
           {sc('Total Call Hours', totalHrs, 'h', 'var(--green)')}
           {sc('Weekday Days', wkday, 'days', 'var(--blue)')}
@@ -1219,7 +1219,7 @@ export default function ScheduleView({
 
     return (
       <div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 18, background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', overflow: 'hidden' }}>
+        <div className="sg3" style={{ marginBottom: 18, background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', overflow: 'hidden' }}>
           {([
             { label: 'Total Hours on Call', value: totalHrs, color: 'var(--green)' },
             { label: 'Weekday Hours', value: wdDays.reduce((a, d) => a + d.shiftHrs, 0), color: 'var(--blue)' },
@@ -1234,7 +1234,7 @@ export default function ScheduleView({
             </div>
           ))}
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+        <div className="sg3" style={{ gap: 14 }}>
           {sc('Weekday Call Days', wdDays.length, 'days', 'var(--blue)', `${wdDays.reduce((a, d) => a + d.shiftHrs, 0)}h`)}
           {sc('Power Weekends', Math.round(pwDays.length / 3), 'wknds', '#92400e', `${pwDays.length} days · ${pwDays.reduce((a, d) => a + d.shiftHrs, 0)}h`)}
           {sc('Holiday Call Days', holDays.length, 'days', 'var(--orange)')}
@@ -1309,7 +1309,7 @@ export default function ScheduleView({
     jrs.forEach((r) => { jrUtilRatio[r.id] = Math.round((jrH[r.id] / jrPotentialHours[r.id]) * 1000) / 10; });
 
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+      <div className="sg2" style={{ gap: 18 }}>
         <div className="card">
           <div className="ch"><div className="ct">Senior Weekday Call Days</div></div>
           <div className="cb">{eqBars(srs.map((r) => ({ name: r.name, val: srWkdays[r.id] ?? 0, color: r.color })), 'd')}</div>
@@ -1427,7 +1427,7 @@ export default function ScheduleView({
     pool.forEach((r) => { vaUtilRatio[r.id] = Math.round(((vaSched!.hours[r.id] ?? 0) / vaPotentialHours[r.id]) * 1000) / 10; });
 
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+      <div className="sg2" style={{ gap: 18 }}>
         <div className="card">
           <div className="ch"><div className="ct">VA Call Weeks</div></div>
           <div className="cb">{eqBars(pool.map((r) => ({ name: r.name, val: vaSched!.counts[r.id] ?? 0, color: r.color })), ' wks')}</div>
@@ -1549,7 +1549,7 @@ export default function ScheduleView({
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginBottom: 18 }}>
+        <div className="sg2" style={{ gap: 18, marginBottom: 18 }}>
           <div className="card">
             <div className="ch"><div className="ct">Hours by Type</div></div>
             <div className="cb">
@@ -1698,7 +1698,7 @@ export default function ScheduleView({
     });
 
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+      <div className="sg2" style={{ gap: 18 }}>
         <div className="card">
           <div className="ch"><div className="ct">CMC Call Days</div></div>
           <div className="cb">{eqBars(pool.map((r) => ({ name: r.name, val: cmcDayData!.counts[r.id] ?? 0, color: r.color })), 'd')}</div>
