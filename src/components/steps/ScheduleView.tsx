@@ -812,6 +812,13 @@ export default function ScheduleView({
     if (!currentResId || !schedule) return null;
     const res = residents.find((r) => r.id === currentResId);
     if (!res) return null;
+
+    // Resolve all resident-record IDs belonging to the same person (multi-rotation support)
+    const personId = res.person_id;
+    const myResIds = new Set(
+      personId ? residents.filter((r) => r.person_id === personId).map((r) => r.id) : [currentResId],
+    );
+
     if (!cuhSched) {
       return (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--muted)', flexDirection: 'column', gap: 12 }}>
@@ -830,10 +837,10 @@ export default function ScheduleView({
 
     function computeJrStats() {
       const days = cuhSched!.juniorDays.filter(
-        (d) => d.res.id === currentResId! && (!prefix || d.dateKey.startsWith(prefix)),
+        (d) => myResIds.has(d.res.id) && (!prefix || d.dateKey.startsWith(prefix)),
       );
       const cuhRdrDays = cuhSched!.juniorDays.filter(
-        (d) => d.cuhRounder?.id === currentResId! && (!prefix || d.dateKey.startsWith(prefix)),
+        (d) => (d.cuhRounder?.id ? myResIds.has(d.cuhRounder.id) : false) && (!prefix || d.dateKey.startsWith(prefix)),
       );
       const wkday  = days.filter((d) => !d.isWeekend && !HOLIDAYS.has(d.dateKey));
       const wknd   = days.filter((d) => d.isWeekend && !HOLIDAYS.has(d.dateKey));
@@ -850,7 +857,7 @@ export default function ScheduleView({
     }
 
     function computeSrStats() {
-      const srWeeks = cuhSched!.seniorWeeks.filter((w) => w.res.id === currentResId!);
+      const srWeeks = cuhSched!.seniorWeeks.filter((w) => myResIds.has(w.res.id));
       let wkdayCount = 0, wkndCount = 0, holCount = 0;
       srWeeks.forEach((w) => {
         let d = parseDate(w.wS); const end = parseDate(w.wE);
@@ -1009,9 +1016,10 @@ export default function ScheduleView({
             const ratioMap: Record<string, number> = {};
             jrs.forEach((r) => { ratioMap[r.id] = Math.round((hrsMap[r.id] / potMap[r.id]) * 1000) / 10; });
 
-            const myRatio = ratioMap[currentResId!] ?? 0;
-            const myAssigned = hrsMap[currentResId!] ?? 0;
-            const myPotential = potMap[currentResId!] ?? 1;
+            // Sum across all rotation records for the same person
+            const myAssigned = [...myResIds].reduce((a, id) => a + (hrsMap[id] ?? 0), 0);
+            const myPotential = [...myResIds].reduce((a, id) => a + (potMap[id] ?? 0), 0) || 1;
+            const myRatio = Math.round((myAssigned / myPotential) * 1000) / 10;
             return renderEquityGauge(myRatio, myAssigned, myPotential, Object.values(ratioMap), 'h');
           } else {
             // Senior: days assigned / potential call days
@@ -1039,9 +1047,9 @@ export default function ScheduleView({
             const ratioMap: Record<string, number> = {};
             srs.forEach((r) => { ratioMap[r.id] = Math.round((assignedDays[r.id] / potDays[r.id]) * 1000) / 10; });
 
-            const myRatio = ratioMap[currentResId!] ?? 0;
-            const myAssigned = assignedDays[currentResId!] ?? 0;
-            const myPotential = potDays[currentResId!] ?? 1;
+            const myAssigned = [...myResIds].reduce((a, id) => a + (assignedDays[id] ?? 0), 0);
+            const myPotential = [...myResIds].reduce((a, id) => a + (potDays[id] ?? 0), 0) || 1;
+            const myRatio = Math.round((myAssigned / myPotential) * 1000) / 10;
             return renderEquityGauge(myRatio, myAssigned, myPotential, Object.values(ratioMap), 'd');
           }
         })()}
@@ -1052,10 +1060,19 @@ export default function ScheduleView({
   // ── VA personal stats tab (resident view) ────────────────────────────────────
   function renderVAStatsTab() {
     if (!currentResId || !vaSched) return null;
-    const res = residents.find((r) => r.id === currentResId);
-    if (!res) return null;
 
-    const myWeeks = vaSched.weeks.filter((w) => w.res.id === currentResId);
+    // Resolve all resident-record IDs belonging to the same person (multi-rotation support)
+    const loginRes = residents.find((r) => r.id === currentResId);
+    if (!loginRes) return null;
+    const personId = loginRes.person_id;
+    const myResIds = new Set(
+      personId ? residents.filter((r) => r.person_id === personId).map((r) => r.id) : [currentResId],
+    );
+
+    // Find the VA record ID that appears in the schedule
+    const myWeeks = vaSched.weeks.filter((w) => myResIds.has(w.res.id));
+    const myVaResId = myWeeks[0]?.res.id ?? currentResId;
+
     if (myWeeks.length === 0) {
       return (
         <div style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>
@@ -1075,7 +1092,7 @@ export default function ScheduleView({
         d = addDays(d, 1);
       }
     });
-    const totalHrs = vaSched.hours[currentResId] ?? 0;
+    const totalHrs = vaSched.hours[myVaResId] ?? 0;
 
     // Equity
     const pool = (() => {
@@ -1125,7 +1142,7 @@ export default function ScheduleView({
           {sc('Weekday Days', wkday, 'days', 'var(--blue)')}
           {sc('Weekend & Holiday', wknd + hol, 'days', 'var(--purple)')}
         </div>
-        {renderEquityGauge(ratioMap[currentResId] ?? 0, totalHrs, potMap[currentResId] ?? 1, Object.values(ratioMap), 'h')}
+        {renderEquityGauge(ratioMap[myVaResId] ?? 0, totalHrs, potMap[myVaResId] ?? 1, Object.values(ratioMap), 'h')}
       </div>
     );
   }
@@ -1133,10 +1150,19 @@ export default function ScheduleView({
   // ── CMC personal stats tab (resident view) ────────────────────────────────────
   function renderCMCStatsTab() {
     if (!currentResId || !cmcDayData) return null;
-    const res = residents.find((r) => r.id === currentResId);
-    if (!res) return null;
 
-    const myDays = cmcDayData.days.filter((d) => d.res.id === currentResId);
+    // Resolve all resident-record IDs belonging to the same person (multi-rotation support)
+    const loginRes = residents.find((r) => r.id === currentResId);
+    if (!loginRes) return null;
+    const personId = loginRes.person_id;
+    const myResIds = new Set(
+      personId ? residents.filter((r) => r.person_id === personId).map((r) => r.id) : [currentResId],
+    );
+
+    // Find the CMC record ID that appears in the schedule
+    const myDays = cmcDayData.days.filter((d) => myResIds.has(d.res.id));
+    const myCmcResId = myDays[0]?.res.id ?? currentResId;
+
     if (myDays.length === 0) {
       return (
         <div style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>
@@ -1149,7 +1175,7 @@ export default function ScheduleView({
     const wdDays  = myDays.filter((d) => !d.isPowerWeekend);
     const holDays = myDays.filter((d) => HOLIDAYS.has(d.dateKey));
     const traumaDays = myDays.filter((d) => TRAUMA_WEEKS.has(d.dateKey));
-    const totalHrs = cmcDayData.hours[currentResId] ?? 0;
+    const totalHrs = cmcDayData.hours[myCmcResId] ?? 0;
 
     // Equity
     const pool = (() => {
@@ -1214,7 +1240,7 @@ export default function ScheduleView({
           {sc('Holiday Call Days', holDays.length, 'days', 'var(--orange)')}
           {sc('Trauma Call Days', traumaDays.length, 'days', 'var(--red)', `${traumaDays.reduce((a, d) => a + d.shiftHrs, 0)}h`)}
         </div>
-        {renderEquityGauge(ratioMap[currentResId] ?? 0, totalHrs, potMap[currentResId] ?? 1, Object.values(ratioMap), 'h')}
+        {renderEquityGauge(ratioMap[myCmcResId] ?? 0, totalHrs, potMap[myCmcResId] ?? 1, Object.values(ratioMap), 'h')}
       </div>
     );
   }
