@@ -496,6 +496,7 @@ export function generateSchedule(
   const rotWkndDays: Record<string, number> = {};
   const rotWkdayDays: Record<string, number> = {};
   const rotAvailDays: Record<string, number> = {};
+  const rotPotentialHours: Record<string, number> = {};
 
   if (needJr) {
   jrs.forEach((r) => { jrC[r.id] = 0; jrH[r.id] = 0; jrHwknd[r.id] = 0; jrHwkday[r.id] = 0; jrDwknd[r.id] = 0; jrDwkday[r.id] = 0; jrTH[r.id] = 0; jrTHwknd[r.id] = 0; jrTHwkday[r.id] = 0; jrTD[r.id] = 0; });
@@ -531,6 +532,7 @@ export function generateSchedule(
     rotWkndDays[r.id] = Math.max(1, wknd);
     rotWkdayDays[r.id] = Math.max(1, wkday);
     rotAvailDays[r.id] = Math.max(1, wknd + wkday);
+    rotPotentialHours[r.id] = Math.max(1, wknd * 24 + wkday * 12);
   });
 
   // Pick junior: enforce rest gap (2 days preferred, 1 day minimum), balance weekend/weekday separately
@@ -560,11 +562,12 @@ export function generateSchedule(
     const d = parseDate(key);
 
     function sortFn(a: Resident, b: Resident) {
-      // Primary: cumulative hours-per-available-day across all blocks in the academic year.
+      // Primary: call utilization ratio (assigned hours / potential hours) — same metric as equity chart.
+      // Carry-in uses availDays from prior blocks; scale to approximate potential hours (×18 avg).
       const aC = carryIn[a.person_id ?? ''] ?? { hours: 0, availDays: 0 };
       const bC = carryIn[b.person_id ?? ''] ?? { hours: 0, availDays: 0 };
-      const ar = (aC.hours + jrH[a.id]) / (aC.availDays + rotAvailDays[a.id]);
-      const br = (bC.hours + jrH[b.id]) / (bC.availDays + rotAvailDays[b.id]);
+      const ar = (aC.hours + jrH[a.id]) / (aC.availDays * 18 + rotPotentialHours[a.id]);
+      const br = (bC.hours + jrH[b.id]) / (bC.availDays * 18 + rotPotentialHours[b.id]);
       if (Math.abs(ar - br) > 0.001) return ar - br;
       // Secondary for weekend slots: prefer fewer weekend hours per available weekend day.
       if (isWeekendSlot) {
@@ -573,11 +576,12 @@ export function generateSchedule(
         if (Math.abs(awr - bwr) > 0.001) return awr - bwr;
       }
       if (isTraumaDay) return jrTH[a.id] - jrTH[b.id];
-      // Final tiebreaker: date-seeded hash so no single resident dominates all ties.
+      // Final tiebreaker: date-seeded hash using full resident ID for even distribution.
       let h = 2166136261;
       for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619) >>> 0;
-      const hA = (Math.imul(h ^ a.id.charCodeAt(0), 16777619) >>> 0);
-      const hB = (Math.imul(h ^ b.id.charCodeAt(0), 16777619) >>> 0);
+      let hA = h, hB = h;
+      for (let i = 0; i < a.id.length; i++) hA = (Math.imul(hA ^ a.id.charCodeAt(i), 16777619) >>> 0);
+      for (let i = 0; i < b.id.length; i++) hB = (Math.imul(hB ^ b.id.charCodeAt(i), 16777619) >>> 0);
       return hA - hB;
     }
 
