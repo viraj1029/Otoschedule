@@ -701,8 +701,8 @@ select {
   /* Truncate resident name badge */
   .res-badge { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  /* Main content area */
-  .main { padding: 12px 12px 24px; overflow-x: hidden; }
+  /* Main content area — app-body already clips horizontal overflow */
+  .main { padding: 12px 12px 24px; }
 
   /* Login */
   .login-card { width: calc(100vw - 24px); padding: 22px 16px; border-radius: 14px; }
@@ -730,9 +730,9 @@ select {
   /* Request layout stacks on mobile */
   .req-layout { grid-template-columns: 1fr; }
 
-  /* Calendar — wrap in horizontal scroll */
-  .calgrid-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: var(--r-lg); }
-  .calgrid { min-width: 500px; }
+  /* Calendar — horizontal scroll within wrapper */
+  .calgrid-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: var(--r-lg); width: 100%; }
+  .calgrid { min-width: 500px; border-radius: 0; }
 
   /* Request calendar — smaller cells */
   .rcalgrid { gap: 2px; }
