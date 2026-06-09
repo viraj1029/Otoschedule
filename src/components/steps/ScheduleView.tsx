@@ -2057,10 +2057,12 @@ export default function ScheduleView({
                       Click any day to override the weekly assignment
                     </div>
                   )}
-                  <div className="calgrid">
-                    <div className="cdow" style={{ background: 'var(--s2)' }}>Wk</div>
-                    {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => <div key={d} className="cdow">{d}</div>)}
-                    {renderCalendar()}
+                  <div className="calgrid-wrap">
+                    <div className="calgrid">
+                      <div className="cdow" style={{ background: 'var(--s2)' }}>Wk</div>
+                      {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => <div key={d} className="cdow">{d}</div>)}
+                      {renderCalendar()}
+                    </div>
                   </div>
                 </div>
               )}
@@ -2134,10 +2136,12 @@ export default function ScheduleView({
                       Click any day to override the assignment
                     </div>
                   )}
-                  <div className="calgrid">
-                    <div className="cdow" style={{ background: 'var(--s2)' }}>Wk</div>
-                    {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => <div key={d} className="cdow">{d}</div>)}
-                    {renderCalendar()}
+                  <div className="calgrid-wrap">
+                    <div className="calgrid">
+                      <div className="cdow" style={{ background: 'var(--s2)' }}>Wk</div>
+                      {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => <div key={d} className="cdow">{d}</div>)}
+                      {renderCalendar()}
+                    </div>
                   </div>
                 </div>
               )}
@@ -2236,12 +2240,14 @@ export default function ScheduleView({
                       Click days to select · {selectedKeys.length} selected
                     </div>
                   )}
-                  <div className="calgrid">
-                    <div className="cdow" style={{ background: 'var(--s2)' }}>Wk</div>
-                    {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => (
-                      <div key={d} className="cdow">{d}</div>
-                    ))}
-                    {renderCalendar()}
+                  <div className="calgrid-wrap">
+                    <div className="calgrid">
+                      <div className="cdow" style={{ background: 'var(--s2)' }}>Wk</div>
+                      {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => (
+                        <div key={d} className="cdow">{d}</div>
+                      ))}
+                      {renderCalendar()}
+                    </div>
                   </div>
                 </div>
               )}
