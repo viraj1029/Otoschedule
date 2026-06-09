@@ -713,6 +713,100 @@ export default function ScheduleView({
     );
   }
 
+  // ── Equity gauge (reusable for all schedule types) ───────────────────────────
+  function renderEquityGauge(
+    myRatio: number,
+    myAssigned: number,
+    myPotential: number,
+    groupRatios: number[],
+    unitLabel: string,
+  ) {
+    if (groupRatios.length === 0) return null;
+    const avg = Math.round((groupRatios.reduce((a, b) => a + b, 0) / groupRatios.length) * 10) / 10;
+    const minR = Math.round(Math.min(...groupRatios) * 10) / 10;
+    const maxR = Math.round(Math.max(...groupRatios) * 10) / 10;
+    const diff = Math.round((myRatio - avg) * 10) / 10;
+    const color = Math.abs(diff) <= 3 ? 'var(--green)' : Math.abs(diff) <= 8 ? 'var(--gold)' : 'var(--red)';
+    const sentiment = Math.abs(diff) <= 3 ? 'On par with peers' : diff > 0 ? 'Above average call load' : 'Below average call load';
+    const pctOf = (v: number) => maxR > 0 ? Math.min(Math.round((v / maxR) * 100), 100) : 0;
+
+    return (
+      <div className="card" style={{ marginTop: 20 }}>
+        <div className="ch">
+          <div>
+            <div className="ct">📊 My Call Equity</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+              Your share of assigned call hours relative to your potential availability during this block.
+              Equal percentages across all residents = a perfectly equitable schedule.
+            </div>
+          </div>
+        </div>
+        <div className="cb">
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 6 }}>
+            <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 42, fontWeight: 700, color, lineHeight: 1 }}>
+              {myRatio}%
+            </span>
+            <span style={{ fontSize: 13, color: 'var(--muted)' }}>utilization ratio</span>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
+            {myAssigned}{unitLabel} assigned ÷ {myPotential}{unitLabel} potential call hours
+          </div>
+
+          {/* Comparison track */}
+          <div style={{ position: 'relative', height: 10, background: 'var(--s2)', borderRadius: 6, marginBottom: 6 }}>
+            {/* Range band */}
+            <div style={{
+              position: 'absolute',
+              left: `${pctOf(minR)}%`,
+              width: `${pctOf(maxR) - pctOf(minR)}%`,
+              height: '100%',
+              background: 'rgba(148,163,184,.25)',
+              borderRadius: 6,
+            }} />
+            {/* Average tick */}
+            <div style={{
+              position: 'absolute',
+              left: `${pctOf(avg)}%`,
+              width: 2,
+              height: '100%',
+              background: 'var(--muted)',
+              borderRadius: 1,
+            }} />
+            {/* My marker */}
+            <div style={{
+              position: 'absolute',
+              left: `${pctOf(myRatio)}%`,
+              transform: 'translateX(-50%)',
+              width: 4,
+              height: 14,
+              top: -2,
+              background: color,
+              borderRadius: 2,
+              boxShadow: `0 0 0 2px ${color}40`,
+            }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--muted)', marginBottom: 14 }}>
+            <span>Min {minR}%</span>
+            <span>▼ Group avg {avg}%</span>
+            <span>Max {maxR}%</span>
+          </div>
+
+          {/* Status badge */}
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            background: `${color}18`, border: `1px solid ${color}44`,
+            borderRadius: 8, padding: '5px 12px',
+          }}>
+            <span style={{ color, fontWeight: 600, fontSize: 12 }}>{sentiment}</span>
+            <span style={{ color: 'var(--muted)', fontSize: 11 }}>
+              ({diff > 0 ? '+' : ''}{diff}% vs group avg)
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ── Stats tab (resident personal dashboard) ───────────────────────────────────
   function renderStatsTab() {
     if (!currentResId || !schedule) return null;
@@ -884,6 +978,243 @@ export default function ScheduleView({
             {sc('Holiday Call Days', srS.holCount, 'days', 'var(--orange)')}
           </div>
         )}
+
+        {/* ── Equity gauge (block-level, not filtered by month) ─────────────── */}
+        {(() => {
+          const cuhBStart = parseDate(cuhSched!.bStart);
+          const cuhBEnd   = parseDate(cuhSched!.bEnd);
+
+          if (isJunior) {
+            const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
+            const potMap: Record<string, number> = {};
+            jrs.forEach((r) => {
+              const rS = r.rotation_start ? parseDate(r.rotation_start) : cuhBStart;
+              const rE = r.rotation_end   ? parseDate(r.rotation_end)   : cuhBEnd;
+              const effS = rS < cuhBStart ? cuhBStart : rS;
+              const effE = rE > cuhBEnd   ? cuhBEnd   : rE;
+              const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
+              let pot = 0; let d = new Date(effS);
+              while (d <= effE) {
+                const key = dk(d);
+                if (!offDays.has(key)) {
+                  const dow = d.getDay();
+                  pot += (dow === 0 || dow === 6 || HOLIDAYS.has(key)) ? 24 : 12;
+                }
+                d = addDays(d, 1);
+              }
+              potMap[r.id] = Math.max(1, pot);
+            });
+            const hrsMap: Record<string, number> = {};
+            jrs.forEach((r) => { hrsMap[r.id] = cuhSched!.juniorDays.filter((d) => d.res.id === r.id).reduce((a, d) => a + d.shiftHrs, 0); });
+            const ratioMap: Record<string, number> = {};
+            jrs.forEach((r) => { ratioMap[r.id] = Math.round((hrsMap[r.id] / potMap[r.id]) * 1000) / 10; });
+
+            const myRatio = ratioMap[currentResId!] ?? 0;
+            const myAssigned = hrsMap[currentResId!] ?? 0;
+            const myPotential = potMap[currentResId!] ?? 1;
+            return renderEquityGauge(myRatio, myAssigned, myPotential, Object.values(ratioMap), 'h');
+          } else {
+            // Senior: days assigned / potential call days
+            const srs = residents.filter((r) => r.pgy >= 4 && (r.status === 'active' || r.status === 'research'));
+            const potDays: Record<string, number> = {};
+            srs.forEach((r) => {
+              const rS = r.rotation_start ? parseDate(r.rotation_start) : cuhBStart;
+              const rE = r.rotation_end   ? parseDate(r.rotation_end)   : cuhBEnd;
+              const effS = rS < cuhBStart ? cuhBStart : rS;
+              const effE = rE > cuhBEnd   ? cuhBEnd   : rE;
+              const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
+              let cnt = 0; let d = new Date(effS);
+              while (d <= effE) { if (!offDays.has(dk(d))) cnt++; d = addDays(d, 1); }
+              potDays[r.id] = Math.max(1, cnt);
+            });
+            const assignedDays: Record<string, number> = {};
+            srs.forEach((r) => {
+              let cnt = 0;
+              cuhSched!.seniorWeeks.filter((w) => w.res.id === r.id).forEach((w) => {
+                let d = parseDate(w.wS); const end = parseDate(w.wE);
+                while (d <= end) { cnt++; d = addDays(d, 1); }
+              });
+              assignedDays[r.id] = cnt;
+            });
+            const ratioMap: Record<string, number> = {};
+            srs.forEach((r) => { ratioMap[r.id] = Math.round((assignedDays[r.id] / potDays[r.id]) * 1000) / 10; });
+
+            const myRatio = ratioMap[currentResId!] ?? 0;
+            const myAssigned = assignedDays[currentResId!] ?? 0;
+            const myPotential = potDays[currentResId!] ?? 1;
+            return renderEquityGauge(myRatio, myAssigned, myPotential, Object.values(ratioMap), 'd');
+          }
+        })()}
+      </div>
+    );
+  }
+
+  // ── VA personal stats tab (resident view) ────────────────────────────────────
+  function renderVAStatsTab() {
+    if (!currentResId || !vaSched) return null;
+    const res = residents.find((r) => r.id === currentResId);
+    if (!res) return null;
+
+    const myWeeks = vaSched.weeks.filter((w) => w.res.id === currentResId);
+    if (myWeeks.length === 0) {
+      return (
+        <div style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>
+          You have no VA call assignments in this schedule.
+        </div>
+      );
+    }
+
+    let wkday = 0, wknd = 0, hol = 0;
+    myWeeks.forEach((w) => {
+      let d = parseDate(w.wS); const end = parseDate(w.wE);
+      while (d <= end) {
+        const key = dk(d);
+        if (HOLIDAYS.has(key)) hol++;
+        else if (d.getDay() === 0 || d.getDay() === 6) wknd++;
+        else wkday++;
+        d = addDays(d, 1);
+      }
+    });
+    const totalHrs = vaSched.hours[currentResId] ?? 0;
+
+    // Equity
+    const pool = (() => {
+      const m = new Map<string, Resident>();
+      vaSched.weeks.forEach((w) => m.set(w.res.id, w.res));
+      return [...m.values()];
+    })();
+    const vaBStart = parseDate(vaSched.bStart);
+    const vaBEnd   = parseDate(vaSched.bEnd);
+    const potMap: Record<string, number> = {};
+    pool.forEach((r) => {
+      const vaSegs = r.rotations?.filter((s) => s.hospital === 'VA') ?? [];
+      const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
+      let pot = 0; let d = new Date(vaBStart);
+      while (d <= vaBEnd) {
+        const dstr = dk(d);
+        const inVA = vaSegs.length === 0 || vaSegs.some((s) => dstr >= s.start_date && dstr <= s.end_date);
+        if (inVA && !offDays.has(dstr)) {
+          const dow = d.getDay();
+          pot += (dow === 0 || dow === 6 || HOLIDAYS.has(dstr)) ? 24 : 12;
+        }
+        d = addDays(d, 1);
+      }
+      potMap[r.id] = Math.max(1, pot);
+    });
+    const ratioMap: Record<string, number> = {};
+    pool.forEach((r) => { ratioMap[r.id] = Math.round(((vaSched!.hours[r.id] ?? 0) / potMap[r.id]) * 1000) / 10; });
+
+    function sc(label: string, value: number, unit: string, color: string, sub?: string) {
+      return (
+        <div className="card" style={{ padding: '18px 20px' }}>
+          <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10 }}>{label}</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+            <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 34, fontWeight: 700, color, lineHeight: 1 }}>{value}</span>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>{unit}</span>
+          </div>
+          {sub && <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color, marginTop: 6, opacity: 0.8 }}>{sub}</div>}
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 4 }}>
+          {sc('VA Call Weeks', myWeeks.length, 'wks', 'var(--gold)')}
+          {sc('Total Call Hours', totalHrs, 'h', 'var(--green)')}
+          {sc('Weekday Days', wkday, 'days', 'var(--blue)')}
+          {sc('Weekend & Holiday', wknd + hol, 'days', 'var(--purple)')}
+        </div>
+        {renderEquityGauge(ratioMap[currentResId] ?? 0, totalHrs, potMap[currentResId] ?? 1, Object.values(ratioMap), 'h')}
+      </div>
+    );
+  }
+
+  // ── CMC personal stats tab (resident view) ────────────────────────────────────
+  function renderCMCStatsTab() {
+    if (!currentResId || !cmcDayData) return null;
+    const res = residents.find((r) => r.id === currentResId);
+    if (!res) return null;
+
+    const myDays = cmcDayData.days.filter((d) => d.res.id === currentResId);
+    if (myDays.length === 0) {
+      return (
+        <div style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>
+          You have no CMC call assignments in this schedule.
+        </div>
+      );
+    }
+
+    const pwDays  = myDays.filter((d) => d.isPowerWeekend);
+    const wdDays  = myDays.filter((d) => !d.isPowerWeekend);
+    const holDays = myDays.filter((d) => HOLIDAYS.has(d.dateKey));
+    const traumaDays = myDays.filter((d) => TRAUMA_WEEKS.has(d.dateKey));
+    const totalHrs = cmcDayData.hours[currentResId] ?? 0;
+
+    // Equity
+    const pool = (() => {
+      const m = new Map<string, Resident>();
+      cmcDayData.days.forEach((d) => m.set(d.res.id, d.res));
+      return [...m.values()];
+    })();
+    const cmcBStart = parseDate(cmcDayData.bStart);
+    const cmcBEnd   = parseDate(cmcDayData.bEnd);
+    const potMap: Record<string, number> = {};
+    pool.forEach((r) => {
+      const cmcSegs = r.rotations?.filter((s) => s.hospital === 'CMC') ?? [];
+      const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
+      let pot = 0; let d = new Date(cmcBStart);
+      while (d <= cmcBEnd) {
+        const dstr = dk(d);
+        const inCMC = cmcSegs.length === 0 || cmcSegs.some((s) => dstr >= s.start_date && dstr <= s.end_date);
+        if (inCMC && !offDays.has(dstr)) {
+          const dow = d.getDay();
+          pot += (dow === 0 || dow === 6 || HOLIDAYS.has(dstr)) ? 24 : 12;
+        }
+        d = addDays(d, 1);
+      }
+      potMap[r.id] = Math.max(1, pot);
+    });
+    const ratioMap: Record<string, number> = {};
+    pool.forEach((r) => { ratioMap[r.id] = Math.round(((cmcDayData!.hours[r.id] ?? 0) / potMap[r.id]) * 1000) / 10; });
+
+    function sc(label: string, value: number, unit: string, color: string, sub?: string) {
+      return (
+        <div className="card" style={{ padding: '18px 20px' }}>
+          <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10 }}>{label}</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+            <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 34, fontWeight: 700, color, lineHeight: 1 }}>{value}</span>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>{unit}</span>
+          </div>
+          {sub && <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color, marginTop: 6, opacity: 0.8 }}>{sub}</div>}
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 18, background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', overflow: 'hidden' }}>
+          {([
+            { label: 'Total Hours on Call', value: totalHrs, color: 'var(--green)' },
+            { label: 'Weekday Hours', value: wdDays.reduce((a, d) => a + d.shiftHrs, 0), color: 'var(--blue)' },
+            { label: 'Power Weekend Hours', value: pwDays.reduce((a, d) => a + d.shiftHrs, 0), color: '#92400e' },
+          ] as { label: string; value: number; color: string }[]).map(({ label, value, color }, i) => (
+            <div key={label} style={{ padding: '20px 24px', borderLeft: i > 0 ? '1px solid var(--border)' : undefined }}>
+              <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8, fontWeight: 600 }}>{label}</div>
+              <div style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 700, color, lineHeight: 1 }}>
+                <span style={{ fontSize: 38 }}>{value}</span>
+                <span style={{ fontSize: 18 }}>h</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+          {sc('Weekday Call Days', wdDays.length, 'days', 'var(--blue)', `${wdDays.reduce((a, d) => a + d.shiftHrs, 0)}h`)}
+          {sc('Power Weekends', Math.round(pwDays.length / 3), 'wknds', '#92400e', `${pwDays.length} days · ${pwDays.reduce((a, d) => a + d.shiftHrs, 0)}h`)}
+          {sc('Holiday Call Days', holDays.length, 'days', 'var(--orange)')}
+          {sc('Trauma Call Days', traumaDays.length, 'days', 'var(--red)', `${traumaDays.reduce((a, d) => a + d.shiftHrs, 0)}h`)}
+        </div>
+        {renderEquityGauge(ratioMap[currentResId] ?? 0, totalHrs, potMap[currentResId] ?? 1, Object.values(ratioMap), 'h')}
       </div>
     );
   }
@@ -1707,6 +2038,7 @@ export default function ScheduleView({
                   </div>
                 </div>
               )}
+              {tab === 'stats'  && renderVAStatsTab()}
               {tab === 'hours'  && renderVAHoursTab()}
               {tab === 'equity' && renderVAEquityTab()}
             </div>
@@ -1783,6 +2115,7 @@ export default function ScheduleView({
                   </div>
                 </div>
               )}
+              {tab === 'stats'  && renderCMCStatsTab()}
               {tab === 'hours'  && renderCMCHoursTab()}
               {tab === 'equity' && renderCMCEquityTab()}
             </div>
