@@ -912,7 +912,11 @@ export function generateCMCSchedule(
 
   // ── Step 2: Assign Mon–Thu weekdays ──────────────────────────────────────────
   // Hard constraint: no consecutive weekdays (different person every day Mon–Thu).
+  // Soft constraint: within a Mon–Thu week, spread across all available residents
+  //   before repeating — avoids q2 (2-resident alternating) patterns.
   let lastWkdayId: string | null = null;
+  // Track IDs used so far within the current Mon–Thu week
+  const weekUsedIds = new Set<string>();
 
   let d = new Date(bStart);
   while (d <= bEnd) {
@@ -920,6 +924,10 @@ export function generateCMCSchedule(
     if (dow >= 1 && dow <= 4) {
       const dateKey = dk(d);
       const isTraumaDay = TRAUMA_WEEKS.has(dateKey);
+
+      // Reset week tracking at the start of each Mon–Thu block
+      if (dow === 1) weekUsedIds.clear();
+
       // Hard constraints:
       //   1. No consecutive weekdays (exclude yesterday's person)
       //   2. Thu → exclude the upcoming power weekend person
@@ -929,12 +937,21 @@ export function generateCMCSchedule(
         dow === 1 ? (pwByFri.get(dk(addDays(d, -3)))?.id ?? null) :
         null;
 
-      let avail = pool.filter(
+      // Residents available for this day (not off, not consecutive)
+      const baseAvail = pool.filter(
         (r) => !offMap[r.id].has(dateKey) && r.id !== lastWkdayId && r.id !== pwExcludeId,
       );
-      // Relax no-consecutive if needed, but always keep PW exclusion
+
+      // Soft constraint: prefer residents not yet used this week (avoids q2 alternating)
+      const unusedThisWeek = baseAvail.filter((r) => !weekUsedIds.has(r.id));
+
+      let avail = unusedThisWeek.length > 0 ? unusedThisWeek : baseAvail;
+
+      // Relax no-consecutive if needed, but keep PW exclusion
       if (!avail.length) {
-        avail = pool.filter((r) => !offMap[r.id].has(dateKey) && r.id !== pwExcludeId);
+        const relaxed = pool.filter((r) => !offMap[r.id].has(dateKey) && r.id !== pwExcludeId);
+        const unusedRelaxed = relaxed.filter((r) => !weekUsedIds.has(r.id));
+        avail = unusedRelaxed.length > 0 ? unusedRelaxed : relaxed;
       }
       if (!avail.length) avail = pool.filter((r) => !offMap[r.id].has(dateKey));
       if (!avail.length) avail = [...pool];
@@ -947,8 +964,12 @@ export function generateCMCSchedule(
       lastWkdayDate[pick.id] = dateKey;
       if (isTraumaDay) traumaHours[pick.id] += 12;
       lastWkdayId = pick.id;
+      weekUsedIds.add(pick.id);
     } else {
-      if (dow === 5) lastWkdayId = null;
+      if (dow === 5) {
+        lastWkdayId = null;
+        // weekUsedIds is reset at the start of the next Monday
+      }
     }
     d = addDays(d, 1);
   }
