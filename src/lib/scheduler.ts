@@ -491,9 +491,21 @@ export function generateSchedule(
   jrs.forEach((r) => { jrC[r.id] = 0; jrH[r.id] = 0; jrHwknd[r.id] = 0; jrHwkday[r.id] = 0; jrDwknd[r.id] = 0; jrDwkday[r.id] = 0; jrTH[r.id] = 0; jrTHwknd[r.id] = 0; jrTHwkday[r.id] = 0; jrTD[r.id] = 0; });
   const processed = new Set<string>();
 
-  // Compute available (non-off) rotation day counts for proportional equity sorting.
-  // Using available days (not raw rotation window) ensures residents with more vacation
-  // don't get assigned at higher density on their working days.
+  // Compute equity-aligned availability: only subtract official vacation days (not weekend/holiday
+  // opt-out requests). Weekend/holiday opt-outs shrink rotAvailDays, making the resident's
+  // hours/availDays ratio look artificially high, causing the sort to under-assign them.
+  // equityOffMap = offMap entries that are either official vacation OR off-rotation (no request).
+  const allReqDates:      Record<string, Set<string>> = {};
+  const officialVacDates: Record<string, Set<string>> = {};
+  const equityOffMap:     Record<string, Set<string>> = {};
+  jrs.forEach((r) => {
+    allReqDates[r.id]      = new Set(requests.filter((req) => req.resident_id === r.id).map((req) => req.date));
+    officialVacDates[r.id] = new Set(requests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
+    equityOffMap[r.id]     = new Set([...offMap[r.id]].filter((key) =>
+      officialVacDates[r.id].has(key) || !allReqDates[r.id].has(key),
+    ));
+  });
+
   jrs.forEach((r) => {
     let wknd = 0, wkday = 0;
     const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
@@ -503,7 +515,7 @@ export function generateSchedule(
     let dd = new Date(effS);
     while (dd <= effE) {
       const key = dk(dd);
-      if (!offMap[r.id].has(key)) {
+      if (!equityOffMap[r.id].has(key)) {
         const dow = dd.getDay();
         if (dow === 0 || dow === 6 || HOLIDAYS.has(key)) wknd++; else wkday++;
       }
