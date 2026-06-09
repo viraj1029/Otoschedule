@@ -922,19 +922,32 @@ export default function ScheduleView({
     // Available days: rotation window minus any off/vacation requests.
     // Matches the scheduler's normalization so the chart reflects actual call density.
     const jrRotDays: Record<string, number> = {};
+    const jrPotentialHours: Record<string, number> = {};
     jrs.forEach((r) => {
       const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
       const rE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
       const effS = rS < bStart ? bStart : rS;
       const effE = rE > bEnd   ? bEnd   : rE;
       const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id).map((req) => req.date));
-      let cnt = 0; let d = new Date(effS);
-      while (d <= effE) { if (!offDays.has(dk(d))) cnt++; d = addDays(d, 1); }
+      let cnt = 0; let pot = 0; let d = new Date(effS);
+      while (d <= effE) {
+        const key = dk(d);
+        if (!offDays.has(key)) {
+          cnt++;
+          const dow = d.getDay();
+          pot += (dow === 0 || dow === 6 || HOLIDAYS.has(key)) ? 24 : 12;
+        }
+        d = addDays(d, 1);
+      }
       jrRotDays[r.id] = Math.max(1, cnt);
+      jrPotentialHours[r.id] = Math.max(1, pot);
     });
     // Express as hours per 30 available days for a legible number
     const jrHper30: Record<string, number> = {};
     jrs.forEach((r) => { jrHper30[r.id] = Math.round((jrH[r.id] / jrRotDays[r.id]) * 30 * 10) / 10; });
+    // Utilization ratio: assigned hours / potential call hours (as percentage)
+    const jrUtilRatio: Record<string, number> = {};
+    jrs.forEach((r) => { jrUtilRatio[r.id] = Math.round((jrH[r.id] / jrPotentialHours[r.id]) * 1000) / 10; });
 
     return (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
@@ -966,6 +979,15 @@ export default function ScheduleView({
             </div>
           </div>
           <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name} (${jrRotDays[r.id]}d avail)`, val: jrHper30[r.id] ?? 0, color: r.color })), 'h')}</div>
+        </div>
+        <div className="card" style={{ gridColumn: 'span 2' }}>
+          <div className="ch">
+            <div>
+              <div className="ct">Junior Call Utilization Ratio</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Assigned hours ÷ potential call hours (avail days × 12h weekday / 24h weekend·holiday) — equal bars = perfectly equitable</div>
+            </div>
+          </div>
+          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${jrH[r.id]}h / ${jrPotentialHours[r.id]}h potential`, val: jrUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
         </div>
       </div>
     );
@@ -1031,6 +1053,29 @@ export default function ScheduleView({
     const resSet = new Map<string, Resident>();
     vaSched.weeks.forEach((w) => resSet.set(w.res.id, w.res));
     const pool = [...resSet.values()].sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
+
+    // Compute potential call hours per VA resident (VA rotation window minus vacation)
+    const vaBStart = parseDate(vaSched.bStart);
+    const vaBEnd   = parseDate(vaSched.bEnd);
+    const vaPotentialHours: Record<string, number> = {};
+    pool.forEach((r) => {
+      const vaSegs = r.rotations?.filter((s) => s.hospital === 'VA') ?? [];
+      const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && (req.type === 'vacation' || req.type === 'vacation_official')).map((req) => req.date));
+      let pot = 0; let d = new Date(vaBStart);
+      while (d <= vaBEnd) {
+        const dstr = dk(d);
+        const inVA = vaSegs.length === 0 || vaSegs.some((s) => dstr >= s.start_date && dstr <= s.end_date);
+        if (inVA && !offDays.has(dstr)) {
+          const dow = d.getDay();
+          pot += (dow === 0 || dow === 6 || HOLIDAYS.has(dstr)) ? 24 : 12;
+        }
+        d = addDays(d, 1);
+      }
+      vaPotentialHours[r.id] = Math.max(1, pot);
+    });
+    const vaUtilRatio: Record<string, number> = {};
+    pool.forEach((r) => { vaUtilRatio[r.id] = Math.round(((vaSched!.hours[r.id] ?? 0) / vaPotentialHours[r.id]) * 1000) / 10; });
+
     return (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
         <div className="card">
@@ -1040,6 +1085,15 @@ export default function ScheduleView({
         <div className="card">
           <div className="ch"><div className="ct">VA Call Hours</div></div>
           <div className="cb">{eqBars(pool.map((r) => ({ name: r.name, val: vaSched!.hours[r.id] ?? 0, color: r.color })), 'h')}</div>
+        </div>
+        <div className="card" style={{ gridColumn: 'span 2' }}>
+          <div className="ch">
+            <div>
+              <div className="ct">VA Call Utilization Ratio</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Assigned hours ÷ potential call hours (avail days × 12h weekday / 24h weekend·holiday) — equal bars = perfectly equitable</div>
+            </div>
+          </div>
+          <div className="cb">{eqBars(pool.map((r) => ({ name: `${r.name}  ${vaSched!.hours[r.id] ?? 0}h / ${vaPotentialHours[r.id]}h potential`, val: vaUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
         </div>
       </div>
     );
@@ -1274,21 +1328,29 @@ export default function ScheduleView({
     const bStart = parseDate(cmcDayData.bStart);
     const bEnd   = parseDate(cmcDayData.bEnd);
     const cmcRotDays: Record<string, number> = {};
+    const cmcPotentialHours: Record<string, number> = {};
     pool.forEach((r) => {
       const cmcSegs = r.rotations?.filter((s) => s.hospital === 'CMC') ?? [];
       const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id).map((req) => req.date));
-      let cnt = 0; let d = new Date(bStart);
+      let cnt = 0; let pot = 0; let d = new Date(bStart);
       while (d <= bEnd) {
         const dstr = dk(d);
         const inCMC = cmcSegs.length === 0 || cmcSegs.some((s) => dstr >= s.start_date && dstr <= s.end_date);
-        if (inCMC && !offDays.has(dstr)) cnt++;
+        if (inCMC && !offDays.has(dstr)) {
+          cnt++;
+          const dow = d.getDay();
+          pot += (dow === 0 || dow === 6 || HOLIDAYS.has(dstr)) ? 24 : 12;
+        }
         d = addDays(d, 1);
       }
       cmcRotDays[r.id] = Math.max(1, cnt);
+      cmcPotentialHours[r.id] = Math.max(1, pot);
     });
     const cmcHper30: Record<string, number> = {};
+    const cmcUtilRatio: Record<string, number> = {};
     pool.forEach((r) => {
       cmcHper30[r.id] = Math.round(((cmcDayData!.hours[r.id] ?? 0) / cmcRotDays[r.id]) * 30 * 10) / 10;
+      cmcUtilRatio[r.id] = Math.round(((cmcDayData!.hours[r.id] ?? 0) / cmcPotentialHours[r.id]) * 1000) / 10;
     });
 
     return (
@@ -1309,6 +1371,15 @@ export default function ScheduleView({
             </div>
           </div>
           <div className="cb">{eqBars(pool.map((r) => ({ name: `${r.name} (${cmcRotDays[r.id]}d avail)`, val: cmcHper30[r.id] ?? 0, color: r.color })), 'h')}</div>
+        </div>
+        <div className="card" style={{ gridColumn: 'span 2' }}>
+          <div className="ch">
+            <div>
+              <div className="ct">CMC Call Utilization Ratio</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Assigned hours ÷ potential call hours (avail days × 12h weekday / 24h weekend·holiday) — equal bars = perfectly equitable</div>
+            </div>
+          </div>
+          <div className="cb">{eqBars(pool.map((r) => ({ name: `${r.name}  ${cmcDayData!.hours[r.id] ?? 0}h / ${cmcPotentialHours[r.id]}h potential`, val: cmcUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
         </div>
       </div>
     );
