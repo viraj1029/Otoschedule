@@ -730,9 +730,18 @@ select {
   /* Request layout stacks on mobile */
   .req-layout { grid-template-columns: 1fr; }
 
-  /* Calendar — horizontal scroll within wrapper */
-  .calgrid-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: var(--r-lg); width: 100%; }
-  .calgrid { min-width: 500px; border-radius: 0; }
+  /* Calendar — fit on screen instead of scrolling */
+  .calgrid-wrap { display: contents; } /* unwrap — no longer needed */
+  .calgrid {
+    grid-template-columns: 26px repeat(7, 1fr);
+    border-radius: var(--r);
+    min-width: unset;
+  }
+  .cdow { font-size: 8px; padding: 7px 2px; letter-spacing: 0; }
+  .cwl { font-size: 8px; padding: 6px 2px; }
+  .ccell { min-height: 54px; padding: 4px 3px; }
+  .cdate { font-size: 8px; margin-bottom: 2px; }
+  .chip { font-size: 8px; padding: 1px 3px; gap: 2px; }
 
   /* Request calendar — smaller cells */
   .rcalgrid { gap: 2px; }
