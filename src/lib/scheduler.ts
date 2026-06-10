@@ -1003,10 +1003,11 @@ export function generateCMCSchedule(
   const counts:         Record<string, number> = {};
   const hours:          Record<string, number> = {};
   const traumaHours:    Record<string, number> = {};
+  const wkndHours:      Record<string, number> = {}; // power-weekend hours only (weekend equity numerator)
   const wdCount:        Record<string, number> = {}; // weekday shifts only
   const pwCount:        Record<string, number> = {}; // power weekends only
   const lastWkdayDate:  Record<string, string>  = {}; // last weekday shift date per resident
-  pool.forEach((r) => { counts[r.id] = 0; hours[r.id] = 0; traumaHours[r.id] = 0; wdCount[r.id] = 0; pwCount[r.id] = 0; lastWkdayDate[r.id] = '1900-01-01'; });
+  pool.forEach((r) => { counts[r.id] = 0; hours[r.id] = 0; traumaHours[r.id] = 0; wkndHours[r.id] = 0; wdCount[r.id] = 0; pwCount[r.id] = 0; lastWkdayDate[r.id] = '1900-01-01'; });
 
   // Available weekdays (Mon–Thu) per resident — uses equityOffMap so informal vacation doesn't skew sort
   const wdAvail: Record<string, number> = {};
@@ -1036,24 +1037,54 @@ export function generateCMCSchedule(
     pwAvail[r.id] = Math.max(cnt, 1);
   });
 
-  // Available trauma days per resident — uses equityOffMap
-  const traumaAvail: Record<string, number> = {};
+  // Potential weekend-call HOURS per resident — power-weekend hours (Fri 12 + Sat 24 + Sun 24),
+  // clipped to the block and excluding fully-off weekends. Denominator for the weekend equity ratio,
+  // mirroring CUH/PMH's rotWkndPotentialHours so numerator (wkndHours) and denominator share units.
+  const wkndPotentialHours: Record<string, number> = {};
   pool.forEach((r) => {
-    let cnt = 0;
-    let td = new Date(bStart);
-    while (td <= bEnd) {
-      if (TRAUMA_WEEKS.has(dk(td)) && !cmcEquityOffMap[r.id].has(dk(td))) cnt++;
-      td = addDays(td, 1);
+    let h = 0;
+    let fd2 = new Date(bStart);
+    while (fd2 <= bEnd) {
+      if (fd2.getDay() === 5) {
+        const friKey = dk(fd2), satKey = dk(addDays(fd2, 1)), sunKey = dk(addDays(fd2, 2));
+        const fullyOff = cmcEquityOffMap[r.id].has(friKey) && cmcEquityOffMap[r.id].has(satKey) && cmcEquityOffMap[r.id].has(sunKey);
+        if (!fullyOff) {
+          for (const [key, hrs] of [[friKey, 12], [satKey, 24], [sunKey, 24]] as [string, number][]) {
+            const pd = parseDate(key);
+            if (pd >= bStart && pd <= bEnd) h += hrs;
+          }
+        }
+      }
+      fd2 = addDays(fd2, 1);
     }
-    traumaAvail[r.id] = Math.max(cnt, 1);
+    wkndPotentialHours[r.id] = Math.max(h, 1);
   });
 
-  // Weekday pick: sort by wdCount/wdAvail; tiebreak by longest gap since last weekday shift
+  // Potential trauma HOURS per resident — trauma-week hours the resident is available for
+  // (Sat/Sun 24h, all other days 12h). Denominator for the trauma equity ratio, mirroring
+  // CUH/PMH's rotPotentialTraumaHours (replaces the prior day-count denominator).
+  const traumaPotentialHours: Record<string, number> = {};
+  pool.forEach((r) => {
+    let h = 0;
+    let td = new Date(bStart);
+    while (td <= bEnd) {
+      const key = dk(td);
+      if (TRAUMA_WEEKS.has(key) && !cmcEquityOffMap[r.id].has(key)) {
+        const dow = td.getDay();
+        h += (dow === 0 || dow === 6) ? 24 : 12;
+      }
+      td = addDays(td, 1);
+    }
+    traumaPotentialHours[r.id] = Math.max(h, 1);
+  });
+
+  // Weekday pick: weekday equity (wdCount/wdAvail) primary; on trauma days the trauma equity
+  // ratio (trauma hours / trauma potential hours) takes precedence, matching CUH/PMH.
   function pickWeekday(candidates: Resident[], isTraumaDay: boolean): Resident {
     return [...candidates].sort((a, b) => {
       if (isTraumaDay) {
-        const aProp = traumaHours[a.id] / traumaAvail[a.id];
-        const bProp = traumaHours[b.id] / traumaAvail[b.id];
+        const aProp = traumaHours[a.id] / traumaPotentialHours[a.id];
+        const bProp = traumaHours[b.id] / traumaPotentialHours[b.id];
         if (Math.abs(aProp - bProp) > 1e-9) return aProp - bProp;
       }
       const ratioA = wdCount[a.id] / wdAvail[a.id];
@@ -1064,13 +1095,21 @@ export function generateCMCSchedule(
     })[0];
   }
 
-  // Power weekend pick: sort by pwCount/pwAvail (trauma proportion primary on trauma weekends)
+  // Power weekend pick: weekend equity ratio (weekend hours / weekend potential hours), matching
+  // CUH/PMH. On trauma weekends use a blended score (weekend ratio + trauma ratio) so neither axis
+  // dominates — identical to the junior pickJr blend. pwCount/pwAvail remains a final tiebreak.
   function pickPowerWeekend(candidates: Resident[], isTraumaWeekend: boolean): Resident {
     return [...candidates].sort((a, b) => {
+      const aW = wkndHours[a.id] / wkndPotentialHours[a.id];
+      const bW = wkndHours[b.id] / wkndPotentialHours[b.id];
       if (isTraumaWeekend) {
-        const aProp = traumaHours[a.id] / traumaAvail[a.id];
-        const bProp = traumaHours[b.id] / traumaAvail[b.id];
-        if (Math.abs(aProp - bProp) > 1e-9) return aProp - bProp;
+        const aT = traumaHours[a.id] / traumaPotentialHours[a.id];
+        const bT = traumaHours[b.id] / traumaPotentialHours[b.id];
+        const aBlend = aW + aT;
+        const bBlend = bW + bT;
+        if (Math.abs(aBlend - bBlend) > 1e-9) return aBlend - bBlend;
+      } else if (Math.abs(aW - bW) > 1e-9) {
+        return aW - bW;
       }
       return pwCount[a.id] / pwAvail[a.id] - pwCount[b.id] / pwAvail[b.id];
     })[0];
@@ -1110,6 +1149,7 @@ export function generateCMCSchedule(
         cmcDays.push({ dateKey: key, res: pick, shiftHrs, isPowerWeekend: true, override: false });
         counts[pick.id]++;
         hours[pick.id] += shiftHrs;
+        wkndHours[pick.id] += shiftHrs;
         if (TRAUMA_WEEKS.has(key)) traumaHours[pick.id] += shiftHrs;
       }
     }
