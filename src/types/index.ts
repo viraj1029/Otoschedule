@@ -120,6 +120,7 @@ export interface ScheduleData {
   jrTHwkday?: Record<string, number>;
   jrTD?: Record<string, number>;
   jrAvailDays?: Record<string, number>;
+  jrWkndAvailDays?: Record<string, number>;
   _scheduleId?: string;  // injected by GET /api/schedule
 }
 

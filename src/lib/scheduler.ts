@@ -504,6 +504,10 @@ export function generateSchedule(
   const rotAvailDays: Record<string, number> = {};
   const rotPotentialHours: Record<string, number> = {};
   const rotPotentialTraumaHours: Record<string, number> = {};
+  // Weekend days the resident is actually available (all request types excluded, including weekend requests).
+  // Used as the denominator for the weekend sort ratio so that weekend-requested days don't inflate
+  // the denominator and cause under-assignment on available slots.
+  const rotWkndAvailDays: Record<string, number> = {};
 
   if (needJr) {
   jrs.forEach((r) => { jrC[r.id] = 0; jrH[r.id] = 0; jrHwknd[r.id] = 0; jrHwkday[r.id] = 0; jrDwknd[r.id] = 0; jrDwkday[r.id] = 0; jrTH[r.id] = 0; jrTHwknd[r.id] = 0; jrTHwkday[r.id] = 0; jrTD[r.id] = 0; });
@@ -530,9 +534,9 @@ export function generateSchedule(
     let dd = new Date(bStart);
     while (dd <= bEnd) {
       const key = dk(dd);
+      const dow = dd.getDay();
+      const isWknd = dow === 0 || dow === 6 || HOLIDAYS.has(key);
       if (!equityOffMap[r.id].has(key)) {
-        const dow = dd.getDay();
-        const isWknd = dow === 0 || dow === 6 || HOLIDAYS.has(key);
         if (isWknd) wknd++; else wkday++;
         if (TRAUMA_WEEKS.has(key)) traumaHrs += isWknd ? 24 : 12;
       }
@@ -568,6 +572,19 @@ export function generateSchedule(
     }
   });
 
+  // Second pass: compute available weekend days now that rotEffStart/rotEffEnd are set.
+  jrs.forEach((r) => {
+    let wkndAvail = 0;
+    let dd = new Date(bStart);
+    while (dd <= bEnd) {
+      const key = dk(dd);
+      const dow = dd.getDay();
+      if ((dow === 0 || dow === 6 || HOLIDAYS.has(key)) && !offMap[r.id].has(key) && dd >= rotEffStart[r.id] && dd <= rotEffEnd[r.id]) wkndAvail++;
+      dd = addDays(dd, 1);
+    }
+    rotWkndAvailDays[r.id] = Math.max(1, wkndAvail);
+  });
+
   function pickJr(key: string, ex: string | null = null, isWeekendSlot = false, skipGap = false, isTraumaDay = false): Resident {
     const d = parseDate(key);
 
@@ -579,17 +596,17 @@ export function generateSchedule(
       // so neither axis dominates. This prevents a resident with low weekend hours but high trauma hours
       // from repeatedly winning trauma-weekend slots just because of the weekend sort.
       if (isWeekendSlot && isTraumaDay) {
-        const aWr = ((aC.wkndHours ?? 0) + jrHwknd[a.id]) / (rotWkndDays[a.id] * 24);
-        const bWr = ((bC.wkndHours ?? 0) + jrHwknd[b.id]) / (rotWkndDays[b.id] * 24);
+        const aWr = ((aC.wkndHours ?? 0) + jrHwknd[a.id]) / (rotWkndAvailDays[a.id] * 24);
+        const bWr = ((bC.wkndHours ?? 0) + jrHwknd[b.id]) / (rotWkndAvailDays[b.id] * 24);
         const aTr = ((aC.traumaHours ?? 0) + jrTH[a.id]) / rotPotentialTraumaHours[a.id];
         const bTr = ((bC.traumaHours ?? 0) + jrTH[b.id]) / rotPotentialTraumaHours[b.id];
         const aBlend = aWr + aTr;
         const bBlend = bWr + bTr;
         if (Math.abs(aBlend - bBlend) > 0.001) return aBlend - bBlend;
       } else if (isWeekendSlot) {
-        // Weekend-only: primary sort is weekend utilization ratio.
-        const aWr = ((aC.wkndHours ?? 0) + jrHwknd[a.id]) / (rotWkndDays[a.id] * 24);
-        const bWr = ((bC.wkndHours ?? 0) + jrHwknd[b.id]) / (rotWkndDays[b.id] * 24);
+        // Weekend-only: primary sort is weekend utilization ratio vs actually available days.
+        const aWr = ((aC.wkndHours ?? 0) + jrHwknd[a.id]) / (rotWkndAvailDays[a.id] * 24);
+        const bWr = ((bC.wkndHours ?? 0) + jrHwknd[b.id]) / (rotWkndAvailDays[b.id] * 24);
         if (Math.abs(aWr - bWr) > 0.001) return aWr - bWr;
       } else if (isTraumaDay) {
         // Trauma-only (weekday): primary sort is trauma utilization ratio.
@@ -785,6 +802,7 @@ export function generateSchedule(
     jrTHwkday,
     jrTD,
     jrAvailDays: rotAvailDays,
+    jrWkndAvailDays: rotWkndAvailDays,
   };
 }
 
