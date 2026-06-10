@@ -37,6 +37,8 @@ export async function GET() {
     // If the stored schedule is from a different (earlier) block within the same academic year, archive it.
     if (storedBlockStart !== currentBlockStart && academicYear(storedBlockStart) === acYear) {
       const jrH: Record<string, number> = stored.jrH ?? {};
+      const jrHwknd: Record<string, number> = stored.jrHwknd ?? {};
+      const jrTH: Record<string, number> = stored.jrTH ?? {};
       const jrAvailDays: Record<string, number> = stored.jrAvailDays ?? {};
       const juniorDays: Array<{ res: { id: string; person_id?: string } }> = stored.juniorDays ?? [];
 
@@ -51,14 +53,18 @@ export async function GET() {
       for (const [personId, resId] of Object.entries(personToResId)) {
         const hours = jrH[resId] ?? 0;
         const availDays = jrAvailDays[resId] ?? 0;
+        const wkndHours = jrHwknd[resId] ?? 0;
+        const traumaHours = jrTH[resId] ?? 0;
         if (hours === 0 && availDays === 0) continue;
         await sql`
-          INSERT INTO jr_carry (person_id, block_start, academic_year, hours, avail_days)
-          VALUES (${personId}, ${storedBlockStart}, ${acYear}, ${hours}, ${availDays})
+          INSERT INTO jr_carry (person_id, block_start, academic_year, hours, avail_days, wknd_hours, trauma_hours)
+          VALUES (${personId}, ${storedBlockStart}, ${acYear}, ${hours}, ${availDays}, ${wkndHours}, ${traumaHours})
           ON CONFLICT (person_id, block_start) DO UPDATE SET
-            hours      = EXCLUDED.hours,
-            avail_days = EXCLUDED.avail_days,
-            archived_at = NOW()
+            hours        = EXCLUDED.hours,
+            avail_days   = EXCLUDED.avail_days,
+            wknd_hours   = EXCLUDED.wknd_hours,
+            trauma_hours = EXCLUDED.trauma_hours,
+            archived_at  = NOW()
         `;
       }
     }
@@ -66,17 +72,23 @@ export async function GET() {
 
   // Return cumulative carry-in for this academic year, excluding the current block
   const { rows: carryRows } = await sql`
-    SELECT person_id, SUM(hours) AS hours, SUM(avail_days) AS avail_days
+    SELECT person_id,
+           SUM(hours)        AS hours,
+           SUM(avail_days)   AS avail_days,
+           SUM(wknd_hours)   AS wknd_hours,
+           SUM(trauma_hours) AS trauma_hours
     FROM jr_carry
     WHERE academic_year = ${acYear} AND block_start != ${currentBlockStart}
     GROUP BY person_id
   `;
 
-  const carryIn: Record<string, { hours: number; availDays: number }> = {};
+  const carryIn: Record<string, { hours: number; availDays: number; wkndHours: number; traumaHours: number }> = {};
   for (const row of carryRows) {
     carryIn[row.person_id] = {
-      hours: parseFloat(row.hours),
-      availDays: parseInt(row.avail_days),
+      hours:        parseFloat(row.hours),
+      availDays:    parseInt(row.avail_days),
+      wkndHours:    parseFloat(row.wknd_hours ?? '0'),
+      traumaHours:  parseFloat(row.trauma_hours ?? '0'),
     };
   }
 

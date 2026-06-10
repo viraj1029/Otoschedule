@@ -103,15 +103,20 @@ export async function initDb() {
   // Per-person carry-over hours across blocks within an academic year (Jul–Jun).
   await sql`
     CREATE TABLE IF NOT EXISTS jr_carry (
-      person_id    TEXT NOT NULL,
-      block_start  TEXT NOT NULL,
-      academic_year INT NOT NULL,
-      hours        REAL NOT NULL DEFAULT 0,
-      avail_days   INT  NOT NULL DEFAULT 0,
-      archived_at  TIMESTAMP DEFAULT NOW(),
+      person_id     TEXT NOT NULL,
+      block_start   TEXT NOT NULL,
+      academic_year INT  NOT NULL,
+      hours         REAL NOT NULL DEFAULT 0,
+      avail_days    INT  NOT NULL DEFAULT 0,
+      wknd_hours    REAL NOT NULL DEFAULT 0,
+      trauma_hours  REAL NOT NULL DEFAULT 0,
+      archived_at   TIMESTAMP DEFAULT NOW(),
       PRIMARY KEY (person_id, block_start)
     )
   `;
+  // Add new columns to existing jr_carry tables (idempotent migrations).
+  await sql`ALTER TABLE jr_carry ADD COLUMN IF NOT EXISTS wknd_hours   REAL NOT NULL DEFAULT 0`;
+  await sql`ALTER TABLE jr_carry ADD COLUMN IF NOT EXISTS trauma_hours REAL NOT NULL DEFAULT 0`;
 
   // Rotation segments — one row per hospital stint per resident per year.
   await sql`
