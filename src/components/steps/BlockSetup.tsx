@@ -119,14 +119,12 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
       const nextMonth = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
       const segEnd = Math.min(nextMonth.getTime(), bStart.getTime() + totalMs);
       const widthPct = (segEnd - segStart) / totalMs * 100;
-      monthSegs.push({
-        label: cur.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
-        widthPct,
-      });
+      const monthName = cur.toLocaleDateString('en-US', { month: 'short' });
+      monthSegs.push({ label: `${monthName} 1`, widthPct });
       cur = nextMonth;
     }
 
-    // Month start positions for grid lines
+    // Cumulative left-% for each month start (for grid lines and tick labels)
     const gridPcts: number[] = [];
     let cumPct = 0;
     monthSegs.forEach((seg) => { gridPcts.push(cumPct); cumPct += seg.widthPct; });
@@ -157,14 +155,16 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
           </div>
         </div>
         <div className="cb">
-          {/* Month axis — flex segments, proportional to actual month widths */}
-          <div style={{ display: 'flex', marginLeft: 144, marginBottom: 6, overflow: 'hidden' }}>
-            {monthSegs.map((m, i) => (
-              <div key={m.label} style={{
-                width: `${m.widthPct}%`, flexShrink: 0,
-                fontSize: 9, color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace",
-                overflow: 'hidden', paddingLeft: i === 0 ? 0 : 2, borderLeft: i > 0 ? '1px solid var(--border)' : undefined,
-              }}>{m.label}</div>
+          {/* Tick-mark ruler — labels at exact month-start positions */}
+          <div style={{ marginLeft: 144, position: 'relative', height: 30, marginBottom: 4 }}>
+            {gridPcts.map((pct, i) => (
+              <div key={i} style={{ position: 'absolute', left: `${pct}%`, top: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                <div style={{ width: 1, height: 10, background: 'var(--border2)' }} />
+                <span style={{
+                  fontSize: 9, color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace",
+                  whiteSpace: 'nowrap', lineHeight: 1.2, marginTop: 2,
+                }}>{monthSegs[i].label}</span>
+              </div>
             ))}
           </div>
 
