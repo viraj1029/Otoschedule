@@ -316,13 +316,13 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
           <table className="ptable">
             <thead>
               <tr>
-                <th>Name</th><th>PGY</th><th>Role</th><th>Status</th><th>Rotations</th><th>PIN</th><th></th>
+                <th>Name</th><th>PGY</th><th>Role</th><th>Status</th><th>PIN</th><th></th>
               </tr>
             </thead>
             <tbody>
               {sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 28, color: 'var(--muted)', fontStyle: 'italic' }}>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: 28, color: 'var(--muted)', fontStyle: 'italic' }}>
                     No residents added yet.
                   </td>
                 </tr>
@@ -345,22 +345,6 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
                       </span>
                     </td>
                     <td>{statusBadge}</td>
-                    <td>
-                      {r.rotations && r.rotations.length > 0 ? (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                          {r.rotations.map((rot) => {
-                            const hospColor: Record<Hospital, string> = { CUH: 'bgr', PMH: 'bp', CMC: 'bb', VA: 'bo', Research: 'bpk' };
-                            return (
-                              <span key={rot.id} className={`bdg ${hospColor[rot.hospital]}`} title={`${rot.start_date} → ${rot.end_date}`}>
-                                {rot.hospital} {fmtShort(rot.start_date)}–{fmtShort(rot.end_date)}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <span style={{ fontSize: 11, color: 'var(--muted2)', fontStyle: 'italic' }}>No segments</span>
-                      )}
-                    </td>
                     <td>
                       <span
                         className="pin-chip"
