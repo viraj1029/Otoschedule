@@ -158,6 +158,9 @@ export default function ScheduleView({
   function buildChips(key: string, isWk: boolean, isHol: boolean, isTrauma = false): string {
     const rc = (color: string, label: string) =>
       `<div class="chip" style="background:${color}22;color:${color};border:1px solid ${color}44">${label}</div>`;
+    // Plain labeled row for CUH/PMH rounding (no color background)
+    const rt = (color: string, label: string) =>
+      `<div class="rrt"><span class="rrdot" style="background:${color}"></span>${label}</div>`;
 
     // VA mode
     if (vaSched) {
@@ -196,25 +199,25 @@ export default function ScheduleView({
           if (ov?.cuhResId !== undefined) {
             if (ov.cuhResId) {
               const ovRes = residents.find(r => r.id === ov.cuhResId);
-              if (ovRes) chips += rc(ovRes.color, `CUH: ${ovRes.name}`);
+              if (ovRes) chips += rt(ovRes.color, `CUH: ${ovRes.name}`);
             }
           } else if (jr.res.hospital === 'CUH') {
-            chips += rc(jr.res.color, `CUH: ${jr.res.name}`);
+            chips += rt(jr.res.color, `CUH: ${jr.res.name}`);
           } else if (friJr?.res.hospital === 'CUH') {
-            chips += rc(friJr.res.color, `CUH: ${friJr.res.name}`);
+            chips += rt(friJr.res.color, `CUH: ${friJr.res.name}`);
           }
           // PMH rounding: override takes priority, else Sat call if PMH, else Parkland intern
           if (ov?.pmhResId !== undefined) {
             if (ov.pmhResId === '__intern__') {
-              chips += `<div class="chip csat">PMH: Parkland intern</div>`;
+              chips += rt('var(--purple)', 'PMH: Parkland intern');
             } else if (ov.pmhResId) {
               const ovRes = residents.find(r => r.id === ov.pmhResId);
-              if (ovRes) chips += rc(ovRes.color, `PMH: ${ovRes.name}`);
+              if (ovRes) chips += rt(ovRes.color, `PMH: ${ovRes.name}`);
             }
           } else {
             chips += jr.res.hospital === 'PMH'
-              ? rc(jr.res.color, `PMH: ${jr.res.name}`)
-              : `<div class="chip csat">PMH: Parkland intern</div>`;
+              ? rt(jr.res.color, `PMH: ${jr.res.name}`)
+              : rt('var(--purple)', 'PMH: Parkland intern');
           }
         } else if (dow === 0) {
           // Sunday
@@ -223,34 +226,34 @@ export default function ScheduleView({
           if (ov?.cuhResId !== undefined) {
             if (ov.cuhResId) {
               const ovRes = residents.find(r => r.id === ov.cuhResId);
-              if (ovRes) chips += rc(ovRes.color, `CUH: ${ovRes.name}`);
+              if (ovRes) chips += rt(ovRes.color, `CUH: ${ovRes.name}`);
             }
           } else if (jr.res.hospital === 'CUH') {
-            chips += rc(jr.res.color, `CUH: ${jr.res.name}`);
+            chips += rt(jr.res.color, `CUH: ${jr.res.name}`);
           } else if (satJr?.res.hospital === 'CUH') {
-            chips += rc(satJr.res.color, `CUH: ${satJr.res.name}`);
+            chips += rt(satJr.res.color, `CUH: ${satJr.res.name}`);
           }
           // PMH rounding: override takes priority, else Sun call if PMH, else Parkland intern
           if (ov?.pmhResId !== undefined) {
             if (ov.pmhResId === '__intern__') {
-              chips += `<div class="chip csat">PMH: Parkland intern</div>`;
+              chips += rt('var(--purple)', 'PMH: Parkland intern');
             } else if (ov.pmhResId) {
               const ovRes = residents.find(r => r.id === ov.pmhResId);
-              if (ovRes) chips += rc(ovRes.color, `PMH: ${ovRes.name}`);
+              if (ovRes) chips += rt(ovRes.color, `PMH: ${ovRes.name}`);
             }
           } else {
             chips += jr.res.hospital === 'PMH'
-              ? rc(jr.res.color, `PMH: ${jr.res.name}`)
-              : `<div class="chip csat">PMH: Parkland intern</div>`;
+              ? rt(jr.res.color, `PMH: ${jr.res.name}`)
+              : rt('var(--purple)', 'PMH: Parkland intern');
           }
         } else {
           // Holiday on a weekday
-          if (jr.res.hospital === 'CUH') chips += rc(jr.res.color, `CUH: ${jr.res.name}`);
+          if (jr.res.hospital === 'CUH') chips += rt(jr.res.color, `CUH: ${jr.res.name}`);
           if (jr.res.hospital === 'PMH') {
-            chips += rc(jr.res.color, `PMH: ${jr.res.name}`);
+            chips += rt(jr.res.color, `PMH: ${jr.res.name}`);
             chips += jr.cuhRounder
-              ? rc(jr.cuhRounder.color, `CUH: ${jr.cuhRounder.name}`)
-              : `<div class="chip cwrn">⚠CUH?</div>`;
+              ? rt(jr.cuhRounder.color, `CUH: ${jr.cuhRounder.name}`)
+              : `<div class="rrt"><span class="rrdot" style="background:var(--red)"></span>⚠ CUH?</div>`;
           }
         }
       }

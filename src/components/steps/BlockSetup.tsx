@@ -8,6 +8,11 @@ import AddResidentModal from '../modals/AddResidentModal';
 import EditResidentModal from '../modals/EditResidentModal';
 import PinDisplayModal from '../modals/PinDisplayModal';
 
+const HOSP_COLOR: Record<Hospital, string> = {
+  CUH: 'var(--green)', PMH: 'var(--purple)', CMC: 'var(--blue)',
+  VA: 'var(--orange)', Research: 'var(--pink)',
+};
+
 interface Props {
   block: Block | null;
   residents: Resident[];
@@ -49,6 +54,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
   const [pinModal, setPinModal] = useState<{ open: boolean; title: string; name: string; pin: string }>({
     open: false, title: '', name: '', pin: '',
   });
+  const [activeTab, setActiveTab] = useState<'setup' | 'rotations'>('setup');
 
   async function saveBlock() {
     try {
@@ -99,6 +105,123 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
     .filter((h) => { const d = parseDate(h); return d >= bStart && d <= bEnd; })
     .sort();
 
+  function renderRotationsTab() {
+    const bStart = parseDate(startDate);
+    const bEnd = parseDate(endDate);
+    const totalMs = bEnd.getTime() - bStart.getTime();
+
+    const months: { label: string; pct: number }[] = [];
+    let cur = new Date(bStart.getFullYear(), bStart.getMonth(), 1);
+    while (cur <= bEnd) {
+      const pct = Math.max(0, (cur.getTime() - bStart.getTime()) / totalMs * 100);
+      months.push({ label: cur.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }), pct });
+      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    }
+
+    const hasAnyRotations = sorted.some((r) => r.rotations && r.rotations.length > 0);
+
+    if (!hasAnyRotations && sorted.length === 0) {
+      return (
+        <div className="card">
+          <div className="cb" style={{ textAlign: 'center', padding: 48, color: 'var(--muted)', fontStyle: 'italic' }}>
+            No residents added yet.
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="card">
+        <div className="ch">
+          <div className="ct">Rotation Timeline</div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {(['CUH', 'PMH', 'CMC', 'VA', 'Research'] as Hospital[]).map((h) => (
+              <div key={h} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{ width: 10, height: 10, borderRadius: 2, background: HOSP_COLOR[h] }} />
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>{h}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="cb">
+          {/* Month axis */}
+          <div style={{ display: 'flex', marginLeft: 144, position: 'relative', height: 22, marginBottom: 6 }}>
+            {months.map((m) => (
+              <div key={m.label} style={{
+                position: 'absolute', left: `${m.pct}%`,
+                fontSize: 9, color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace",
+                transform: 'translateX(-50%)', whiteSpace: 'nowrap',
+              }}>{m.label}</div>
+            ))}
+          </div>
+
+          {/* Resident rows */}
+          {sorted.map((res) => {
+            const rots = res.rotations ?? [];
+            const bars = rots.map((rot) => {
+              const s = parseDate(rot.start_date);
+              const e = parseDate(rot.end_date);
+              const clampS = s < bStart ? bStart : s;
+              const clampE = e > bEnd ? bEnd : e;
+              const leftPct = (clampS.getTime() - bStart.getTime()) / totalMs * 100;
+              const widthPct = (clampE.getTime() - clampS.getTime()) / totalMs * 100 + (1 / totalMs * 86400000 * 100);
+              return { hospital: rot.hospital, leftPct: Math.max(0, leftPct), widthPct: Math.min(widthPct, 100 - Math.max(0, leftPct)), title: `${rot.hospital}: ${fmtShort(rot.start_date)} – ${fmtShort(rot.end_date)}` };
+            });
+
+            return (
+              <div key={res.id} style={{ display: 'flex', alignItems: 'center', marginBottom: 6, gap: 8 }}>
+                {/* Name label */}
+                <div style={{ width: 136, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5, overflow: 'hidden' }}>
+                  {avatar(res, 20)}
+                  <span style={{ fontSize: 11, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{res.name}</span>
+                  <span className={`bdg ${res.pgy >= 4 ? 'bg2' : 'bb'}`} style={{ fontSize: 8, flexShrink: 0 }}>{res.pgy}</span>
+                </div>
+                {/* Gantt bar */}
+                <div style={{ flex: 1, position: 'relative', height: 26, background: 'var(--s2)', borderRadius: 4 }}>
+                  {/* Grid lines */}
+                  {months.map((m) => (
+                    <div key={m.label} style={{
+                      position: 'absolute', left: `${m.pct}%`, top: 0, bottom: 0,
+                      width: 1, background: 'var(--border)', opacity: 0.6,
+                    }} />
+                  ))}
+                  {bars.length === 0 ? (
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', paddingLeft: 8, fontSize: 10, color: 'var(--muted2)', fontStyle: 'italic' }}>
+                      no rotations
+                    </div>
+                  ) : bars.map((bar, i) => (
+                    <div key={i} title={bar.title} style={{
+                      position: 'absolute',
+                      left: `${bar.leftPct}%`,
+                      width: `${bar.widthPct}%`,
+                      top: 3, bottom: 3,
+                      background: HOSP_COLOR[bar.hospital],
+                      borderRadius: 3,
+                      opacity: res.status === 'away' ? 0.35 : 0.85,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+                    }}>
+                      {bar.widthPct > 7 && (
+                        <span style={{ fontSize: 8, fontWeight: 700, color: '#000', letterSpacing: '0.04em' }}>
+                          {bar.hospital}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
+          {sorted.length === 0 && (
+            <div style={{ textAlign: 'center', padding: 32, color: 'var(--muted)', fontStyle: 'italic' }}>
+              No residents added yet.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="page-title">Year Setup</div>
@@ -108,6 +231,18 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
         generation time. Each resident gets a unique PIN for blinded request submission.
       </div>
 
+      {/* Tab bar */}
+      <div className="tabrow" style={{ marginBottom: 20 }}>
+        {([{ id: 'setup', label: '⚙ Setup' }, { id: 'rotations', label: '📅 Rotations' }] as const).map(({ id, label }) => (
+          <button key={id} className={`tabbtn${activeTab === id ? ' active' : ''}`} onClick={() => setActiveTab(id)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'rotations' && renderRotationsTab()}
+
+      {activeTab === 'setup' && <div>
       <div style={{ marginBottom: 18 }}>
         {/* Block config card */}
         <div className="card">
@@ -266,6 +401,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button className="btn bg" onClick={onNext}>Continue to Requests →</button>
       </div>
+      </div>}
 
       <EditResidentModal
         resident={editResident}
