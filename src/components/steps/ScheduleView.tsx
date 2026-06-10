@@ -211,7 +211,9 @@ export default function ScheduleView({
             chips += rt('var(--purple)', 'PMH: Parkland intern');
           } else if (ov?.pmhResId) {
             const ovRes = residents.find(r => r.id === ov.pmhResId);
-            if (ovRes) chips += rt(ovRes.color, `PMH: ${ovRes.name}`);
+            chips += ovRes
+              ? rt(ovRes.color, `PMH: ${ovRes.name}`)
+              : jr.res.hospital === 'PMH' ? rt(jr.res.color, `PMH: ${jr.res.name}`) : rt('var(--purple)', 'PMH: Parkland intern');
           } else {
             chips += jr.res.hospital === 'PMH'
               ? rt(jr.res.color, `PMH: ${jr.res.name}`)
@@ -236,7 +238,9 @@ export default function ScheduleView({
             chips += rt('var(--purple)', 'PMH: Parkland intern');
           } else if (ov?.pmhResId) {
             const ovRes = residents.find(r => r.id === ov.pmhResId);
-            if (ovRes) chips += rt(ovRes.color, `PMH: ${ovRes.name}`);
+            chips += ovRes
+              ? rt(ovRes.color, `PMH: ${ovRes.name}`)
+              : jr.res.hospital === 'PMH' ? rt(jr.res.color, `PMH: ${jr.res.name}`) : rt('var(--purple)', 'PMH: Parkland intern');
           } else {
             chips += jr.res.hospital === 'PMH'
               ? rt(jr.res.color, `PMH: ${jr.res.name}`)
