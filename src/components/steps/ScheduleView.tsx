@@ -1246,7 +1246,8 @@ export default function ScheduleView({
 
   // ── Equity tab ────────────────────────────────────────────────────────────────
   function eqBars(data: { name: string; val: number; color: string }[], unit: string) {
-    const max = Math.max(...data.map((d) => d.val), 1);
+    // Use a fixed 100 scale for percentages so small differences don't look dramatic.
+    const max = unit === '%' ? 100 : Math.max(...data.map((d) => d.val), 1);
     return data.sort((a, b) => b.val - a.val).map((d) => (
       <div key={d.name} className="erow">
         <div className="ename">{d.name}</div>
@@ -1354,23 +1355,23 @@ export default function ScheduleView({
           <div className="ch"><div className="ct">24h Shifts</div></div>
           <div className="cb">{eqBars(jrs.map((r) => ({ name: r.name, val: jrH24[r.id] ?? 0, color: r.color })), 'shifts')}</div>
         </div>
-        <div className="card" style={{ gridColumn: 'span 2' }}>
+        <div className="card">
           <div className="ch">
             <div>
               <div className="ct">Junior Call Utilization Ratio</div>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Assigned hours ÷ potential call hours (rotation window minus official vacation days only) — equal bars = perfectly equitable</div>
             </div>
           </div>
-          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${jrH[r.id]}h / ${jrPotentialHours[r.id]}h potential`, val: jrUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
+          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${jrH[r.id]}h / ${jrPotentialHours[r.id]}h`, val: jrUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
         </div>
-        <div className="card" style={{ gridColumn: 'span 2' }}>
+        <div className="card">
           <div className="ch">
             <div>
               <div className="ct">Junior Trauma Utilization Ratio</div>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Trauma hours assigned ÷ potential trauma hours (trauma-week days in rotation window minus official vacation) — equal bars = perfectly equitable</div>
             </div>
           </div>
-          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${cuhSched!.jrTH?.[r.id] ?? 0}h / ${jrPotentialTraumaHours[r.id]}h potential`, val: jrTraumaUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
+          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${cuhSched!.jrTH?.[r.id] ?? 0}h / ${jrPotentialTraumaHours[r.id]}h`, val: jrTraumaUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
         </div>
       </div>
     );
