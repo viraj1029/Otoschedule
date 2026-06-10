@@ -83,6 +83,18 @@ export function shiftHours(key: string): number {
   return dow === 0 || dow === 6 ? 24 : 12;
 }
 
+// Single source of truth for "does this call count as a weekend shift?" for the
+// purposes of JUNIOR call-hour equity. Friday is treated as a weekend call because
+// the Friday junior is paired with the following Sunday — its 12h count toward the
+// weekend-hours bucket (and weekend-potential denominator) so the two stay in sync.
+// NOTE: this is intentionally scoped to junior call-hour accounting. It does NOT
+// change shift length (Friday stays 12h), the calendar-weekend `isWeekend` flag used
+// for CUH-rounder coverage, or any senior-week weekend-day counting.
+export function isWeekendCall(key: string): boolean {
+  const dow = parseDate(key).getDay();
+  return dow === 5 || dow === 6 || dow === 0 || HOLIDAYS.has(key);
+}
+
 // ─── Trauma weeks ─────────────────────────────────────────────────────────────
 
 function buildTraumaSet(): Set<string> {
@@ -505,9 +517,12 @@ export function generateSchedule(
   const rotPotentialHours: Record<string, number> = {};
   const rotPotentialTraumaHours: Record<string, number> = {};
   // Weekend days the resident is actually available (all request types excluded, including weekend requests).
-  // Used as the denominator for the weekend sort ratio so that weekend-requested days don't inflate
-  // the denominator and cause under-assignment on available slots.
+  // Kept for display/compat — counts calendar weekend + holiday days (Friday excluded).
   const rotWkndAvailDays: Record<string, number> = {};
+  // Potential weekend-call HOURS the resident is available for (Fri=12, Sat/Sun/holiday=24).
+  // This is the denominator for the weekend equity ratio — it includes Friday so the numerator
+  // (jrHwknd, which now counts Friday's 12h) and denominator speak the same units.
+  const rotWkndPotentialHours: Record<string, number> = {};
 
   if (needJr) {
   jrs.forEach((r) => { jrC[r.id] = 0; jrH[r.id] = 0; jrHwknd[r.id] = 0; jrHwkday[r.id] = 0; jrDwknd[r.id] = 0; jrDwkday[r.id] = 0; jrTH[r.id] = 0; jrTHwknd[r.id] = 0; jrTHwkday[r.id] = 0; jrTD[r.id] = 0; });
@@ -572,17 +587,25 @@ export function generateSchedule(
     }
   });
 
-  // Second pass: compute available weekend days now that rotEffStart/rotEffEnd are set.
+  // Second pass: compute available weekend days + potential weekend-call hours now that
+  // rotEffStart/rotEffEnd are set. Days counts calendar weekend + holiday (for display/compat);
+  // potential hours uses the weekend-call definition (Fri included) and real shift length.
   jrs.forEach((r) => {
     let wkndAvail = 0;
+    let wkndPotHrs = 0;
     let dd = new Date(bStart);
     while (dd <= bEnd) {
       const key = dk(dd);
       const dow = dd.getDay();
-      if ((dow === 0 || dow === 6 || HOLIDAYS.has(key)) && !offMap[r.id].has(key) && dd >= rotEffStart[r.id] && dd <= rotEffEnd[r.id]) wkndAvail++;
+      const avail = !offMap[r.id].has(key) && dd >= rotEffStart[r.id] && dd <= rotEffEnd[r.id];
+      if (avail) {
+        if (dow === 0 || dow === 6 || HOLIDAYS.has(key)) wkndAvail++;
+        if (isWeekendCall(key)) wkndPotHrs += shiftHours(key);
+      }
       dd = addDays(dd, 1);
     }
     rotWkndAvailDays[r.id] = Math.max(1, wkndAvail);
+    rotWkndPotentialHours[r.id] = Math.max(1, wkndPotHrs);
   });
 
   function pickJr(key: string, ex: string | null = null, isWeekendSlot = false, skipGap = false, isTraumaDay = false): Resident {
@@ -596,17 +619,17 @@ export function generateSchedule(
       // so neither axis dominates. This prevents a resident with low weekend hours but high trauma hours
       // from repeatedly winning trauma-weekend slots just because of the weekend sort.
       if (isWeekendSlot && isTraumaDay) {
-        const aWr = ((aC.wkndHours ?? 0) + jrHwknd[a.id]) / (rotWkndAvailDays[a.id] * 24);
-        const bWr = ((bC.wkndHours ?? 0) + jrHwknd[b.id]) / (rotWkndAvailDays[b.id] * 24);
+        const aWr = ((aC.wkndHours ?? 0) + jrHwknd[a.id]) / rotWkndPotentialHours[a.id];
+        const bWr = ((bC.wkndHours ?? 0) + jrHwknd[b.id]) / rotWkndPotentialHours[b.id];
         const aTr = ((aC.traumaHours ?? 0) + jrTH[a.id]) / rotPotentialTraumaHours[a.id];
         const bTr = ((bC.traumaHours ?? 0) + jrTH[b.id]) / rotPotentialTraumaHours[b.id];
         const aBlend = aWr + aTr;
         const bBlend = bWr + bTr;
         if (Math.abs(aBlend - bBlend) > 0.001) return aBlend - bBlend;
       } else if (isWeekendSlot) {
-        // Weekend-only: primary sort is weekend utilization ratio vs actually available days.
-        const aWr = ((aC.wkndHours ?? 0) + jrHwknd[a.id]) / (rotWkndAvailDays[a.id] * 24);
-        const bWr = ((bC.wkndHours ?? 0) + jrHwknd[b.id]) / (rotWkndAvailDays[b.id] * 24);
+        // Weekend-only: primary sort is weekend utilization ratio vs available weekend-call hours.
+        const aWr = ((aC.wkndHours ?? 0) + jrHwknd[a.id]) / rotWkndPotentialHours[a.id];
+        const bWr = ((bC.wkndHours ?? 0) + jrHwknd[b.id]) / rotWkndPotentialHours[b.id];
         if (Math.abs(aWr - bWr) > 0.001) return aWr - bWr;
       } else if (isTraumaDay) {
         // Trauma-only (weekday): primary sort is trauma utilization ratio.
@@ -695,17 +718,19 @@ export function generateSchedule(
   function addJD(key: string, res: Resident, type: JuniorDayType, paired = false, cuhR: Resident | null = null) {
     const hrs = shiftHours(key);
     const d = parseDate(key);
+    // isWkndCall drives equity buckets (Fri/Sat/Sun/holiday). isWk is the calendar-weekend
+    // flag kept on the JuniorDay for CUH-rounder coverage (Sat/Sun only, Friday excluded).
+    const isWkndCall = isWeekendCall(key);
     const isWk = d.getDay() === 0 || d.getDay() === 6;
-    const isWkndSlot = isWk || HOLIDAYS.has(key);
     const isTrauma = TRAUMA_WEEKS.has(key);
     jrC[res.id]++;
     jrH[res.id] += hrs;
-    if (isWkndSlot) { jrHwknd[res.id] += hrs; jrDwknd[res.id]++; lastWeekendKey[res.id] = key; }
-    else             { jrHwkday[res.id] += hrs; jrDwkday[res.id]++; }
+    if (isWkndCall) { jrHwknd[res.id] += hrs; jrDwknd[res.id]++; lastWeekendKey[res.id] = key; }
+    else            { jrHwkday[res.id] += hrs; jrDwkday[res.id]++; }
     if (isTrauma) {
       jrTH[res.id] += hrs;
       jrTD[res.id]++;
-      if (isWkndSlot) jrTHwknd[res.id] += hrs;
+      if (isWkndCall) jrTHwknd[res.id] += hrs;
       else jrTHwkday[res.id] += hrs;
       lastTraumaKey[res.id] = key;
     }
@@ -797,10 +822,11 @@ export function generateSchedule(
       const diff = Math.abs((d.getTime() - parseDate(jj.dateKey).getTime()) / 86400000);
       if (diff < 2) return false;
     }
-    // Limit consecutive weekends: if this is a weekend day, count weekend shifts within ±14 days.
-    const dow = d.getDay();
-    const isWknd = dow === 0 || dow === 5 || dow === 6 || HOLIDAYS.has(key);
-    if (isWknd) {
+    // Limit consecutive weekends: if this is a weekend-call day, count nearby weekends within ±14 days.
+    // The count keys off the calendar isWeekend flag (Sat/Sun marker) so a Fri–Sun pair counts as
+    // one weekend, not two — but the trigger uses the weekend-call definition so receiving a Friday
+    // is guarded too.
+    if (isWeekendCall(key)) {
       let nearbyWknds = 0;
       for (const jj of juniorDays) {
         if (jj.res.id !== res.id || !jj.isWeekend) continue;
@@ -814,14 +840,17 @@ export function generateSchedule(
 
   function reassignJD(jd: JuniorDay, from: Resident, to: Resident) {
     jd.res = to;
+    // Bucket by weekend-call classification (Fri/Sat/Sun/holiday), matching how addJD tallied it —
+    // not the calendar isWeekend flag, which excludes Friday and holiday-weekdays.
+    const isWkndCall = isWeekendCall(jd.dateKey);
     jrC[from.id]--; jrC[to.id]++;
     jrH[from.id] -= jd.shiftHrs; jrH[to.id] += jd.shiftHrs;
-    if (jd.isWeekend) { jrHwknd[from.id] -= jd.shiftHrs; jrHwknd[to.id] += jd.shiftHrs; }
-    else              { jrHwkday[from.id] -= jd.shiftHrs; jrHwkday[to.id] += jd.shiftHrs; }
+    if (isWkndCall) { jrHwknd[from.id] -= jd.shiftHrs; jrHwknd[to.id] += jd.shiftHrs; }
+    else            { jrHwkday[from.id] -= jd.shiftHrs; jrHwkday[to.id] += jd.shiftHrs; }
     if (jd.isTrauma) {
       jrTH[from.id] -= jd.shiftHrs; jrTH[to.id] += jd.shiftHrs;
-      if (jd.isWeekend) { jrTHwknd[from.id] -= jd.shiftHrs; jrTHwknd[to.id] += jd.shiftHrs; }
-      else              { jrTHwkday[from.id] -= jd.shiftHrs; jrTHwkday[to.id] += jd.shiftHrs; }
+      if (isWkndCall) { jrTHwknd[from.id] -= jd.shiftHrs; jrTHwknd[to.id] += jd.shiftHrs; }
+      else            { jrTHwkday[from.id] -= jd.shiftHrs; jrTHwkday[to.id] += jd.shiftHrs; }
     }
   }
 
@@ -858,13 +887,14 @@ export function generateSchedule(
   // Weekend rebalancer
   for (let iter = 0; iter < 60; iter++) {
     const sorted = [...jrs].sort((a, b) =>
-      (jrHwknd[a.id] / (rotWkndAvailDays[a.id] * 24)) - (jrHwknd[b.id] / (rotWkndAvailDays[b.id] * 24)),
+      (jrHwknd[a.id] / rotWkndPotentialHours[a.id]) - (jrHwknd[b.id] / rotWkndPotentialHours[b.id]),
     );
     const under = sorted[0];
     const over  = sorted[sorted.length - 1];
-    if ((jrHwknd[over.id] / (rotWkndAvailDays[over.id] * 24)) - (jrHwknd[under.id] / (rotWkndAvailDays[under.id] * 24)) <= 0.05) break;
+    if ((jrHwknd[over.id] / rotWkndPotentialHours[over.id]) - (jrHwknd[under.id] / rotWkndPotentialHours[under.id]) <= 0.05) break;
 
-    const candidates = juniorDays.filter((jd) => jd.res.id === over.id && jd.isWeekend && !jd.override);
+    // Candidates are weekend-call shifts (Fri/Sat/Sun/holiday) the over-resident holds.
+    const candidates = juniorDays.filter((jd) => jd.res.id === over.id && isWeekendCall(jd.dateKey) && !jd.override);
     let moved = false;
     for (const jd of candidates) {
       if (jd.type === 'fri-pair') {
@@ -908,6 +938,7 @@ export function generateSchedule(
     jrTD,
     jrAvailDays: rotAvailDays,
     jrWkndAvailDays: rotWkndAvailDays,
+    jrWkndPotentialHours: rotWkndPotentialHours,
   };
 }
 

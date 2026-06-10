@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, type ReactElement } from 'react';
 import type { Block, Resident, Request, ScheduleData, CMCScheduleData, VAScheduleData, AnyScheduleData, Schedule, Tab, Role } from '@/types';
-import { HOLIDAYS, HOLIDAY_NAMES, TRAUMA_WEEKS, parseDate, fmtShort, dk, addDays } from '@/lib/scheduler';
+import { HOLIDAYS, HOLIDAY_NAMES, TRAUMA_WEEKS, parseDate, fmtShort, dk, addDays, isWeekendCall } from '@/lib/scheduler';
 import { api } from '../App';
 import OverrideModal from '../modals/OverrideModal';
 
@@ -625,8 +625,8 @@ export default function ScheduleView({
               </thead>
               <tbody>
                 {jrs.map((res) => {
-                  const wkndDays = cuhSched!.juniorDays.filter((d) => d.res.id === res.id && (d.isWeekend || HOLIDAYS.has(d.dateKey)));
-                  const wkdayDays = cuhSched!.juniorDays.filter((d) => d.res.id === res.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey));
+                  const wkndDays = cuhSched!.juniorDays.filter((d) => d.res.id === res.id && isWeekendCall(d.dateKey));
+                  const wkdayDays = cuhSched!.juniorDays.filter((d) => d.res.id === res.id && !isWeekendCall(d.dateKey));
                   const wkndHrs = wkndDays.reduce((a, d) => a + d.shiftHrs, 0);
                   const wkdayHrs = wkdayDays.reduce((a, d) => a + d.shiftHrs, 0);
                   const roundingWknds = cuhSched!.juniorDays.filter((d) => d.cuhRounder?.id === res.id).length;
@@ -648,10 +648,10 @@ export default function ScheduleView({
                   );
                 })}
                 {(() => {
-                  const totWkndD = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.res.id === r.id && (d.isWeekend || HOLIDAYS.has(d.dateKey))).length, 0);
-                  const totWkndH = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.res.id === r.id && (d.isWeekend || HOLIDAYS.has(d.dateKey))).reduce((s, d) => s + d.shiftHrs, 0), 0);
-                  const totWkdD = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).length, 0);
-                  const totWkdH = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.res.id === r.id && !d.isWeekend && !HOLIDAYS.has(d.dateKey)).reduce((s, d) => s + d.shiftHrs, 0), 0);
+                  const totWkndD = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.res.id === r.id && isWeekendCall(d.dateKey)).length, 0);
+                  const totWkndH = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.res.id === r.id && isWeekendCall(d.dateKey)).reduce((s, d) => s + d.shiftHrs, 0), 0);
+                  const totWkdD = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.res.id === r.id && !isWeekendCall(d.dateKey)).length, 0);
+                  const totWkdH = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.res.id === r.id && !isWeekendCall(d.dateKey)).reduce((s, d) => s + d.shiftHrs, 0), 0);
                   const totRounding = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.cuhRounder?.id === r.id).length, 0);
                   const totTraumaH = jrs.reduce((a, r) => a + (cuhSched!.jrTH?.[r.id] ?? 0), 0);
                   const totTraumaD = jrs.reduce((a, r) => a + (cuhSched!.jrTD?.[r.id] ?? 0), 0);
@@ -847,8 +847,8 @@ export default function ScheduleView({
       const cuhRdrDays = cuhSched!.juniorDays.filter(
         (d) => (d.cuhRounder?.id ? myResIds.has(d.cuhRounder.id) : false) && (!prefix || d.dateKey.startsWith(prefix)),
       );
-      const wkday  = days.filter((d) => !d.isWeekend && !HOLIDAYS.has(d.dateKey));
-      const wknd   = days.filter((d) => d.isWeekend && !HOLIDAYS.has(d.dateKey));
+      const wkday  = days.filter((d) => !isWeekendCall(d.dateKey));
+      const wknd   = days.filter((d) => isWeekendCall(d.dateKey) && !HOLIDAYS.has(d.dateKey));
       const hol    = days.filter((d) => HOLIDAYS.has(d.dateKey));
       const trauma = days.filter((d) => d.isTrauma);
       return {
@@ -1314,13 +1314,13 @@ export default function ScheduleView({
     const jrUtilRatio: Record<string, number> = {};
     jrs.forEach((r) => { jrUtilRatio[r.id] = Math.round((jrH[r.id] / jrPotentialHours[r.id]) * 1000) / 10; });
 
-    // Weekend utilization ratio: weekend hours / actually available weekend hours
-    // Uses jrWkndAvailDays (all requests excluded) so the ratio reflects how much of each
-    // resident's available weekends they've worked, not inflated by requested-off days.
+    // Weekend utilization ratio: weekend-call hours / available weekend-call hours.
+    // Uses jrWkndPotentialHours (Fri=12, Sat/Sun/holiday=24, all requests excluded) so the
+    // numerator and denominator speak the same units and the ratio isn't inflated by requested-off days.
     const jrWkndUtilRatio: Record<string, number> = {};
     jrs.forEach((r) => {
       const wkndH = cuhSched!.jrHwknd?.[r.id] ?? 0;
-      const availWkndHrs = (cuhSched!.jrWkndAvailDays?.[r.id] ?? 1) * 24;
+      const availWkndHrs = cuhSched!.jrWkndPotentialHours?.[r.id] ?? 1;
       jrWkndUtilRatio[r.id] = Math.round((wkndH / availWkndHrs) * 1000) / 10;
     });
 
@@ -1375,10 +1375,10 @@ export default function ScheduleView({
           <div className="ch">
             <div>
               <div className="ct">Junior Weekend Utilization Ratio</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Weekend hours assigned ÷ potential weekend hours (Sat/Sun/holidays in rotation window minus official vacation) — equal bars = perfectly equitable</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Weekend hours assigned ÷ potential weekend hours (Fri/Sat/Sun/holidays in rotation window minus official vacation) — equal bars = perfectly equitable</div>
             </div>
           </div>
-          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${cuhSched!.jrHwknd?.[r.id] ?? 0}h / ${(cuhSched!.jrWkndAvailDays?.[r.id] ?? 1) * 24}h avail`, val: jrWkndUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
+          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${cuhSched!.jrHwknd?.[r.id] ?? 0}h / ${cuhSched!.jrWkndPotentialHours?.[r.id] ?? 1}h avail`, val: jrWkndUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
         </div>
         <div className="card">
           <div className="ch">
