@@ -11,7 +11,17 @@ function academicYear(dateStr: string): number {
   return m >= 7 ? d.getFullYear() : d.getFullYear() - 1;
 }
 
-export async function GET() {
+// Carry-in for a CUH/PMH junior schedule about to be generated.
+// Defined as the cumulative junior hours from PUBLISHED (finalized) CUH/PMH
+// schedules earlier in the same academic year — i.e. blocks whose date range
+// ends before the new schedule's start (`before`). Blocks are non-overlapping
+// consecutive ranges, so "ends before start" == "is a prior block".
+//
+// This is computed directly from the published schedules' stored data, so:
+//   • drafts never contribute (only finalized blocks carry forward),
+//   • the first block of the year has zero carry-in,
+//   • regenerating or re-publishing a block can never double-count or self-pollute.
+export async function GET(req: Request) {
   const session = await getSession();
   if (session.role !== 'chief') {
     return NextResponse.json({ error: 'Chief access required' }, { status: 401 });
@@ -19,77 +29,55 @@ export async function GET() {
 
   await initDb();
 
-  // Get current block dates
-  const { rows: blockRows } = await sql`SELECT start_date FROM blocks WHERE id = ${DEFAULT_BLOCK_ID}`;
-  if (!blockRows[0]) return NextResponse.json({});
-  const currentBlockStart: string = blockRows[0].start_date;
-  const acYear = academicYear(currentBlockStart);
+  const before = new URL(req.url).searchParams.get('before');
+  if (!before) return NextResponse.json({}); // no target start date → no carry-in
 
-  // Read the currently stored schedule
-  const { rows: schedRows } = await sql`
-    SELECT data FROM schedules WHERE block_id = ${DEFAULT_BLOCK_ID} ORDER BY generated_at DESC LIMIT 1
-  `;
+  const acYear = academicYear(before);
+  const acYearStart = `${acYear}-07-01`;
 
-  if (schedRows[0]) {
-    const stored = JSON.parse(schedRows[0].data);
-    const storedBlockStart: string = stored.bStart;
-
-    // If the stored schedule is from a different (earlier) block within the same academic year, archive it.
-    if (storedBlockStart !== currentBlockStart && academicYear(storedBlockStart) === acYear) {
-      const jrH: Record<string, number> = stored.jrH ?? {};
-      const jrHwknd: Record<string, number> = stored.jrHwknd ?? {};
-      const jrTH: Record<string, number> = stored.jrTH ?? {};
-      const jrAvailDays: Record<string, number> = stored.jrAvailDays ?? {};
-      const juniorDays: Array<{ res: { id: string; person_id?: string } }> = stored.juniorDays ?? [];
-
-      // Build person_id → resident_id map from juniorDays
-      const personToResId: Record<string, string> = {};
-      for (const jd of juniorDays) {
-        if (jd.res.person_id && !personToResId[jd.res.person_id]) {
-          personToResId[jd.res.person_id] = jd.res.id;
-        }
-      }
-
-      for (const [personId, resId] of Object.entries(personToResId)) {
-        const hours = jrH[resId] ?? 0;
-        const availDays = jrAvailDays[resId] ?? 0;
-        const wkndHours = jrHwknd[resId] ?? 0;
-        const traumaHours = jrTH[resId] ?? 0;
-        if (hours === 0 && availDays === 0) continue;
-        await sql`
-          INSERT INTO jr_carry (person_id, block_start, academic_year, hours, avail_days, wknd_hours, trauma_hours)
-          VALUES (${personId}, ${storedBlockStart}, ${acYear}, ${hours}, ${availDays}, ${wkndHours}, ${traumaHours})
-          ON CONFLICT (person_id, block_start) DO UPDATE SET
-            hours        = EXCLUDED.hours,
-            avail_days   = EXCLUDED.avail_days,
-            wknd_hours   = EXCLUDED.wknd_hours,
-            trauma_hours = EXCLUDED.trauma_hours,
-            archived_at  = NOW()
-        `;
-      }
-    }
-  }
-
-  // Return cumulative carry-in for this academic year, excluding the current block
-  const { rows: carryRows } = await sql`
-    SELECT person_id,
-           SUM(hours)        AS hours,
-           SUM(avail_days)   AS avail_days,
-           SUM(wknd_hours)   AS wknd_hours,
-           SUM(trauma_hours) AS trauma_hours
-    FROM jr_carry
-    WHERE academic_year = ${acYear} AND block_start != ${currentBlockStart}
-    GROUP BY person_id
+  // Latest published CUH/PMH schedule per prior block period (DISTINCT ON start_date,
+  // newest generated wins — so re-publishing a block replaces, never adds).
+  const { rows } = await sql`
+    SELECT DISTINCT ON (start_date) start_date, data
+    FROM schedules
+    WHERE block_id = ${DEFAULT_BLOCK_ID}
+      AND published = TRUE
+      AND COALESCE(schedule_type, 'cuh_pmh') = 'cuh_pmh'
+      AND end_date  <  ${before}
+      AND start_date >= ${acYearStart}
+    ORDER BY start_date, generated_at DESC
   `;
 
   const carryIn: Record<string, { hours: number; availDays: number; wkndHours: number; traumaHours: number }> = {};
-  for (const row of carryRows) {
-    carryIn[row.person_id] = {
-      hours:        parseFloat(row.hours),
-      availDays:    parseInt(row.avail_days),
-      wkndHours:    parseFloat(row.wknd_hours ?? '0'),
-      traumaHours:  parseFloat(row.trauma_hours ?? '0'),
+
+  for (const row of rows) {
+    let stored: {
+      jrH?: Record<string, number>;
+      jrHwknd?: Record<string, number>;
+      jrTH?: Record<string, number>;
+      jrAvailDays?: Record<string, number>;
+      juniorDays?: Array<{ res: { id: string; person_id?: string } }>;
     };
+    try { stored = JSON.parse(row.data); } catch { continue; }
+
+    const jrH         = stored.jrH ?? {};
+    const jrHwknd     = stored.jrHwknd ?? {};
+    const jrTH        = stored.jrTH ?? {};
+    const jrAvailDays = stored.jrAvailDays ?? {};
+
+    // resident_id → person_id. person_id is stable across blocks, so carry is keyed by it.
+    const resToPerson: Record<string, string> = {};
+    for (const jd of stored.juniorDays ?? []) {
+      if (jd.res?.person_id && !resToPerson[jd.res.id]) resToPerson[jd.res.id] = jd.res.person_id;
+    }
+
+    for (const [resId, personId] of Object.entries(resToPerson)) {
+      const c = (carryIn[personId] ??= { hours: 0, availDays: 0, wkndHours: 0, traumaHours: 0 });
+      c.hours       += jrH[resId] ?? 0;
+      c.availDays   += jrAvailDays[resId] ?? 0;
+      c.wkndHours   += jrHwknd[resId] ?? 0;
+      c.traumaHours += jrTH[resId] ?? 0;
+    }
   }
 
   return NextResponse.json(carryIn);
