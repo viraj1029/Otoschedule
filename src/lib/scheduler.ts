@@ -780,6 +780,99 @@ export function generateSchedule(
   });
 
   juniorDays.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+
+  // ── Post-hoc rebalancing ────────────────────────────────────────────────────
+  // After the greedy pass, iteratively reassign shifts from the most over-assigned
+  // resident to the most under-assigned until the gap is ≤5% or no valid move exists.
+  // Respects: offMap (all request types), rotation window, ≥1 day gap.
+  // Fri-Sun pairs are always moved together.
+
+  function canReceive(key: string, res: Resident): boolean {
+    if (offMap[res.id].has(key)) return false;
+    const d = parseDate(key);
+    if (d < rotEffStart[res.id] || d > rotEffEnd[res.id]) return false;
+    // Require ≥1 day gap from every existing shift for this resident.
+    for (const jj of juniorDays) {
+      if (jj.res.id !== res.id) continue;
+      const diff = Math.abs((d.getTime() - parseDate(jj.dateKey).getTime()) / 86400000);
+      if (diff < 1) return false;
+    }
+    return true;
+  }
+
+  function reassignJD(jd: JuniorDay, from: Resident, to: Resident) {
+    jd.res = to;
+    jrC[from.id]--; jrC[to.id]++;
+    jrH[from.id] -= jd.shiftHrs; jrH[to.id] += jd.shiftHrs;
+    if (jd.isWeekend) { jrHwknd[from.id] -= jd.shiftHrs; jrHwknd[to.id] += jd.shiftHrs; }
+    else              { jrHwkday[from.id] -= jd.shiftHrs; jrHwkday[to.id] += jd.shiftHrs; }
+    if (jd.isTrauma) {
+      jrTH[from.id] -= jd.shiftHrs; jrTH[to.id] += jd.shiftHrs;
+      if (jd.isWeekend) { jrTHwknd[from.id] -= jd.shiftHrs; jrTHwknd[to.id] += jd.shiftHrs; }
+      else              { jrTHwkday[from.id] -= jd.shiftHrs; jrTHwkday[to.id] += jd.shiftHrs; }
+    }
+  }
+
+  // Trauma rebalancer
+  for (let iter = 0; iter < 60; iter++) {
+    const sorted = [...jrs].sort((a, b) =>
+      (jrTH[a.id] / rotPotentialTraumaHours[a.id]) - (jrTH[b.id] / rotPotentialTraumaHours[b.id]),
+    );
+    const under = sorted[0];
+    const over  = sorted[sorted.length - 1];
+    if ((jrTH[over.id] / rotPotentialTraumaHours[over.id]) - (jrTH[under.id] / rotPotentialTraumaHours[under.id]) <= 0.05) break;
+
+    const candidates = juniorDays.filter((jd) => jd.res.id === over.id && jd.isTrauma && !jd.override);
+    let moved = false;
+    for (const jd of candidates) {
+      if (jd.type === 'fri-pair') {
+        const sunKey = dk(addDays(parseDate(jd.dateKey), 2));
+        const sunJd  = juniorDays.find((jj) => jj.dateKey === sunKey && jj.res.id === over.id);
+        if (!sunJd || !canReceive(jd.dateKey, under) || !canReceive(sunKey, under)) continue;
+        reassignJD(jd, over, under);
+        reassignJD(sunJd, over, under);
+      } else if (jd.type === 'sun-pair') {
+        continue; // handled with its Friday pair above
+      } else {
+        if (!canReceive(jd.dateKey, under)) continue;
+        reassignJD(jd, over, under);
+      }
+      moved = true;
+      break;
+    }
+    if (!moved) break;
+  }
+
+  // Weekend rebalancer
+  for (let iter = 0; iter < 60; iter++) {
+    const sorted = [...jrs].sort((a, b) =>
+      (jrHwknd[a.id] / (rotWkndAvailDays[a.id] * 24)) - (jrHwknd[b.id] / (rotWkndAvailDays[b.id] * 24)),
+    );
+    const under = sorted[0];
+    const over  = sorted[sorted.length - 1];
+    if ((jrHwknd[over.id] / (rotWkndAvailDays[over.id] * 24)) - (jrHwknd[under.id] / (rotWkndAvailDays[under.id] * 24)) <= 0.05) break;
+
+    const candidates = juniorDays.filter((jd) => jd.res.id === over.id && jd.isWeekend && !jd.override);
+    let moved = false;
+    for (const jd of candidates) {
+      if (jd.type === 'fri-pair') {
+        const sunKey = dk(addDays(parseDate(jd.dateKey), 2));
+        const sunJd  = juniorDays.find((jj) => jj.dateKey === sunKey && jj.res.id === over.id);
+        if (!sunJd || !canReceive(jd.dateKey, under) || !canReceive(sunKey, under)) continue;
+        reassignJD(jd, over, under);
+        reassignJD(sunJd, over, under);
+      } else if (jd.type === 'sun-pair') {
+        continue; // handled with its Friday pair above
+      } else {
+        if (!canReceive(jd.dateKey, under)) continue;
+        reassignJD(jd, over, under);
+      }
+      moved = true;
+      break;
+    }
+    if (!moved) break;
+  }
+
   } // end needJr
 
   return {
