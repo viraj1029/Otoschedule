@@ -196,15 +196,14 @@ export default function ScheduleView({
           // Saturday
           const friJr = jrMap[dk(addDays(parseDate(key), -1))];
           // CUH rounding: override takes priority, else Sat call if CUH, else Fri call post-call
-          if (ov?.cuhResId !== undefined) {
-            if (ov.cuhResId) {
-              const ovRes = residents.find(r => r.id === ov.cuhResId);
-              if (ovRes) chips += rt(ovRes.color, `CUH: ${ovRes.name}`);
-            }
-          } else if (jr.res.hospital === 'CUH') {
-            chips += rt(jr.res.color, `CUH: ${jr.res.name}`);
-          } else if (friJr?.res.hospital === 'CUH') {
-            chips += rt(friJr.res.color, `CUH: ${friJr.res.name}`);
+          if (ov?.cuhResId) {
+            const ovRes = residents.find(r => r.id === ov.cuhResId);
+            if (ovRes) chips += rt(ovRes.color, `CUH: ${ovRes.name}`);
+            else if (jr.res.hospital === 'CUH') chips += rt(jr.res.color, `CUH: ${jr.res.name}`);
+            else if (friJr?.res.hospital === 'CUH') chips += rt(friJr.res.color, `CUH: ${friJr.res.name}`);
+          } else {
+            if (jr.res.hospital === 'CUH') chips += rt(jr.res.color, `CUH: ${jr.res.name}`);
+            else if (friJr?.res.hospital === 'CUH') chips += rt(friJr.res.color, `CUH: ${friJr.res.name}`);
           }
           // PMH rounding: override takes priority, else Sat call if PMH, else Parkland intern
           if (ov?.pmhResId === '__intern__') {
@@ -223,15 +222,16 @@ export default function ScheduleView({
           // Sunday
           const satJr = jrMap[dk(addDays(parseDate(key), -1))];
           // CUH rounding: override takes priority, else Sun call if CUH, else Sat call post-call
-          if (ov?.cuhResId !== undefined) {
-            if (ov.cuhResId) {
-              const ovRes = residents.find(r => r.id === ov.cuhResId);
-              if (ovRes) chips += rt(ovRes.color, `CUH: ${ovRes.name}`);
-            }
-          } else if (jr.res.hospital === 'CUH') {
-            chips += rt(jr.res.color, `CUH: ${jr.res.name}`);
-          } else if (satJr?.res.hospital === 'CUH') {
-            chips += rt(satJr.res.color, `CUH: ${satJr.res.name}`);
+          if (ov?.cuhResId) {
+            const ovRes = residents.find(r => r.id === ov.cuhResId);
+            if (ovRes) chips += rt(ovRes.color, `CUH: ${ovRes.name}`);
+            // stale ID falls through to default below
+            else if (jr.res.hospital === 'CUH') chips += rt(jr.res.color, `CUH: ${jr.res.name}`);
+            else if (satJr?.res.hospital === 'CUH') chips += rt(satJr.res.color, `CUH: ${satJr.res.name}`);
+          } else {
+            // null / undefined / no override — use schedule default
+            if (jr.res.hospital === 'CUH') chips += rt(jr.res.color, `CUH: ${jr.res.name}`);
+            else if (satJr?.res.hospital === 'CUH') chips += rt(satJr.res.color, `CUH: ${satJr.res.name}`);
           }
           // PMH rounding: override takes priority, else Sun call if PMH, else Parkland intern
           if (ov?.pmhResId === '__intern__') {
