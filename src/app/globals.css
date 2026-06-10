@@ -399,24 +399,16 @@ select {
 .cwrn { background: var(--red-dim); color: var(--red); }
 .cres { background: var(--pink-dim); color: var(--pink); }
 
-/* ── Rounding label (plain text row, no background box) ── */
+/* ── Rounding label (plain text row, no background box, no dot) ── */
 .rrt {
-  display: flex;
-  align-items: center;
-  gap: 4px;
   font-size: 10px;
   font-weight: 500;
   padding: 1px 2px;
-  color: var(--muted);
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.rrdot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
+  opacity: 0.75;
 }
 
 /* ── Hours table ── */

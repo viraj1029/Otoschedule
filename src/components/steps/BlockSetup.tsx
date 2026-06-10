@@ -108,15 +108,28 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
   function renderRotationsTab() {
     const bStart = parseDate(startDate);
     const bEnd = parseDate(endDate);
-    const totalMs = bEnd.getTime() - bStart.getTime();
+    // +1 day so the last day is fully included in width calculations
+    const totalMs = bEnd.getTime() - bStart.getTime() + 86400000;
 
-    const months: { label: string; pct: number }[] = [];
+    // Build months as proportional flex segments so they align perfectly with bars
+    const monthSegs: { label: string; widthPct: number }[] = [];
     let cur = new Date(bStart.getFullYear(), bStart.getMonth(), 1);
-    while (cur <= bEnd) {
-      const pct = Math.max(0, (cur.getTime() - bStart.getTime()) / totalMs * 100);
-      months.push({ label: cur.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }), pct });
-      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    while (cur.getTime() < bStart.getTime() + totalMs) {
+      const segStart = Math.max(cur.getTime(), bStart.getTime());
+      const nextMonth = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+      const segEnd = Math.min(nextMonth.getTime(), bStart.getTime() + totalMs);
+      const widthPct = (segEnd - segStart) / totalMs * 100;
+      monthSegs.push({
+        label: cur.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+        widthPct,
+      });
+      cur = nextMonth;
     }
+
+    // Month start positions for grid lines
+    const gridPcts: number[] = [];
+    let cumPct = 0;
+    monthSegs.forEach((seg) => { gridPcts.push(cumPct); cumPct += seg.widthPct; });
 
     const hasAnyRotations = sorted.some((r) => r.rotations && r.rotations.length > 0);
 
@@ -144,13 +157,13 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
           </div>
         </div>
         <div className="cb">
-          {/* Month axis */}
-          <div style={{ display: 'flex', marginLeft: 144, position: 'relative', height: 22, marginBottom: 6 }}>
-            {months.map((m) => (
+          {/* Month axis — flex segments, proportional to actual month widths */}
+          <div style={{ display: 'flex', marginLeft: 144, marginBottom: 6, overflow: 'hidden' }}>
+            {monthSegs.map((m, i) => (
               <div key={m.label} style={{
-                position: 'absolute', left: `${m.pct}%`,
+                width: `${m.widthPct}%`, flexShrink: 0,
                 fontSize: 9, color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace",
-                transform: 'translateX(-50%)', whiteSpace: 'nowrap',
+                overflow: 'hidden', paddingLeft: i === 0 ? 0 : 2, borderLeft: i > 0 ? '1px solid var(--border)' : undefined,
               }}>{m.label}</div>
             ))}
           </div>
@@ -164,7 +177,8 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
               const clampS = s < bStart ? bStart : s;
               const clampE = e > bEnd ? bEnd : e;
               const leftPct = (clampS.getTime() - bStart.getTime()) / totalMs * 100;
-              const widthPct = (clampE.getTime() - clampS.getTime()) / totalMs * 100 + (1 / totalMs * 86400000 * 100);
+              // +1 day width so the last day of the segment is fully covered
+              const widthPct = (clampE.getTime() - clampS.getTime() + 86400000) / totalMs * 100;
               return { hospital: rot.hospital, leftPct: Math.max(0, leftPct), widthPct: Math.min(widthPct, 100 - Math.max(0, leftPct)), title: `${rot.hospital}: ${fmtShort(rot.start_date)} – ${fmtShort(rot.end_date)}` };
             });
 
@@ -178,10 +192,10 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
                 </div>
                 {/* Gantt bar */}
                 <div style={{ flex: 1, position: 'relative', height: 26, background: 'var(--s2)', borderRadius: 4 }}>
-                  {/* Grid lines */}
-                  {months.map((m) => (
-                    <div key={m.label} style={{
-                      position: 'absolute', left: `${m.pct}%`, top: 0, bottom: 0,
+                  {/* Grid lines at month starts */}
+                  {gridPcts.map((pct, i) => (
+                    <div key={i} style={{
+                      position: 'absolute', left: `${pct}%`, top: 0, bottom: 0,
                       width: 1, background: 'var(--border)', opacity: 0.6,
                     }} />
                   ))}
@@ -302,13 +316,13 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
           <table className="ptable">
             <thead>
               <tr>
-                <th>Name</th><th>PGY</th><th>Role</th><th>Status</th><th>Rotations</th><th>PIN</th><th></th>
+                <th>Name</th><th>PGY</th><th>Role</th><th>Status</th><th>PIN</th><th></th>
               </tr>
             </thead>
             <tbody>
               {sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 28, color: 'var(--muted)', fontStyle: 'italic' }}>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: 28, color: 'var(--muted)', fontStyle: 'italic' }}>
                     No residents added yet.
                   </td>
                 </tr>
@@ -331,22 +345,6 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
                       </span>
                     </td>
                     <td>{statusBadge}</td>
-                    <td>
-                      {r.rotations && r.rotations.length > 0 ? (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                          {r.rotations.map((rot) => {
-                            const hospColor: Record<Hospital, string> = { CUH: 'bgr', PMH: 'bp', CMC: 'bb', VA: 'bo', Research: 'bpk' };
-                            return (
-                              <span key={rot.id} className={`bdg ${hospColor[rot.hospital]}`} title={`${rot.start_date} → ${rot.end_date}`}>
-                                {rot.hospital} {fmtShort(rot.start_date)}–{fmtShort(rot.end_date)}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <span style={{ fontSize: 11, color: 'var(--muted2)', fontStyle: 'italic' }}>No segments</span>
-                      )}
-                    </td>
                     <td>
                       <span
                         className="pin-chip"

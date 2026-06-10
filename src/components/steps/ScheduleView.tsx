@@ -158,9 +158,9 @@ export default function ScheduleView({
   function buildChips(key: string, isWk: boolean, isHol: boolean, isTrauma = false): string {
     const rc = (color: string, label: string) =>
       `<div class="chip" style="background:${color}22;color:${color};border:1px solid ${color}44">${label}</div>`;
-    // Plain labeled row for CUH/PMH rounding (no color background)
-    const rt = (color: string, label: string) =>
-      `<div class="rrt"><span class="rrdot" style="background:${color}"></span>${label}</div>`;
+    // Plain text row for CUH/PMH rounding — no background box, no dot
+    const rt = (_color: string, label: string) =>
+      `<div class="rrt">${label}</div>`;
 
     // VA mode
     if (vaSched) {
