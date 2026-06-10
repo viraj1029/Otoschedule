@@ -86,17 +86,22 @@ export function shiftHours(key: string): number {
 // ─── Trauma weeks ─────────────────────────────────────────────────────────────
 
 function buildTraumaSet(): Set<string> {
-  const ranges = [
-    ['2026-07-13', '2026-07-19'],
-    ['2026-08-03', '2026-08-09'],
-    ['2026-08-24', '2026-08-30'],
-    ['2026-09-14', '2026-09-20'],
+  // Each entry is the Monday that starts a trauma week; Sun is +6 days.
+  const mondays = [
+    '2026-07-13',
+    '2026-08-03',
+    '2026-08-24',
+    '2026-09-14',
+    '2026-10-05',
+    '2026-10-26',
+    '2026-11-23',
+    '2026-12-07',
+    '2026-12-28',
   ];
   const s = new Set<string>();
-  for (const [start, end] of ranges) {
-    let d = parseDate(start);
-    const e = parseDate(end);
-    while (d <= e) { s.add(dk(d)); d = addDays(d, 1); }
+  for (const mon of mondays) {
+    let d = parseDate(mon);
+    for (let i = 0; i < 7; i++) { s.add(dk(d)); d = addDays(d, 1); }
   }
   return s;
 }
@@ -141,7 +146,7 @@ export function generateSchedule(
   bEndStr: string,
   blockPublished: boolean,
   mode: ScheduleMode = 'merged',
-  carryIn: Record<string, { hours: number; availDays: number }> = {},
+  carryIn: Record<string, { hours: number; availDays: number; wkndHours?: number; traumaHours?: number }> = {},
 ): ScheduleData {
   const bStart = parseDate(bStartStr);
   const bEnd   = parseDate(bEndStr);
@@ -497,6 +502,7 @@ export function generateSchedule(
   const rotWkdayDays: Record<string, number> = {};
   const rotAvailDays: Record<string, number> = {};
   const rotPotentialHours: Record<string, number> = {};
+  const rotPotentialTraumaHours: Record<string, number> = {};
 
   if (needJr) {
   jrs.forEach((r) => { jrC[r.id] = 0; jrH[r.id] = 0; jrHwknd[r.id] = 0; jrHwkday[r.id] = 0; jrDwknd[r.id] = 0; jrDwkday[r.id] = 0; jrTH[r.id] = 0; jrTHwknd[r.id] = 0; jrTHwkday[r.id] = 0; jrTD[r.id] = 0; });
@@ -518,14 +524,16 @@ export function generateSchedule(
   });
 
   jrs.forEach((r) => {
-    let wknd = 0, wkday = 0;
+    let wknd = 0, wkday = 0, traumaHrs = 0;
     // Use full block range; equityOffMap already excludes off-rotation dates
     let dd = new Date(bStart);
     while (dd <= bEnd) {
       const key = dk(dd);
       if (!equityOffMap[r.id].has(key)) {
         const dow = dd.getDay();
-        if (dow === 0 || dow === 6 || HOLIDAYS.has(key)) wknd++; else wkday++;
+        const isWknd = dow === 0 || dow === 6 || HOLIDAYS.has(key);
+        if (isWknd) wknd++; else wkday++;
+        if (TRAUMA_WEEKS.has(key)) traumaHrs += isWknd ? 24 : 12;
       }
       dd = addDays(dd, 1);
     }
@@ -533,6 +541,7 @@ export function generateSchedule(
     rotWkdayDays[r.id] = Math.max(1, wkday);
     rotAvailDays[r.id] = Math.max(1, wknd + wkday);
     rotPotentialHours[r.id] = Math.max(1, wknd * 24 + wkday * 12);
+    rotPotentialTraumaHours[r.id] = Math.max(1, traumaHrs);
   });
 
   // Pick junior: enforce rest gap (2 days preferred, 1 day minimum), balance weekend/weekday separately
@@ -562,20 +571,30 @@ export function generateSchedule(
     const d = parseDate(key);
 
     function sortFn(a: Resident, b: Resident) {
-      // Primary: call utilization ratio (assigned hours / potential hours) — same metric as equity chart.
-      // Carry-in uses availDays from prior blocks; scale to approximate potential hours (×18 avg).
-      const aC = carryIn[a.person_id ?? ''] ?? { hours: 0, availDays: 0 };
-      const bC = carryIn[b.person_id ?? ''] ?? { hours: 0, availDays: 0 };
+      const aC = carryIn[a.person_id ?? ''] ?? { hours: 0, availDays: 0, wkndHours: 0, traumaHours: 0 };
+      const bC = carryIn[b.person_id ?? ''] ?? { hours: 0, availDays: 0, wkndHours: 0, traumaHours: 0 };
+
+      // For weekend slots: primary sort is weekend-specific utilization ratio (carry-in + current).
+      // This ensures residents with disproportionately few weekend hours get priority for weekend shifts,
+      // independent of how their total ratio compares.
+      if (isWeekendSlot) {
+        const aWr = ((aC.wkndHours ?? 0) + jrHwknd[a.id]) / (rotWkndDays[a.id] * 24);
+        const bWr = ((bC.wkndHours ?? 0) + jrHwknd[b.id]) / (rotWkndDays[b.id] * 24);
+        if (Math.abs(aWr - bWr) > 0.001) return aWr - bWr;
+      }
+
+      // For trauma days: trauma utilization ratio is its own equity axis, independent of total hours.
+      if (isTraumaDay) {
+        const aTr = ((aC.traumaHours ?? 0) + jrTH[a.id]) / rotPotentialTraumaHours[a.id];
+        const bTr = ((bC.traumaHours ?? 0) + jrTH[b.id]) / rotPotentialTraumaHours[b.id];
+        if (Math.abs(aTr - bTr) > 0.001) return aTr - bTr;
+      }
+
+      // Total utilization ratio as fallback (carry-in availDays × 18 approximates prior potential hours).
       const ar = (aC.hours + jrH[a.id]) / (aC.availDays * 18 + rotPotentialHours[a.id]);
       const br = (bC.hours + jrH[b.id]) / (bC.availDays * 18 + rotPotentialHours[b.id]);
       if (Math.abs(ar - br) > 0.001) return ar - br;
-      // Secondary for weekend slots: prefer fewer weekend hours per available weekend day.
-      if (isWeekendSlot) {
-        const awr = jrHwknd[a.id] / rotWkndDays[a.id];
-        const bwr = jrHwknd[b.id] / rotWkndDays[b.id];
-        if (Math.abs(awr - bwr) > 0.001) return awr - bwr;
-      }
-      if (isTraumaDay) return jrTH[a.id] - jrTH[b.id];
+
       // Final tiebreaker: date-seeded hash using full resident ID for even distribution.
       let h = 2166136261;
       for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619) >>> 0;
