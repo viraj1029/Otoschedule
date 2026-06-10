@@ -491,6 +491,7 @@ export function generateSchedule(
   const jrDwkday: Record<string, number> = {};  // weekday shift count
   const lastCallKey: Record<string, string> = {};    // last assigned date per resident
   const lastWeekendKey: Record<string, string> = {}; // last weekend/holiday call date per resident
+  const lastTraumaKey: Record<string, string> = {};  // last trauma shift date per resident
 
   const jrTH: Record<string, number> = {};    // trauma hours total
   const jrTHwknd: Record<string, number> = {}; // trauma weekend hours
@@ -574,17 +575,24 @@ export function generateSchedule(
       const aC = carryIn[a.person_id ?? ''] ?? { hours: 0, availDays: 0, wkndHours: 0, traumaHours: 0 };
       const bC = carryIn[b.person_id ?? ''] ?? { hours: 0, availDays: 0, wkndHours: 0, traumaHours: 0 };
 
-      // For weekend slots: primary sort is weekend-specific utilization ratio (carry-in + current).
-      // This ensures residents with disproportionately few weekend hours get priority for weekend shifts,
-      // independent of how their total ratio compares.
-      if (isWeekendSlot) {
+      // For shifts that are both weekend AND trauma: use a blended score (weekend ratio + trauma ratio)
+      // so neither axis dominates. This prevents a resident with low weekend hours but high trauma hours
+      // from repeatedly winning trauma-weekend slots just because of the weekend sort.
+      if (isWeekendSlot && isTraumaDay) {
+        const aWr = ((aC.wkndHours ?? 0) + jrHwknd[a.id]) / (rotWkndDays[a.id] * 24);
+        const bWr = ((bC.wkndHours ?? 0) + jrHwknd[b.id]) / (rotWkndDays[b.id] * 24);
+        const aTr = ((aC.traumaHours ?? 0) + jrTH[a.id]) / rotPotentialTraumaHours[a.id];
+        const bTr = ((bC.traumaHours ?? 0) + jrTH[b.id]) / rotPotentialTraumaHours[b.id];
+        const aBlend = aWr + aTr;
+        const bBlend = bWr + bTr;
+        if (Math.abs(aBlend - bBlend) > 0.001) return aBlend - bBlend;
+      } else if (isWeekendSlot) {
+        // Weekend-only: primary sort is weekend utilization ratio.
         const aWr = ((aC.wkndHours ?? 0) + jrHwknd[a.id]) / (rotWkndDays[a.id] * 24);
         const bWr = ((bC.wkndHours ?? 0) + jrHwknd[b.id]) / (rotWkndDays[b.id] * 24);
         if (Math.abs(aWr - bWr) > 0.001) return aWr - bWr;
-      }
-
-      // For trauma days: trauma utilization ratio is its own equity axis, independent of total hours.
-      if (isTraumaDay) {
+      } else if (isTraumaDay) {
+        // Trauma-only (weekday): primary sort is trauma utilization ratio.
         const aTr = ((aC.traumaHours ?? 0) + jrTH[a.id]) / rotPotentialTraumaHours[a.id];
         const bTr = ((bC.traumaHours ?? 0) + jrTH[b.id]) / rotPotentialTraumaHours[b.id];
         if (Math.abs(aTr - bTr) > 0.001) return aTr - bTr;
@@ -614,6 +622,11 @@ export function generateSchedule(
       return Math.round((d.getTime() - parseDate(lastWeekendKey[r.id]).getTime()) / 86400000);
     }
 
+    function daysSinceLastTrauma(r: Resident): number {
+      if (!lastTraumaKey[r.id]) return 999;
+      return Math.round((d.getTime() - parseDate(lastTraumaKey[r.id]).getTime()) / 86400000);
+    }
+
     // Progressive gap relaxation: prefer ≥3 days, fallback to ≥2, then ≥1.
     // Never relaxes to 0 — back-to-back shifts are handled only in the fallback below.
     const minGaps = skipGap ? [1] : [3, 2, 1];
@@ -630,7 +643,23 @@ export function generateSchedule(
         // fall back to no-consecutive-weekend (≥8 days), then any eligible.
         for (const minWknd of [14, 8]) {
           const noConsec = eligible.filter((r) => daysSinceLastWeekend(r) >= minWknd);
-          if (noConsec.length) return noConsec.sort(sortFn)[0];
+          if (noConsec.length) {
+            // For trauma-weekend days also enforce trauma spacing within the weekend-spaced pool.
+            if (isTraumaDay) {
+              for (const minTrauma of [14, 8]) {
+                const noRecentTrauma = noConsec.filter((r) => daysSinceLastTrauma(r) >= minTrauma);
+                if (noRecentTrauma.length) return noRecentTrauma.sort(sortFn)[0];
+              }
+            }
+            return noConsec.sort(sortFn)[0];
+          }
+        }
+      }
+      // For trauma-only (weekday) days, enforce trauma spacing independently.
+      if (isTraumaDay) {
+        for (const minTrauma of [14, 8]) {
+          const noRecentTrauma = eligible.filter((r) => daysSinceLastTrauma(r) >= minTrauma);
+          if (noRecentTrauma.length) return noRecentTrauma.sort(sortFn)[0];
         }
       }
       return eligible.sort(sortFn)[0];
@@ -661,6 +690,7 @@ export function generateSchedule(
       jrTD[res.id]++;
       if (isWkndSlot) jrTHwknd[res.id] += hrs;
       else jrTHwkday[res.id] += hrs;
+      lastTraumaKey[res.id] = key;
     }
     lastCallKey[res.id] = key;
     juniorDays.push({ dateKey: key, res, shiftHrs: hrs, type, paired, cuhRounder: cuhR, isWeekend: isWk, isTrauma, override: false });
@@ -695,6 +725,7 @@ export function generateSchedule(
           jrTH[friRes.id] += hrs;
           jrTD[friRes.id]++;
           jrTHwknd[friRes.id] += hrs;
+          lastTraumaKey[friRes.id] = sunKey;
         }
         lastCallKey[friRes.id] = sunKey;
         lastWeekendKey[friRes.id] = sunKey; // gap tracking: last weekend = Sunday

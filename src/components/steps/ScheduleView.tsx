@@ -1314,6 +1314,29 @@ export default function ScheduleView({
     const jrUtilRatio: Record<string, number> = {};
     jrs.forEach((r) => { jrUtilRatio[r.id] = Math.round((jrH[r.id] / jrPotentialHours[r.id]) * 1000) / 10; });
 
+    // Weekend utilization ratio: weekend hours / potential weekend hours
+    const jrPotentialWkndHours: Record<string, number> = {};
+    jrs.forEach((r) => {
+      const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
+      const rE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
+      const effS = rS < bStart ? bStart : rS;
+      const effE = rE > bEnd   ? bEnd   : rE;
+      const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
+      let pot = 0; let d = new Date(effS);
+      while (d <= effE) {
+        const key = dk(d);
+        const dow = d.getDay();
+        if (!offDays.has(key) && (dow === 0 || dow === 6 || HOLIDAYS.has(key))) pot += 24;
+        d = addDays(d, 1);
+      }
+      jrPotentialWkndHours[r.id] = Math.max(1, pot);
+    });
+    const jrWkndUtilRatio: Record<string, number> = {};
+    jrs.forEach((r) => {
+      const wkndH = cuhSched!.jrHwknd?.[r.id] ?? 0;
+      jrWkndUtilRatio[r.id] = Math.round((wkndH / jrPotentialWkndHours[r.id]) * 1000) / 10;
+    });
+
     // Trauma utilization ratio: trauma hours / potential trauma hours
     const jrPotentialTraumaHours: Record<string, number> = {};
     jrs.forEach((r) => {
@@ -1364,6 +1387,15 @@ export default function ScheduleView({
         <div className="card">
           <div className="ch">
             <div>
+              <div className="ct">Junior Weekend Utilization Ratio</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Weekend hours assigned ÷ potential weekend hours (Sat/Sun/holidays in rotation window minus official vacation) — equal bars = perfectly equitable</div>
+            </div>
+          </div>
+          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${cuhSched!.jrHwknd?.[r.id] ?? 0}h / ${jrPotentialWkndHours[r.id]}h`, val: jrWkndUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
+        </div>
+        <div className="card">
+          <div className="ch">
+            <div>
               <div className="ct">Junior Call Utilization Ratio</div>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Assigned hours ÷ potential call hours (rotation window minus official vacation days only) — equal bars = perfectly equitable</div>
             </div>
@@ -1378,6 +1410,15 @@ export default function ScheduleView({
             </div>
           </div>
           <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${cuhSched!.jrTH?.[r.id] ?? 0}h / ${jrPotentialTraumaHours[r.id]}h`, val: jrTraumaUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
+        </div>
+        <div className="card" style={{ gridColumn: 'span 2' }}>
+          <div className="ch">
+            <div>
+              <div className="ct">Junior Trauma Utilization Ratio</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Trauma hours assigned ÷ potential trauma hours (trauma-week days in rotation window minus official vacation) — equal bars = perfectly equitable</div>
+            </div>
+          </div>
+          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${cuhSched!.jrTH?.[r.id] ?? 0}h / ${jrPotentialTraumaHours[r.id]}h potential`, val: jrTraumaUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
         </div>
       </div>
     );
