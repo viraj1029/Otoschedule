@@ -854,17 +854,14 @@ export function generateSchedule(
     }
   }
 
-  // Trauma rebalancer — carry-in aware so it equalizes cumulative (cross-block) trauma equity,
-  // matching the greedy picker. Without the carry-in term it would re-flatten each block to
-  // within-block fairness and undo the year-long catch-up. With no carry-in it reduces to jrTH alone.
-  const carryTH = (r: Resident) => (carryIn[r.person_id ?? '']?.traumaHours ?? 0) + jrTH[r.id];
+  // Trauma rebalancer
   for (let iter = 0; iter < 60; iter++) {
     const sorted = [...jrs].sort((a, b) =>
-      (carryTH(a) / rotPotentialTraumaHours[a.id]) - (carryTH(b) / rotPotentialTraumaHours[b.id]),
+      (jrTH[a.id] / rotPotentialTraumaHours[a.id]) - (jrTH[b.id] / rotPotentialTraumaHours[b.id]),
     );
     const under = sorted[0];
     const over  = sorted[sorted.length - 1];
-    if ((carryTH(over) / rotPotentialTraumaHours[over.id]) - (carryTH(under) / rotPotentialTraumaHours[under.id]) <= 0.05) break;
+    if ((jrTH[over.id] / rotPotentialTraumaHours[over.id]) - (jrTH[under.id] / rotPotentialTraumaHours[under.id]) <= 0.05) break;
 
     const candidates = juniorDays.filter((jd) => jd.res.id === over.id && jd.isTrauma && !jd.override);
     let moved = false;
@@ -887,16 +884,14 @@ export function generateSchedule(
     if (!moved) break;
   }
 
-  // Weekend rebalancer — carry-in aware (see trauma rebalancer note). Equalizes cumulative
-  // weekend equity across blocks instead of re-flattening each block in isolation.
-  const carryWk = (r: Resident) => (carryIn[r.person_id ?? '']?.wkndHours ?? 0) + jrHwknd[r.id];
+  // Weekend rebalancer
   for (let iter = 0; iter < 60; iter++) {
     const sorted = [...jrs].sort((a, b) =>
-      (carryWk(a) / rotWkndPotentialHours[a.id]) - (carryWk(b) / rotWkndPotentialHours[b.id]),
+      (jrHwknd[a.id] / rotWkndPotentialHours[a.id]) - (jrHwknd[b.id] / rotWkndPotentialHours[b.id]),
     );
     const under = sorted[0];
     const over  = sorted[sorted.length - 1];
-    if ((carryWk(over) / rotWkndPotentialHours[over.id]) - (carryWk(under) / rotWkndPotentialHours[under.id]) <= 0.05) break;
+    if ((jrHwknd[over.id] / rotWkndPotentialHours[over.id]) - (jrHwknd[under.id] / rotWkndPotentialHours[under.id]) <= 0.05) break;
 
     // Candidates are weekend-call shifts (Fri/Sat/Sun/holiday) the over-resident holds.
     const candidates = juniorDays.filter((jd) => jd.res.id === over.id && isWeekendCall(jd.dateKey) && !jd.override);
