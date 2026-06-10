@@ -644,9 +644,8 @@ export function generateSchedule(
       return Math.round((d.getTime() - parseDate(lastTraumaKey[r.id]).getTime()) / 86400000);
     }
 
-    // Progressive gap relaxation: prefer ≥3 days, fallback to ≥2, then ≥1.
-    // Never relaxes to 0 — back-to-back shifts are handled only in the fallback below.
-    const minGaps = skipGap ? [1] : [3, 2, 1];
+    // Progressive gap relaxation: prefer ≥3 days, fallback to ≥2. No back-to-back allowed.
+    const minGaps = skipGap ? [2] : [3, 2];
     for (const minGap of minGaps) {
       const eligible = jrs.filter((r) =>
         r.id !== ex &&
@@ -687,8 +686,9 @@ export function generateSchedule(
       !offMap[r.id].has(key) &&
       d >= rotEffStart[r.id] && d <= rotEffEnd[r.id],
     );
-    const withGap = inWindow.filter((r) => daysSince(r) >= 1);
-    const pool = withGap.length ? withGap : inWindow.length ? inWindow : jrs;
+    const withGap = inWindow.filter((r) => daysSince(r) >= 2);
+    const withMinGap = inWindow.filter((r) => daysSince(r) >= 1);
+    const pool = withGap.length ? withGap : withMinGap.length ? withMinGap : inWindow.length ? inWindow : jrs;
     return pool.sort(sortFn)[0];
   }
 
@@ -791,11 +791,23 @@ export function generateSchedule(
     if (offMap[res.id].has(key)) return false;
     const d = parseDate(key);
     if (d < rotEffStart[res.id] || d > rotEffEnd[res.id]) return false;
-    // Require ≥1 day gap from every existing shift for this resident.
+    // Require ≥2 day gap from every existing shift (no back-to-back days).
     for (const jj of juniorDays) {
       if (jj.res.id !== res.id) continue;
       const diff = Math.abs((d.getTime() - parseDate(jj.dateKey).getTime()) / 86400000);
-      if (diff < 1) return false;
+      if (diff < 2) return false;
+    }
+    // Limit consecutive weekends: if this is a weekend day, count weekend shifts within ±14 days.
+    const dow = d.getDay();
+    const isWknd = dow === 0 || dow === 5 || dow === 6 || HOLIDAYS.has(key);
+    if (isWknd) {
+      let nearbyWknds = 0;
+      for (const jj of juniorDays) {
+        if (jj.res.id !== res.id || !jj.isWeekend) continue;
+        const diff = Math.abs((d.getTime() - parseDate(jj.dateKey).getTime()) / 86400000);
+        if (diff <= 14) nearbyWknds++;
+      }
+      if (nearbyWknds >= 2) return false;
     }
     return true;
   }
