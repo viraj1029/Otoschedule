@@ -1756,6 +1756,53 @@ export default function ScheduleView({
       cmcUtilRatio[r.id] = Math.round(((cmcDayData!.hours[r.id] ?? 0) / cmcPotentialHours[r.id]) * 1000) / 10;
     });
 
+    // Weekend utilization ratio: power-weekend hours assigned ÷ potential weekend-call hours
+    // (Fri=12, Sat/Sun=24 across the CMC rotation window minus official vacation). Mirrors the
+    // scheduler's wkndPotentialHours so numerator and denominator share units.
+    const cmcWkndHours: Record<string, number> = {};
+    const cmcWkndPotentialHours: Record<string, number> = {};
+    pool.forEach((r) => {
+      cmcWkndHours[r.id] = cmcDayData!.days.filter((d) => d.isPowerWeekend && d.res.id === r.id).reduce((a, d) => a + d.shiftHrs, 0);
+      const cmcSegs = r.rotations?.filter((s) => s.hospital === 'CMC') ?? [];
+      const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
+      let pot = 0; let d = new Date(bStart);
+      while (d <= bEnd) {
+        const dstr = dk(d);
+        const inCMC = cmcSegs.length === 0 || cmcSegs.some((s) => dstr >= s.start_date && dstr <= s.end_date);
+        const dow = d.getDay();
+        if (inCMC && !offDays.has(dstr) && (dow === 5 || dow === 6 || dow === 0)) {
+          pot += dow === 5 ? 12 : 24;
+        }
+        d = addDays(d, 1);
+      }
+      cmcWkndPotentialHours[r.id] = Math.max(1, pot);
+    });
+    const cmcWkndUtilRatio: Record<string, number> = {};
+    pool.forEach((r) => { cmcWkndUtilRatio[r.id] = Math.round((cmcWkndHours[r.id] / cmcWkndPotentialHours[r.id]) * 1000) / 10; });
+
+    // Trauma utilization ratio: trauma hours assigned ÷ potential trauma hours
+    // (trauma-week days in the CMC rotation window minus official vacation; Sat/Sun=24, else 12).
+    const cmcTraumaHours: Record<string, number> = {};
+    const cmcTraumaPotentialHours: Record<string, number> = {};
+    pool.forEach((r) => {
+      cmcTraumaHours[r.id] = cmcDayData!.days.filter((d) => TRAUMA_WEEKS.has(d.dateKey) && d.res.id === r.id).reduce((a, d) => a + d.shiftHrs, 0);
+      const cmcSegs = r.rotations?.filter((s) => s.hospital === 'CMC') ?? [];
+      const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
+      let pot = 0; let d = new Date(bStart);
+      while (d <= bEnd) {
+        const dstr = dk(d);
+        const inCMC = cmcSegs.length === 0 || cmcSegs.some((s) => dstr >= s.start_date && dstr <= s.end_date);
+        if (inCMC && !offDays.has(dstr) && TRAUMA_WEEKS.has(dstr)) {
+          const dow = d.getDay();
+          pot += (dow === 0 || dow === 6) ? 24 : 12;
+        }
+        d = addDays(d, 1);
+      }
+      cmcTraumaPotentialHours[r.id] = Math.max(1, pot);
+    });
+    const cmcTraumaUtilRatio: Record<string, number> = {};
+    pool.forEach((r) => { cmcTraumaUtilRatio[r.id] = Math.round((cmcTraumaHours[r.id] / cmcTraumaPotentialHours[r.id]) * 1000) / 10; });
+
     return (
       <div className="sg2" style={{ gap: 18 }}>
         <div className="card">
@@ -1765,6 +1812,24 @@ export default function ScheduleView({
         <div className="card">
           <div className="ch"><div className="ct">CMC Call Hours</div></div>
           <div className="cb">{eqBars(pool.map((r) => ({ name: r.name, val: cmcDayData!.hours[r.id] ?? 0, color: r.color })), 'h')}</div>
+        </div>
+        <div className="card">
+          <div className="ch">
+            <div>
+              <div className="ct">CMC Weekend Utilization Ratio</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Power-weekend hours assigned ÷ potential weekend hours (Fri/Sat/Sun in rotation window minus official vacation) — equal bars = perfectly equitable</div>
+            </div>
+          </div>
+          <div className="cb">{eqBars(pool.map((r) => ({ name: `${r.name}  ${cmcWkndHours[r.id] ?? 0}h / ${cmcWkndPotentialHours[r.id]}h avail`, val: cmcWkndUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
+        </div>
+        <div className="card">
+          <div className="ch">
+            <div>
+              <div className="ct">CMC Trauma Utilization Ratio</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Trauma hours assigned ÷ potential trauma hours (trauma-week days in rotation window minus official vacation) — equal bars = perfectly equitable</div>
+            </div>
+          </div>
+          <div className="cb">{eqBars(pool.map((r) => ({ name: `${r.name}  ${cmcTraumaHours[r.id] ?? 0}h / ${cmcTraumaPotentialHours[r.id]}h`, val: cmcTraumaUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
         </div>
         <div className="card" style={{ gridColumn: 'span 2' }}>
           <div className="ch">
