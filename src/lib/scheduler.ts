@@ -778,6 +778,7 @@ export function generateSchedule(
     srC,
     jrC,
     jrH,
+    jrHwknd,
     published: blockPublished,
     jrTH,
     jrTHwknd,

@@ -112,6 +112,7 @@ export interface ScheduleData {
   srC: Record<string, number>;
   jrC: Record<string, number>;
   jrH: Record<string, number>;
+  jrHwknd?: Record<string, number>;
   published: boolean;
   roundingOverrides?: Record<string, { cuhResId?: string | null; pmhResId?: string | null }>;
   jrTH?: Record<string, number>;
