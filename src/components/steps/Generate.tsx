@@ -119,7 +119,8 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
         if (!vaPool.length) throw new Error('No active residents with a VA rotation in this period');
         scheduleData = generateVASchedule(vaPool, allRequests, scheduleName, schedStart, schedEnd);
       } else {
-        const carryIn = await api<Record<string, { hours: number; availDays: number }>>('/jr-carry');
+        // Carry-in = cumulative junior hours from published blocks earlier this academic year.
+        const carryIn = await api<Record<string, { hours: number; availDays: number; wkndHours: number; traumaHours: number }>>(`/jr-carry?before=${encodeURIComponent(schedStart)}`);
         scheduleData = generateSchedule(residents, allRequests, scheduleName, schedStart, schedEnd, false, mode, carryIn);
       }
 
