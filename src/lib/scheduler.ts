@@ -646,7 +646,7 @@ export function generateSchedule(
           if (noConsec.length) {
             // For trauma-weekend days also enforce trauma spacing within the weekend-spaced pool.
             if (isTraumaDay) {
-              for (const minTrauma of [14, 8]) {
+              for (const minTrauma of [22, 14, 8]) {
                 const noRecentTrauma = noConsec.filter((r) => daysSinceLastTrauma(r) >= minTrauma);
                 if (noRecentTrauma.length) return noRecentTrauma.sort(sortFn)[0];
               }
@@ -657,7 +657,7 @@ export function generateSchedule(
       }
       // For trauma-only (weekday) days, enforce trauma spacing independently.
       if (isTraumaDay) {
-        for (const minTrauma of [14, 8]) {
+        for (const minTrauma of [22, 14, 8]) {
           const noRecentTrauma = eligible.filter((r) => daysSinceLastTrauma(r) >= minTrauma);
           if (noRecentTrauma.length) return noRecentTrauma.sort(sortFn)[0];
         }
