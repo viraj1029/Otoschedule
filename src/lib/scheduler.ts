@@ -86,17 +86,22 @@ export function shiftHours(key: string): number {
 // ─── Trauma weeks ─────────────────────────────────────────────────────────────
 
 function buildTraumaSet(): Set<string> {
-  const ranges = [
-    ['2026-07-13', '2026-07-19'],
-    ['2026-08-03', '2026-08-09'],
-    ['2026-08-24', '2026-08-30'],
-    ['2026-09-14', '2026-09-20'],
+  // Each entry is the Monday that starts a trauma week; Sun is +6 days.
+  const mondays = [
+    '2026-07-13',
+    '2026-08-03',
+    '2026-08-24',
+    '2026-09-14',
+    '2026-10-05',
+    '2026-10-26',
+    '2026-11-23',
+    '2026-12-07',
+    '2026-12-28',
   ];
   const s = new Set<string>();
-  for (const [start, end] of ranges) {
-    let d = parseDate(start);
-    const e = parseDate(end);
-    while (d <= e) { s.add(dk(d)); d = addDays(d, 1); }
+  for (const mon of mondays) {
+    let d = parseDate(mon);
+    for (let i = 0; i < 7; i++) { s.add(dk(d)); d = addDays(d, 1); }
   }
   return s;
 }
