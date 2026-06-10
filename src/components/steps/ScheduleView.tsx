@@ -1379,6 +1379,15 @@ export default function ScheduleView({
           </div>
           <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${cuhSched!.jrTH?.[r.id] ?? 0}h / ${jrPotentialTraumaHours[r.id]}h`, val: jrTraumaUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
         </div>
+        <div className="card" style={{ gridColumn: 'span 2' }}>
+          <div className="ch">
+            <div>
+              <div className="ct">Junior Trauma Utilization Ratio</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Trauma hours assigned ÷ potential trauma hours (trauma-week days in rotation window minus official vacation) — equal bars = perfectly equitable</div>
+            </div>
+          </div>
+          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${cuhSched!.jrTH?.[r.id] ?? 0}h / ${jrPotentialTraumaHours[r.id]}h potential`, val: jrTraumaUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
+        </div>
       </div>
     );
   }
