@@ -207,13 +207,11 @@ export default function ScheduleView({
             chips += rt(friJr.res.color, `CUH: ${friJr.res.name}`);
           }
           // PMH rounding: override takes priority, else Sat call if PMH, else Parkland intern
-          if (ov?.pmhResId !== undefined) {
-            if (ov.pmhResId === '__intern__') {
-              chips += rt('var(--purple)', 'PMH: Parkland intern');
-            } else if (ov.pmhResId) {
-              const ovRes = residents.find(r => r.id === ov.pmhResId);
-              if (ovRes) chips += rt(ovRes.color, `PMH: ${ovRes.name}`);
-            }
+          if (ov?.pmhResId === '__intern__') {
+            chips += rt('var(--purple)', 'PMH: Parkland intern');
+          } else if (ov?.pmhResId) {
+            const ovRes = residents.find(r => r.id === ov.pmhResId);
+            if (ovRes) chips += rt(ovRes.color, `PMH: ${ovRes.name}`);
           } else {
             chips += jr.res.hospital === 'PMH'
               ? rt(jr.res.color, `PMH: ${jr.res.name}`)
@@ -234,13 +232,11 @@ export default function ScheduleView({
             chips += rt(satJr.res.color, `CUH: ${satJr.res.name}`);
           }
           // PMH rounding: override takes priority, else Sun call if PMH, else Parkland intern
-          if (ov?.pmhResId !== undefined) {
-            if (ov.pmhResId === '__intern__') {
-              chips += rt('var(--purple)', 'PMH: Parkland intern');
-            } else if (ov.pmhResId) {
-              const ovRes = residents.find(r => r.id === ov.pmhResId);
-              if (ovRes) chips += rt(ovRes.color, `PMH: ${ovRes.name}`);
-            }
+          if (ov?.pmhResId === '__intern__') {
+            chips += rt('var(--purple)', 'PMH: Parkland intern');
+          } else if (ov?.pmhResId) {
+            const ovRes = residents.find(r => r.id === ov.pmhResId);
+            if (ovRes) chips += rt(ovRes.color, `PMH: ${ovRes.name}`);
           } else {
             chips += jr.res.hospital === 'PMH'
               ? rt(jr.res.color, `PMH: ${jr.res.name}`)
