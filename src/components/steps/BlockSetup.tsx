@@ -55,6 +55,8 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
     open: false, title: '', name: '', pin: '',
   });
   const [activeTab, setActiveTab] = useState<'setup' | 'rotations'>('setup');
+  const [rotationView, setRotationView] = useState<'by-resident' | 'by-hospital'>('by-resident');
+  const [selectedHospital, setSelectedHospital] = useState<Hospital | null>(null);
 
   async function saveBlock() {
     try {
@@ -141,34 +143,28 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
       );
     }
 
-    return (
-      <div className="card">
-        <div className="ch">
-          <div className="ct">Rotation Timeline</div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            {(['CUH', 'PMH', 'CMC', 'VA', 'Research'] as Hospital[]).map((h) => (
-              <div key={h} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <div style={{ width: 10, height: 10, borderRadius: 2, background: HOSP_COLOR[h] }} />
-                <span style={{ fontSize: 11, color: 'var(--muted)' }}>{h}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="cb">
-          {/* Tick-mark ruler — labels at exact month-start positions */}
-          <div style={{ marginLeft: 144, position: 'relative', height: 30, marginBottom: 4 }}>
-            {gridPcts.map((pct, i) => (
-              <div key={i} style={{ position: 'absolute', left: `${pct}%`, top: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                <div style={{ width: 1, height: 10, background: 'var(--border2)' }} />
-                <span style={{
-                  fontSize: 9, color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace",
-                  whiteSpace: 'nowrap', lineHeight: 1.2, marginTop: 2,
-                }}>{monthSegs[i].label}</span>
-              </div>
-            ))}
-          </div>
+    const HOSPITALS: Hospital[] = ['CUH', 'PMH', 'CMC', 'VA', 'Research'];
 
-          {/* Resident rows */}
+    function renderRuler(labelWidth: number) {
+      return (
+        <div style={{ marginLeft: labelWidth, position: 'relative', height: 30, marginBottom: 4 }}>
+          {gridPcts.map((pct, i) => (
+            <div key={i} style={{ position: 'absolute', left: `${pct}%`, top: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+              <div style={{ width: 1, height: 10, background: 'var(--border2)' }} />
+              <span style={{
+                fontSize: 9, color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace",
+                whiteSpace: 'nowrap', lineHeight: 1.2, marginTop: 2,
+              }}>{monthSegs[i].label}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    function renderByResidentView() {
+      return (
+        <div className="cb">
+          {renderRuler(144)}
           {sorted.map((res) => {
             const rots = res.rotations ?? [];
             const bars = rots.map((rot) => {
@@ -177,27 +173,20 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
               const clampS = s < bStart ? bStart : s;
               const clampE = e > bEnd ? bEnd : e;
               const leftPct = (clampS.getTime() - bStart.getTime()) / totalMs * 100;
-              // +1 day width so the last day of the segment is fully covered
               const widthPct = (clampE.getTime() - clampS.getTime() + 86400000) / totalMs * 100;
               return { hospital: rot.hospital, leftPct: Math.max(0, leftPct), widthPct: Math.min(widthPct, 100 - Math.max(0, leftPct)), title: `${rot.hospital}: ${fmtShort(rot.start_date)} – ${fmtShort(rot.end_date)}` };
             });
 
             return (
               <div key={res.id} style={{ display: 'flex', alignItems: 'center', marginBottom: 6, gap: 8 }}>
-                {/* Name label */}
                 <div style={{ width: 136, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5, overflow: 'hidden' }}>
                   {avatar(res, 20)}
                   <span style={{ fontSize: 11, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{res.name}</span>
                   <span className={`bdg ${res.pgy >= 4 ? 'bg2' : 'bb'}`} style={{ fontSize: 8, flexShrink: 0 }}>{res.pgy}</span>
                 </div>
-                {/* Gantt bar */}
                 <div style={{ flex: 1, position: 'relative', height: 26, background: 'var(--s2)', borderRadius: 4 }}>
-                  {/* Grid lines at month starts */}
                   {gridPcts.map((pct, i) => (
-                    <div key={i} style={{
-                      position: 'absolute', left: `${pct}%`, top: 0, bottom: 0,
-                      width: 1, background: 'var(--border)', opacity: 0.6,
-                    }} />
+                    <div key={i} style={{ position: 'absolute', left: `${pct}%`, top: 0, bottom: 0, width: 1, background: 'var(--border)', opacity: 0.6 }} />
                   ))}
                   {bars.length === 0 ? (
                     <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', paddingLeft: 8, fontSize: 10, color: 'var(--muted2)', fontStyle: 'italic' }}>
@@ -205,19 +194,13 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
                     </div>
                   ) : bars.map((bar, i) => (
                     <div key={i} title={bar.title} style={{
-                      position: 'absolute',
-                      left: `${bar.leftPct}%`,
-                      width: `${bar.widthPct}%`,
-                      top: 3, bottom: 3,
-                      background: HOSP_COLOR[bar.hospital],
-                      borderRadius: 3,
+                      position: 'absolute', left: `${bar.leftPct}%`, width: `${bar.widthPct}%`,
+                      top: 3, bottom: 3, background: HOSP_COLOR[bar.hospital], borderRadius: 3,
                       opacity: res.status === 'away' ? 0.35 : 0.85,
                       display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
                     }}>
                       {bar.widthPct > 7 && (
-                        <span style={{ fontSize: 8, fontWeight: 700, color: '#000', letterSpacing: '0.04em' }}>
-                          {bar.hospital}
-                        </span>
+                        <span style={{ fontSize: 8, fontWeight: 700, color: '#000', letterSpacing: '0.04em' }}>{bar.hospital}</span>
                       )}
                     </div>
                   ))}
@@ -225,13 +208,127 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
               </div>
             );
           })}
-
           {sorted.length === 0 && (
-            <div style={{ textAlign: 'center', padding: 32, color: 'var(--muted)', fontStyle: 'italic' }}>
-              No residents added yet.
-            </div>
+            <div style={{ textAlign: 'center', padding: 32, color: 'var(--muted)', fontStyle: 'italic' }}>No residents added yet.</div>
           )}
         </div>
+      );
+    }
+
+    function renderByHospitalView() {
+      const activeHosp = selectedHospital ?? HOSPITALS[0];
+      const resForHosp = sorted.filter((r) =>
+        (r.rotations ?? []).some((rot) => rot.hospital === activeHosp)
+      );
+
+      return (
+        <div className="cb">
+          {/* Hospital selector chips */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+            {HOSPITALS.map((h) => {
+              const count = sorted.filter((r) => (r.rotations ?? []).some((rot) => rot.hospital === h)).length;
+              const isActive = activeHosp === h;
+              return (
+                <button
+                  key={h}
+                  onClick={() => setSelectedHospital(h)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '5px 12px', borderRadius: 20,
+                    border: `2px solid ${isActive ? HOSP_COLOR[h] : 'var(--border)'}`,
+                    background: isActive ? `${HOSP_COLOR[h]}22` : 'var(--s1)',
+                    cursor: 'pointer', fontWeight: isActive ? 700 : 400,
+                    fontSize: 12, color: isActive ? HOSP_COLOR[h] : 'var(--muted)',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: HOSP_COLOR[h] }} />
+                  {h}
+                  <span style={{ fontSize: 10, opacity: 0.75 }}>({count})</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {resForHosp.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 32, color: 'var(--muted)', fontStyle: 'italic' }}>
+              No residents assigned to {activeHosp} this year.
+            </div>
+          ) : (
+            <>
+              {renderRuler(144)}
+              {resForHosp.map((res) => {
+                const hospRots = (res.rotations ?? []).filter((rot) => rot.hospital === activeHosp);
+                return (
+                  <div key={res.id} style={{ display: 'flex', alignItems: 'center', marginBottom: 6, gap: 8 }}>
+                    <div style={{ width: 136, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5, overflow: 'hidden' }}>
+                      {avatar(res, 20)}
+                      <span style={{ fontSize: 11, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{res.name}</span>
+                      <span className={`bdg ${res.pgy >= 4 ? 'bg2' : 'bb'}`} style={{ fontSize: 8, flexShrink: 0 }}>{res.pgy}</span>
+                    </div>
+                    <div style={{ flex: 1, position: 'relative', height: 26, background: 'var(--s2)', borderRadius: 4 }}>
+                      {gridPcts.map((pct, i) => (
+                        <div key={i} style={{ position: 'absolute', left: `${pct}%`, top: 0, bottom: 0, width: 1, background: 'var(--border)', opacity: 0.6 }} />
+                      ))}
+                      {hospRots.map((rot, i) => {
+                        const s = parseDate(rot.start_date);
+                        const e = parseDate(rot.end_date);
+                        const clampS = s < bStart ? bStart : s;
+                        const clampE = e > bEnd ? bEnd : e;
+                        const leftPct = Math.max(0, (clampS.getTime() - bStart.getTime()) / totalMs * 100);
+                        const rawWidth = (clampE.getTime() - clampS.getTime() + 86400000) / totalMs * 100;
+                        const widthPct = Math.min(rawWidth, 100 - leftPct);
+                        return (
+                          <div key={i} title={`${res.name}: ${fmtShort(rot.start_date)} – ${fmtShort(rot.end_date)}`} style={{
+                            position: 'absolute', left: `${leftPct}%`, width: `${widthPct}%`,
+                            top: 3, bottom: 3,
+                            background: res.color,
+                            borderRadius: 3,
+                            opacity: res.status === 'away' ? 0.35 : 0.85,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+                          }}>
+                            {widthPct > 7 && (
+                              <span style={{ fontSize: 8, fontWeight: 700, color: '#000', letterSpacing: '0.04em' }}>
+                                {res.name.split(' ').pop()}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className="card">
+        <div className="ch">
+          <div className="ct">Rotation Timeline</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {rotationView === 'by-resident' && (['CUH', 'PMH', 'CMC', 'VA', 'Research'] as Hospital[]).map((h) => (
+              <div key={h} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{ width: 10, height: 10, borderRadius: 2, background: HOSP_COLOR[h] }} />
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>{h}</span>
+              </div>
+            ))}
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+              <button
+                className={`btn bsm ${rotationView === 'by-resident' ? 'bg' : 'bgh'}`}
+                onClick={() => setRotationView('by-resident')}
+              >By Resident</button>
+              <button
+                className={`btn bsm ${rotationView === 'by-hospital' ? 'bg' : 'bgh'}`}
+                onClick={() => setRotationView('by-hospital')}
+              >By Hospital</button>
+            </div>
+          </div>
+        </div>
+        {rotationView === 'by-resident' ? renderByResidentView() : renderByHospitalView()}
       </div>
     );
   }
