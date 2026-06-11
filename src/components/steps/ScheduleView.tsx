@@ -68,6 +68,20 @@ export default function ScheduleView({
   const [cmcOverride, setCmcOverride] = useState<{ open: boolean; dateKey: string }>({ open: false, dateKey: '' });
   const [poolOverrideResId, setPoolOverrideResId] = useState('');
 
+  const [annualHours, setAnnualHours] = useState<{
+    tracked: boolean;
+    pgy?: number;
+    hoursWorked?: number;
+    targetHours?: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (role !== 'resident' || !currentResId) return;
+    api<{ tracked: boolean; pgy?: number; hoursWorked?: number; targetHours?: number }>('/annual-hours')
+      .then((data) => setAnnualHours(data))
+      .catch(() => {});
+  }, [role, currentResId, schedule]);
+
   useEffect(() => {
     if (schedule) {
       const start = parseDate(schedule.bStart);
@@ -924,6 +938,37 @@ export default function ScheduleView({
             </div>
           </div>
         </div>
+
+        {/* Annual call hours progress bar (PGY2 / PGY3 only) */}
+        {annualHours?.tracked && annualHours.targetHours != null && annualHours.hoursWorked != null && (
+          (() => {
+            const worked = annualHours.hoursWorked!;
+            const target = annualHours.targetHours!;
+            const pct = Math.min(100, Math.round((worked / target) * 100));
+            const over = worked > target;
+            const barColor = over ? 'var(--orange)' : pct >= 80 ? 'var(--green)' : 'var(--blue)';
+            const remaining = target - worked;
+            return (
+              <div style={{ marginBottom: 20, padding: '16px 20px', background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Annual CUH/PMH Call Hours
+                  </span>
+                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 13, fontWeight: 700, color: barColor }}>
+                    {worked}h / {target}h
+                  </span>
+                </div>
+                <div style={{ height: 10, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${pct}%`, background: barColor, borderRadius: 99, transition: 'width 0.4s ease' }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 7, fontSize: 11, color: 'var(--muted)' }}>
+                  <span>{pct}% of annual target</span>
+                  <span>{over ? `${worked - target}h over target` : `${remaining}h remaining`}</span>
+                </div>
+              </div>
+            );
+          })()
+        )}
 
         {/* Month selector */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
