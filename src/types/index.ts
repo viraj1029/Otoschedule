@@ -122,6 +122,8 @@ export interface ScheduleData {
   jrAvailDays?: Record<string, number>;
   jrWkndAvailDays?: Record<string, number>;
   jrWkndPotentialHours?: Record<string, number>;
+  jrPotentialHours?: Record<string, number>;
+  jrPotentialTraumaHours?: Record<string, number>;
   _scheduleId?: string;  // injected by GET /api/schedule
 }
 
