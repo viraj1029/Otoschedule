@@ -1324,6 +1324,149 @@ export function generateCMCSchedule(
     d = addDays(d, 1);
   }
 
+  // ── Post-hoc rebalancing ────────────────────────────────────────────────────
+  // Two passes mirror the CUHPMH approach: weekend equity first, then weekday
+  // equity. Each pass iterates over all over→under resident pairs and makes the
+  // first legal, gap-shrinking move found, reverting any move that overshoots.
+  // Guaranteed monotone convergence; stops when gap ≤ tol or no legal move exists.
+
+  // Reassign an entire power weekend (Fri+Sat+Sun) atomically from `from` to `to`.
+  function cmcReassignPW(friKey: string, from: Resident, to: Resident) {
+    const fri = parseDate(friKey);
+    const satKey = dk(addDays(fri, 1));
+    const sunKey = dk(addDays(fri, 2));
+    for (const day of cmcDays) {
+      if (!day.isPowerWeekend || day.res.id !== from.id) continue;
+      if (day.dateKey !== friKey && day.dateKey !== satKey && day.dateKey !== sunKey) continue;
+      day.res = to;
+      counts[from.id]--; counts[to.id]++;
+      hours[from.id] -= day.shiftHrs; hours[to.id] += day.shiftHrs;
+      wkndHours[from.id] -= day.shiftHrs; wkndHours[to.id] += day.shiftHrs;
+      if (TRAUMA_WEEKS.has(day.dateKey)) {
+        traumaHours[from.id] -= day.shiftHrs; traumaHours[to.id] += day.shiftHrs;
+      }
+    }
+    pwCount[from.id]--; pwCount[to.id]++;
+    pwByFri.set(friKey, to);
+  }
+
+  // A resident can receive a power weekend only if they are not fully off all three
+  // days and would not end up with back-to-back power weekends.
+  function cmcCanReceivePW(friKey: string, res: Resident): boolean {
+    const fri = parseDate(friKey);
+    const satKey = dk(addDays(fri, 1));
+    const sunKey = dk(addDays(fri, 2));
+    if (offMap[res.id].has(friKey) && offMap[res.id].has(satKey) && offMap[res.id].has(sunKey)) return false;
+    if (pwByFri.get(dk(addDays(fri, -7)))?.id === res.id) return false;
+    if (pwByFri.get(dk(addDays(fri,  7)))?.id === res.id) return false;
+    return true;
+  }
+
+  // Move entire power weekends from over- to under-assigned residents until the
+  // weekend-ratio gap (wkndHours / wkndPotentialHours) is ≤ tol.
+  function cmcRebalanceWeekend(tol = 0.05) {
+    const ratioOf = (r: Resident) => wkndHours[r.id] / wkndPotentialHours[r.id];
+    for (let iter = 0; iter < 400; iter++) {
+      const sorted = [...pool].sort((a, b) => ratioOf(a) - ratioOf(b));
+      if (ratioOf(sorted[sorted.length - 1]) - ratioOf(sorted[0]) <= tol) break;
+      let moved = false;
+      for (let oi = sorted.length - 1; oi >= 1 && !moved; oi--) {
+        const over = sorted[oi];
+        for (let ui = 0; ui < oi && !moved; ui++) {
+          const under = sorted[ui];
+          const gapBefore = ratioOf(over) - ratioOf(under);
+          if (gapBefore <= tol) continue;
+          const overFridays = [...pwByFri.entries()]
+            .filter(([, r]) => r.id === over.id)
+            .map(([key]) => key);
+          for (const friKey of overFridays) {
+            const fri2 = parseDate(friKey);
+            const hasOverride = cmcDays.some(
+              (day) =>
+                day.isPowerWeekend &&
+                day.res.id === over.id &&
+                day.override &&
+                (day.dateKey === friKey ||
+                  day.dateKey === dk(addDays(fri2, 1)) ||
+                  day.dateKey === dk(addDays(fri2, 2))),
+            );
+            if (hasOverride) continue;
+            if (!cmcCanReceivePW(friKey, under)) continue;
+            cmcReassignPW(friKey, over, under);
+            if (Math.abs(ratioOf(over) - ratioOf(under)) < gapBefore - 1e-9) {
+              moved = true;
+              break;
+            }
+            cmcReassignPW(friKey, under, over); // revert — overshoot
+          }
+        }
+      }
+      if (!moved) break;
+    }
+  }
+
+  // Reassign a single weekday shift atomically.
+  function cmcReassignWD(dateKey: string, from: Resident, to: Resident) {
+    const day = cmcDays.find((d) => d.dateKey === dateKey && !d.isPowerWeekend && d.res.id === from.id);
+    if (!day) return;
+    day.res = to;
+    counts[from.id]--; counts[to.id]++;
+    hours[from.id] -= 12; hours[to.id] += 12;
+    wdCount[from.id]--; wdCount[to.id]++;
+    if (TRAUMA_WEEKS.has(dateKey)) {
+      traumaHours[from.id] -= 12; traumaHours[to.id] += 12;
+    }
+  }
+
+  // A resident can receive a weekday shift only if they are not off, would not
+  // create consecutive weekday shifts, and the Thu→Fri / Mon←Sun power-weekend
+  // adjacency constraints are respected.
+  function cmcCanReceiveWD(dateKey: string, res: Resident): boolean {
+    if (offMap[res.id].has(dateKey)) return false;
+    const dd = parseDate(dateKey);
+    const dow = dd.getDay();
+    const prevKey = dk(addDays(dd, -1));
+    const nextKey = dk(addDays(dd,  1));
+    if (cmcDays.some((day) => day.dateKey === prevKey && !day.isPowerWeekend && day.res.id === res.id)) return false;
+    if (cmcDays.some((day) => day.dateKey === nextKey && !day.isPowerWeekend && day.res.id === res.id)) return false;
+    if (dow === 4 && pwByFri.get(dk(addDays(dd, 1)))?.id  === res.id) return false;
+    if (dow === 1 && pwByFri.get(dk(addDays(dd, -3)))?.id === res.id) return false;
+    return true;
+  }
+
+  // Move individual weekday shifts from over- to under-assigned residents until
+  // the weekday-count ratio (wdCount / wdAvail) gap is ≤ tol.
+  function cmcRebalanceWeekday(tol = 0.05) {
+    const ratioOf = (r: Resident) => wdCount[r.id] / wdAvail[r.id];
+    for (let iter = 0; iter < 400; iter++) {
+      const sorted = [...pool].sort((a, b) => ratioOf(a) - ratioOf(b));
+      if (ratioOf(sorted[sorted.length - 1]) - ratioOf(sorted[0]) <= tol) break;
+      let moved = false;
+      for (let oi = sorted.length - 1; oi >= 1 && !moved; oi--) {
+        const over = sorted[oi];
+        for (let ui = 0; ui < oi && !moved; ui++) {
+          const under = sorted[ui];
+          const gapBefore = ratioOf(over) - ratioOf(under);
+          if (gapBefore <= tol) continue;
+          const candidates = cmcDays.filter((day) => day.res.id === over.id && !day.isPowerWeekend && !day.override);
+          for (const day of candidates) {
+            if (!cmcCanReceiveWD(day.dateKey, under)) continue;
+            cmcReassignWD(day.dateKey, over, under);
+            if (Math.abs(ratioOf(over) - ratioOf(under)) < gapBefore - 1e-9) {
+              moved = true;
+              break;
+            }
+            cmcReassignWD(day.dateKey, under, over); // revert — overshoot
+          }
+        }
+      }
+      if (!moved) break;
+    }
+  }
+
+  cmcRebalanceWeekend();
+  cmcRebalanceWeekday();
+
   cmcDays.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
 
   return {
