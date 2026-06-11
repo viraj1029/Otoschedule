@@ -854,66 +854,81 @@ export function generateSchedule(
     }
   }
 
-  // Trauma rebalancer
-  for (let iter = 0; iter < 60; iter++) {
-    const sorted = [...jrs].sort((a, b) =>
-      (jrTH[a.id] / rotPotentialTraumaHours[a.id]) - (jrTH[b.id] / rotPotentialTraumaHours[b.id]),
-    );
-    const under = sorted[0];
-    const over  = sorted[sorted.length - 1];
-    if ((jrTH[over.id] / rotPotentialTraumaHours[over.id]) - (jrTH[under.id] / rotPotentialTraumaHours[under.id]) <= 0.05) break;
+  // ── Generic within-block equity rebalancer ──────────────────────────────────
+  // Equalize one ratio metric (e.g. weekend hours / weekend potential) across the
+  // junior pool. Unlike a naive "move from the single most-over to the single
+  // most-under" loop — which stops the instant that one pair is blocked by the
+  // spacing rules in canReceive — this searches EVERY over→under pair each
+  // iteration and makes the first legal, gap-shrinking move it finds. A move is
+  // only kept if it actually reduces that pair's ratio gap (otherwise reverted),
+  // which prevents overshoot/oscillation and guarantees monotonic convergence.
+  //
+  //   ratioOf      — current utilization ratio for a resident (live jr* state)
+  //   isCandidate  — which of the over-resident's shifts may be moved
+  // Fri–Sun pairs always move together so a weekend is never split across people.
+  function rebalance(
+    ratioOf: (r: Resident) => number,
+    isCandidate: (jd: JuniorDay) => boolean,
+    tol = 0.05,
+  ) {
+    for (let iter = 0; iter < 400; iter++) {
+      const sorted = [...jrs].sort((a, b) => ratioOf(a) - ratioOf(b));
+      if (ratioOf(sorted[sorted.length - 1]) - ratioOf(sorted[0]) <= tol) break;
 
-    const candidates = juniorDays.filter((jd) => jd.res.id === over.id && jd.isTrauma && !jd.override);
-    let moved = false;
-    for (const jd of candidates) {
-      if (jd.type === 'fri-pair') {
-        const sunKey = dk(addDays(parseDate(jd.dateKey), 2));
-        const sunJd  = juniorDays.find((jj) => jj.dateKey === sunKey && jj.res.id === over.id);
-        if (!sunJd || !canReceive(jd.dateKey, under) || !canReceive(sunKey, under)) continue;
-        reassignJD(jd, over, under);
-        reassignJD(sunJd, over, under);
-      } else if (jd.type === 'sun-pair') {
-        continue; // handled with its Friday pair above
-      } else {
-        if (!canReceive(jd.dateKey, under)) continue;
-        reassignJD(jd, over, under);
+      let moved = false;
+      // Largest-gap pairs first: most-over with most-under, then inward.
+      for (let oi = sorted.length - 1; oi >= 1 && !moved; oi--) {
+        const over = sorted[oi];
+        for (let ui = 0; ui < oi && !moved; ui++) {
+          const under = sorted[ui];
+          const gapBefore = ratioOf(over) - ratioOf(under);
+          if (gapBefore <= tol) continue;
+
+          const candidates = juniorDays.filter((jd) => jd.res.id === over.id && isCandidate(jd) && !jd.override);
+          for (const jd of candidates) {
+            let sunJd: JuniorDay | undefined;
+            if (jd.type === 'sun-pair') continue; // moved with its Friday partner
+            if (jd.type === 'fri-pair') {
+              const sunKey = dk(addDays(parseDate(jd.dateKey), 2));
+              sunJd = juniorDays.find((jj) => jj.dateKey === sunKey && jj.res.id === over.id);
+              if (!sunJd || !canReceive(jd.dateKey, under) || !canReceive(sunKey, under)) continue;
+            } else {
+              if (!canReceive(jd.dateKey, under)) continue;
+            }
+
+            // Tentatively move, keep only if it shrinks this pair's gap.
+            reassignJD(jd, over, under);
+            if (sunJd) reassignJD(sunJd, over, under);
+            if (Math.abs(ratioOf(over) - ratioOf(under)) < gapBefore - 1e-9) {
+              moved = true;
+              break;
+            }
+            reassignJD(jd, under, over); // revert — overshoot, no improvement
+            if (sunJd) reassignJD(sunJd, under, over);
+          }
+        }
       }
-      moved = true;
-      break;
+      if (!moved) break;
     }
-    if (!moved) break;
   }
 
-  // Weekend rebalancer
-  for (let iter = 0; iter < 60; iter++) {
-    const sorted = [...jrs].sort((a, b) =>
-      (jrHwknd[a.id] / rotWkndPotentialHours[a.id]) - (jrHwknd[b.id] / rotWkndPotentialHours[b.id]),
-    );
-    const under = sorted[0];
-    const over  = sorted[sorted.length - 1];
-    if ((jrHwknd[over.id] / rotWkndPotentialHours[over.id]) - (jrHwknd[under.id] / rotWkndPotentialHours[under.id]) <= 0.05) break;
-
-    // Candidates are weekend-call shifts (Fri/Sat/Sun/holiday) the over-resident holds.
-    const candidates = juniorDays.filter((jd) => jd.res.id === over.id && isWeekendCall(jd.dateKey) && !jd.override);
-    let moved = false;
-    for (const jd of candidates) {
-      if (jd.type === 'fri-pair') {
-        const sunKey = dk(addDays(parseDate(jd.dateKey), 2));
-        const sunJd  = juniorDays.find((jj) => jj.dateKey === sunKey && jj.res.id === over.id);
-        if (!sunJd || !canReceive(jd.dateKey, under) || !canReceive(sunKey, under)) continue;
-        reassignJD(jd, over, under);
-        reassignJD(sunJd, over, under);
-      } else if (jd.type === 'sun-pair') {
-        continue; // handled with its Friday pair above
-      } else {
-        if (!canReceive(jd.dateKey, under)) continue;
-        reassignJD(jd, over, under);
-      }
-      moved = true;
-      break;
-    }
-    if (!moved) break;
-  }
+  // Run in ascending priority so each pass can disturb only the lower-priority ones:
+  //  1. Trauma   — trauma shifts (lowest priority; may be nudged by the weekend pass).
+  //  2. Weekend  — weekend-call shifts (Fri/Sat/Sun/holiday).
+  //  3. Total    — ONLY weekday, non-trauma shifts, so balancing total hours leaves the
+  //                already-balanced weekend and trauma distributions untouched.
+  rebalance(
+    (r) => jrTH[r.id] / rotPotentialTraumaHours[r.id],
+    (jd) => jd.isTrauma,
+  );
+  rebalance(
+    (r) => jrHwknd[r.id] / rotWkndPotentialHours[r.id],
+    (jd) => isWeekendCall(jd.dateKey),
+  );
+  rebalance(
+    (r) => jrH[r.id] / rotPotentialHours[r.id],
+    (jd) => !isWeekendCall(jd.dateKey) && !jd.isTrauma,
+  );
 
   } // end needJr
 
