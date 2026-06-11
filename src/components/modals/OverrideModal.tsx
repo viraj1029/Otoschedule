@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import type { Resident, ScheduleData, Request } from '@/types';
 import { HOLIDAYS, parseDate, dk, addDays } from '@/lib/scheduler';
+import { api } from '../App';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -48,7 +49,6 @@ function removeSeniorDays(updated: ScheduleData, keys: string[]) {
 function applyMultiDayOverride(updated: ScheduleData, keys: string[], newRes: Resident) {
   const sorted = [...keys].sort();
 
-  // Build contiguous ranges from sorted keys
   const ranges: { start: string; end: string }[] = [];
   let rStart = sorted[0], rEnd = sorted[0];
   for (let i = 1; i < sorted.length; i++) {
@@ -71,15 +71,12 @@ function applyMultiDayOverride(updated: ScheduleData, keys: string[], newRes: Re
         newWeeks.push(w);
         continue;
       }
-      // Part before range
       if (w.wS < range.start) {
         newWeeks.push({ ...w, wE: dk(addDays(parseDate(range.start), -1)) });
       }
-      // Overlap — assign to new resident
       const overS = w.wS > range.start ? w.wS : range.start;
       const overE = w.wE < range.end ? w.wE : range.end;
       newWeeks.push({ wS: overS, wE: overE, res: newRes, isBackup: w.isBackup, override: true });
-      // Part after range
       if (w.wE > range.end) {
         newWeeks.push({ ...w, wS: dk(addDays(parseDate(range.end), 1)) });
       }
@@ -92,10 +89,16 @@ export default function OverrideModal({ open, dateKeys, schedule, residents, all
   const [srId, setSrId] = useState('');
   const [jrId, setJrId] = useState('');
   const [note, setNote] = useState('');
+  const [liveRequests, setLiveRequests] = useState<Request[]>(allRequests);
 
+  // Fetch fresh requests every time the modal opens so availability is current
   useEffect(() => {
-    if (open) { setSrId(''); setJrId(''); setNote(''); }
-  }, [open, dateKeys.join(',')]);
+    if (!open) return;
+    setSrId(''); setJrId(''); setNote('');
+    api<Request[]>('/requests')
+      .then(setLiveRequests)
+      .catch(() => setLiveRequests(allRequests));
+  }, [open, dateKeys.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function saveOverride() {
     if (!dateKeys.length || !schedule) return;
@@ -126,12 +129,13 @@ export default function OverrideModal({ open, dateKeys, schedule, residents, all
   if (!open || !dateKeys.length) return null;
 
   const offOnSelectedDates = new Set(
-    allRequests
+    liveRequests
       .filter((req) => (req.type === 'vacation_official' || req.type === 'vacation') && dateKeys.includes(req.date))
       .map((req) => req.resident_id),
   );
   const srs = residents.filter((r) => r.pgy >= 4 && r.status !== 'away' && !offOnSelectedDates.has(r.id));
   const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active' && !offOnSelectedDates.has(r.id));
+  const offResidents = residents.filter((r) => offOnSelectedDates.has(r.id));
 
   function fmtDateKey(s: string) {
     const d = parseDate(s);
@@ -153,6 +157,11 @@ export default function OverrideModal({ open, dateKeys, schedule, residents, all
           <button className="mx" onClick={onClose}>✕</button>
         </div>
         <div className="mb">
+          {offResidents.length > 0 && (
+            <div style={{ fontSize: 11, color: 'var(--orange)', marginBottom: 10, padding: '5px 8px', background: 'rgba(251,146,60,0.1)', borderRadius: 6, border: '1px solid rgba(251,146,60,0.25)' }}>
+              ⚠ Excluded (requested off): {offResidents.map((r) => r.name).join(', ')}
+            </div>
+          )}
           <div className="fg f2">
             <div className="fl">
               <label className="flb">Senior on Call</label>
