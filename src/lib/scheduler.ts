@@ -913,18 +913,108 @@ export function generateSchedule(
     }
   }
 
-  // Run in ascending priority so each pass can disturb only the lower-priority ones:
-  //  1. Trauma   — trauma shifts (lowest priority; may be nudged by the weekend pass).
-  //  2. Weekend  — weekend-call shifts (Fri/Sat/Sun/holiday).
-  //  3. Total    — ONLY weekday, non-trauma shifts, so balancing total hours leaves the
-  //                already-balanced weekend and trauma distributions untouched.
-  rebalance(
-    (r) => jrTH[r.id] / rotPotentialTraumaHours[r.id],
-    (jd) => jd.isTrauma,
-  );
+  // Validate a resident's ENTIRE shift set against the spacing rules (same rules as
+  // canReceive, but checked globally): no two call days within 2 days, and no more than
+  // two weekend-call days inside any 14-day window. Used to vet trauma swaps, which move
+  // shifts in both directions at once and so can't be checked with canReceive alone.
+  function spacingOk(resId: string): boolean {
+    const mine = juniorDays.filter((j) => j.res.id === resId);
+    const times = mine.map((j) => parseDate(j.dateKey).getTime()).sort((a, b) => a - b);
+    for (let i = 1; i < times.length; i++) {
+      if ((times[i] - times[i - 1]) / 86400000 < 2) return false;
+    }
+    const wkndTimes = mine.filter((j) => j.isWeekend).map((j) => parseDate(j.dateKey).getTime());
+    for (const t of wkndTimes) {
+      let n = 0;
+      for (const u of wkndTimes) if (Math.abs((t - u) / 86400000) <= 14) n++;
+      if (n > 2) return false;
+    }
+    return true;
+  }
+
+  // The movable "unit" for a weekend shift: a standalone Saturday/holiday (one JuniorDay,
+  // 24h) or a Fri+Sun pair (two JuniorDays, 12+24 = 36h) that always travel together.
+  // Returns null for shifts that can't be cleanly swapped (e.g. an orphaned sun-pair).
+  function weekendUnit(jd: JuniorDay): JuniorDay[] | null {
+    if (jd.type === 'saturday' || jd.type === 'sunday') return [jd];
+    if (jd.type === 'fri-pair') {
+      const sunKey = dk(addDays(parseDate(jd.dateKey), 2));
+      const sun = juniorDays.find((j) => j.dateKey === sunKey && j.res.id === jd.res.id);
+      return sun ? [jd, sun] : null;
+    }
+    return null; // sun-pair (handled via its Friday) or weekday-holiday — skip
+  }
+  const unitHours = (u: JuniorDay[]) => u.reduce((s, j) => s + j.shiftHrs, 0);
+  const moveUnit = (u: JuniorDay[], from: Resident, to: Resident) => u.forEach((j) => reassignJD(j, from, to));
+
+  // Trauma-weekend rebalancer via compensating swaps. Trauma hours are dominated by trauma
+  // WEEKENDS, the one cell shared by the weekend and trauma axes — so they can't be moved by
+  // a plain reassignment without skewing weekend hours. Instead we SWAP an over-trauma
+  // resident's trauma weekend for an under-trauma resident's equal-length NON-trauma weekend.
+  // Equal length ⇒ each keeps the same weekend hours (and same total hours); only trauma
+  // hours move. Weekend and total equity are therefore preserved exactly.
+  function traumaSwap(tol = 0.05) {
+    const ratioOf = (r: Resident) => jrTH[r.id] / rotPotentialTraumaHours[r.id];
+    for (let iter = 0; iter < 400; iter++) {
+      const sorted = [...jrs].sort((a, b) => ratioOf(a) - ratioOf(b));
+      if (ratioOf(sorted[sorted.length - 1]) - ratioOf(sorted[0]) <= tol) break;
+
+      let moved = false;
+      for (let oi = sorted.length - 1; oi >= 1 && !moved; oi--) {
+        const over = sorted[oi];
+        for (let ui = 0; ui < oi && !moved; ui++) {
+          const under = sorted[ui];
+          const gapBefore = ratioOf(over) - ratioOf(under);
+          if (gapBefore <= tol) continue;
+
+          const overUnits = juniorDays
+            .filter((j) => j.res.id === over.id && j.isTrauma && isWeekendCall(j.dateKey) && !j.override)
+            .map(weekendUnit).filter((u): u is JuniorDay[] => u !== null);
+          const underUnits = juniorDays
+            .filter((j) => j.res.id === under.id && !j.isTrauma && isWeekendCall(j.dateKey) && !j.override)
+            .map(weekendUnit).filter((u): u is JuniorDay[] => u !== null);
+
+          for (const ou of overUnits) {
+            for (const uu of underUnits) {
+              if (unitHours(ou) !== unitHours(uu)) continue; // equal length ⇒ weekend hours preserved
+              // Tentatively swap both units, then validate spacing + trauma improvement.
+              moveUnit(ou, over, under);
+              moveUnit(uu, under, over);
+              const ok = spacingOk(over.id) && spacingOk(under.id) &&
+                         Math.abs(ratioOf(over) - ratioOf(under)) < gapBefore - 1e-9;
+              if (ok) { moved = true; break; }
+              moveUnit(ou, under, over); // revert
+              moveUnit(uu, over, under);
+            }
+            if (moved) break;
+          }
+        }
+      }
+      if (!moved) break;
+    }
+  }
+
+  // Four passes over the four disjoint shift buckets — {weekday,weekend} × {non-trauma,trauma} —
+  // ordered so each pass only preserves the equity established before it:
+  //
+  //                weekday        weekend(Fri/Sat/Sun/hol)
+  //   non-trauma   A (total)      C (weekend)
+  //   trauma       B (trauma)     D (trauma weekend)
+  //
+  //   1. Weekend    — moves C only             → evens weekend hours.
+  //   2. TraumaSwap — swaps D ↔ equal-length C → evens trauma WEEKEND load while keeping every
+  //                   resident's weekend hours (and totals) unchanged, so step 1 is preserved.
+  //   3. Trauma     — moves B only             → fine-tunes trauma in 12h steps (weekday-only, so
+  //                   weekend stays put); only total hours shift, fixed by step 4.
+  //   4. Total      — moves A only             → evens total hours, touching neither weekend nor trauma.
   rebalance(
     (r) => jrHwknd[r.id] / rotWkndPotentialHours[r.id],
-    (jd) => isWeekendCall(jd.dateKey),
+    (jd) => isWeekendCall(jd.dateKey) && !jd.isTrauma,
+  );
+  traumaSwap();
+  rebalance(
+    (r) => jrTH[r.id] / rotPotentialTraumaHours[r.id],
+    (jd) => jd.isTrauma && !isWeekendCall(jd.dateKey),
   );
   rebalance(
     (r) => jrH[r.id] / rotPotentialHours[r.id],
