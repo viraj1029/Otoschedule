@@ -58,6 +58,14 @@ export default function ScheduleView({
   const [published, setPublished] = useState<boolean>(schedule?.published ?? block?.published ?? false);
   const [overrideKeys, setOverrideKeys] = useState<string[]>([]);
   const [selectMode, setSelectMode] = useState(false);
+
+  // Keep a fresh local copy of requests — the prop may be stale if loaded on login
+  const [freshRequests, setFreshRequests] = useState<Request[]>(allRequests);
+  useEffect(() => {
+    api<Request[]>('/requests').then(setFreshRequests).catch(() => setFreshRequests(allRequests));
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+  // Also sync if parent updates (e.g. resident changes requests while on this tab)
+  useEffect(() => { setFreshRequests(allRequests); }, [allRequests]);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [editingRounding, setEditingRounding] = useState<string | null>(null);
 
@@ -2480,7 +2488,7 @@ export default function ScheduleView({
                   dateKeys={overrideKeys}
                   schedule={currentTabSchedule as ScheduleData}
                   residents={residents}
-                  allRequests={allRequests}
+                  allRequests={freshRequests}
                   onSave={(updated) => {
                     persistSchedule(updated);
                     setOverrideKeys([]);
@@ -2516,7 +2524,7 @@ export default function ScheduleView({
                 <label className="flb">Assign VA call</label>
                 <select value={poolOverrideResId} onChange={(e) => setPoolOverrideResId(e.target.value)}>
                   <option value="">— select resident —</option>
-                  {residents.filter((r) => r.status !== 'away' && !allRequests.some((req) => req.resident_id === r.id && (req.type === 'vacation_official' || req.type === 'vacation') && vaSched!.weeks[vaOverride.weekIndex] && req.date >= vaSched!.weeks[vaOverride.weekIndex].wS && req.date <= vaSched!.weeks[vaOverride.weekIndex].wE)).map((r) => (
+                  {residents.filter((r) => r.status !== 'away' && !freshRequests.some((req) => req.resident_id === r.id && (req.type === 'vacation_official' || req.type === 'vacation') && vaSched!.weeks[vaOverride.weekIndex] && req.date >= vaSched!.weeks[vaOverride.weekIndex].wS && req.date <= vaSched!.weeks[vaOverride.weekIndex].wE)).map((r) => (
                     <option key={r.id} value={r.id}>{r.name} (PGY-{r.pgy})</option>
                   ))}
                 </select>
@@ -2566,7 +2574,7 @@ export default function ScheduleView({
                 <label className="flb">Assign CMC call</label>
                 <select value={poolOverrideResId} onChange={(e) => setPoolOverrideResId(e.target.value)}>
                   <option value="">— select resident —</option>
-                  {residents.filter((r) => r.status === 'active' && r.pgy >= 2 && r.pgy <= 4 && !(selectedKeys.length > 1 ? selectedKeys : [cmcOverride.dateKey]).some((dk2) => allRequests.some((req) => req.resident_id === r.id && (req.type === 'vacation_official' || req.type === 'vacation') && req.date === dk2))).map((r) => (
+                  {residents.filter((r) => r.status === 'active' && r.pgy >= 2 && r.pgy <= 4 && !(selectedKeys.length > 1 ? selectedKeys : [cmcOverride.dateKey]).some((dk2) => freshRequests.some((req) => req.resident_id === r.id && (req.type === 'vacation_official' || req.type === 'vacation') && req.date === dk2))).map((r) => (
                     <option key={r.id} value={r.id}>{r.name} (PGY-{r.pgy})</option>
                   ))}
                 </select>
