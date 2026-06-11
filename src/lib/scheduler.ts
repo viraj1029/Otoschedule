@@ -1047,6 +1047,8 @@ export function generateSchedule(
     jrAvailDays: rotAvailDays,
     jrWkndAvailDays: rotWkndAvailDays,
     jrWkndPotentialHours: rotWkndPotentialHours,
+    jrPotentialHours: rotPotentialHours,
+    jrPotentialTraumaHours: rotPotentialTraumaHours,
   };
 }
 

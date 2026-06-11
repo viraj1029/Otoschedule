@@ -1373,24 +1373,36 @@ export default function ScheduleView({
     const jrH24: Record<string, number> = {};
     jrs.forEach((r) => { jrH24[r.id] = cuhSched!.juniorDays.filter((d) => d.res.id === r.id && d.shiftHrs === 24).length; });
 
-    const jrPotentialHours: Record<string, number> = {};
-    jrs.forEach((r) => {
-      const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
-      const rE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
-      const effS = rS < bStart ? bStart : rS;
-      const effE = rE > bEnd   ? bEnd   : rE;
-      const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
-      let pot = 0; let d = new Date(effS);
-      while (d <= effE) {
+    // Potential call hours over the block, on the SAME basis the scheduler uses:
+    // CUH/PMH/Research rotation segments (per-day), minus official vacation. Counts all days
+    // when traumaOnly=false, or only trauma-week days when true. Falls back to legacy
+    // rotation_start/end ONLY when the resident has no rotation segments.
+    // NOTE: the old version computed this from legacy rotation_start/end, which for a later
+    // block (e.g. Sept–Oct) could be an inverted window → 0 days → potential floored to 1h →
+    // a nonsense 18000% ratio. Prefer the scheduler's returned potentials when present.
+    function jrPotential(r: typeof jrs[number], traumaOnly: boolean): number {
+      const off = new Set(allRequests.filter((q) => q.resident_id === r.id && q.type === 'vacation_official').map((q) => q.date));
+      const segs = (r.rotations ?? []).filter((s) => s.hospital === 'CUH' || s.hospital === 'PMH' || (s.hospital === 'Research' && r.pgy >= 4));
+      const hasSegs = (r.rotations?.length ?? 0) > 0;
+      const legacyS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
+      const legacyE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
+      let pot = 0; let d = new Date(bStart);
+      while (d <= bEnd) {
         const key = dk(d);
-        if (!offDays.has(key)) {
+        const onRot = segs.length ? segs.some((s) => key >= s.start_date && key <= s.end_date)
+          : hasSegs ? false                       // has segments but none are CUH/PMH/Research
+          : (d >= legacyS && d <= legacyE);        // legacy fallback
+        if (onRot && !off.has(key) && (!traumaOnly || TRAUMA_WEEKS.has(key))) {
           const dow = d.getDay();
           pot += (dow === 0 || dow === 6 || HOLIDAYS.has(key)) ? 24 : 12;
         }
         d = addDays(d, 1);
       }
-      jrPotentialHours[r.id] = Math.max(1, pot);
-    });
+      return Math.max(1, pot);
+    }
+
+    const jrPotentialHours: Record<string, number> = {};
+    jrs.forEach((r) => { jrPotentialHours[r.id] = cuhSched!.jrPotentialHours?.[r.id] ?? jrPotential(r, false); });
     // Utilization ratio: assigned hours / potential call hours (as percentage)
     const jrUtilRatio: Record<string, number> = {};
     jrs.forEach((r) => { jrUtilRatio[r.id] = Math.round((jrH[r.id] / jrPotentialHours[r.id]) * 1000) / 10; });
@@ -1413,23 +1425,7 @@ export default function ScheduleView({
       jrTraumaHrsLive[r.id] = cuhSched!.juniorDays.filter((d) => d.res.id === r.id && TRAUMA_WEEKS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
     });
     const jrPotentialTraumaHours: Record<string, number> = {};
-    jrs.forEach((r) => {
-      const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
-      const rE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
-      const effS = rS < bStart ? bStart : rS;
-      const effE = rE > bEnd   ? bEnd   : rE;
-      const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
-      let pot = 0; let d = new Date(effS);
-      while (d <= effE) {
-        const key = dk(d);
-        if (!offDays.has(key) && TRAUMA_WEEKS.has(key)) {
-          const dow = d.getDay();
-          pot += (dow === 0 || dow === 6 || HOLIDAYS.has(key)) ? 24 : 12;
-        }
-        d = addDays(d, 1);
-      }
-      jrPotentialTraumaHours[r.id] = Math.max(1, pot);
-    });
+    jrs.forEach((r) => { jrPotentialTraumaHours[r.id] = cuhSched!.jrPotentialTraumaHours?.[r.id] ?? jrPotential(r, true); });
     const jrTraumaUtilRatio: Record<string, number> = {};
     jrs.forEach((r) => {
       jrTraumaUtilRatio[r.id] = Math.round((jrTraumaHrsLive[r.id] / jrPotentialTraumaHours[r.id]) * 1000) / 10;
