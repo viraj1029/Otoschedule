@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import type { Block, Resident, Request, Role, ScheduleData, AnyScheduleData, Hospital } from '@/types';
-import { HOLIDAYS, parseDate, fmtShort } from '@/lib/scheduler';
+import { HOLIDAYS, parseDate, fmtShort, isOnRotation } from '@/lib/scheduler';
 import { api } from '../App';
 import ScheduleView from './ScheduleView';
 
@@ -297,9 +297,7 @@ export default function Requests({
   function resIdForDate(dateStr: string): string {
     if (personResIds.length <= 1) return personResIds[0] ?? activeResId;
     const matching = residents.find((r) =>
-      personResIds.includes(r.id) &&
-      dateStr >= (r.rotation_start ?? block?.start_date ?? '0000-01-01') &&
-      dateStr <= (r.rotation_end ?? block?.end_date ?? '9999-12-31'),
+      personResIds.includes(r.id) && isOnRotation(r, dateStr),
     );
     return matching?.id ?? personResIds[0] ?? activeResId;
   }

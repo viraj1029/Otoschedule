@@ -95,6 +95,25 @@ export function isWeekendCall(key: string): boolean {
   return dow === 5 || dow === 6 || dow === 0 || HOLIDAYS.has(key);
 }
 
+// Single source of truth for "is this resident on rotation on dateKey?", based solely on
+// their rotation segments (the modern rotations[] model). This replaces the old, bug-prone
+// reads of the legacy rotation_start/rotation_end fields, which could hold stale dates from
+// a different block and produce wrong windows.
+//   • hospitals — restrict to these hospitals (e.g. ['CUH','PMH']); omit to count any segment.
+//   • If the resident has matching segments, they're on rotation iff a segment covers the day.
+//   • If they have segments but none match the hospital filter, they're off.
+//   • If they have no segments at all, they're treated as on (callers clip to the block range).
+export function isOnRotation(
+  r: { rotations?: { hospital: string; start_date: string; end_date: string }[] },
+  dateKey: string,
+  hospitals?: string[],
+): boolean {
+  const all = r.rotations ?? [];
+  const segs = hospitals ? all.filter((s) => hospitals.includes(s.hospital)) : all;
+  if (segs.length) return segs.some((s) => dateKey >= s.start_date && dateKey <= s.end_date);
+  return all.length === 0;
+}
+
 // ─── Trauma weeks ─────────────────────────────────────────────────────────────
 
 function buildTraumaSet(): Set<string> {
@@ -218,13 +237,11 @@ export function generateSchedule(
         // Has rotation segments but none are CUH/PMH/Research — mark all days as off.
         onRotation = false;
       } else {
-        // Legacy fallback: use rotation_start/rotation_end fields
-        const rotStart = r.rotation_start ? parseDate(r.rotation_start) : bStart;
-        const rotEnd   = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
-        onRotation = dd >= rotStart && dd <= rotEnd;
+        // No rotation segments at all → assume on rotation for the whole block.
+        onRotation = true;
       }
       // Safety net: always block dates where the resident is on CMC/VA rotation,
-      // even if the legacy fallback or a mis-entered CUH/PMH segment says otherwise.
+      // even if a mis-entered CUH/PMH segment says otherwise.
       if (onRotation && otherHospSegs.some((seg) => dstr >= seg.start_date && dstr <= seg.end_date)) {
         onRotation = false;
       }
@@ -572,7 +589,7 @@ export function generateSchedule(
   // Pick junior: enforce rest gap (2 days preferred, 1 day minimum), balance weekend/weekday separately
   // Precompute each resident's effective rotation window for fast eligibility checks.
   // Use the span of all CUH/PMH segments so residents with multi-segment rotations (e.g. CUH→PMH)
-  // remain eligible for the full period. Fall back to legacy rotation_start/end only when no segments.
+  // remain eligible for the full period. With no CUH/PMH segments, eligible for the whole block.
   const rotEffStart: Record<string, Date> = {};
   const rotEffEnd: Record<string, Date> = {};
   jrs.forEach((r) => {
@@ -585,10 +602,9 @@ export function generateSchedule(
       rotEffStart[r.id] = segStart < bStart ? bStart : segStart;
       rotEffEnd[r.id]   = segEnd   > bEnd   ? bEnd   : segEnd;
     } else {
-      const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
-      const rE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
-      rotEffStart[r.id] = rS < bStart ? bStart : rS;
-      rotEffEnd[r.id]   = rE > bEnd   ? bEnd   : rE;
+      // No CUH/PMH segments → eligible for the whole block.
+      rotEffStart[r.id] = bStart;
+      rotEffEnd[r.id]   = bEnd;
     }
   });
 

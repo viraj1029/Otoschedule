@@ -17,7 +17,6 @@ const COLORS = [
 type ResidentRow = {
   id: string; block_id: string; name: string; pgy: number; pin: string; color: string;
   person_id: string | null; hospital: string; status: string; sort_order: number;
-  rotation_start: string | null; rotation_end: string | null;
 };
 type RotationRow = { id: string; resident_id: string; hospital: string; start_date: string; end_date: string };
 
@@ -34,9 +33,7 @@ async function fetchResidents() {
       r.person_id,
       r.hospital,
       r.status,
-      r.sort_order,
-      r.rotation_start,
-      r.rotation_end
+      r.sort_order
     FROM residents r
     LEFT JOIN persons p ON r.person_id = p.id
     WHERE r.block_id = ${DEFAULT_BLOCK_ID}
@@ -89,7 +86,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Chief access required' }, { status: 401 });
   }
 
-  const { name, pgy, hospital = 'CUH', status, rotation_start, rotation_end, personId: existingPersonId, rotations: initialRotations } = await req.json();
+  const { name, pgy, hospital = 'CUH', status, personId: existingPersonId, rotations: initialRotations } = await req.json();
 
   // Ensure the block row exists
   const { rows: blockRows } = await sql`SELECT id FROM blocks WHERE id = ${DEFAULT_BLOCK_ID}`;
@@ -141,14 +138,12 @@ export async function POST(req: Request) {
 
   const id = 'res_' + uuidv4().slice(0, 8);
   const { rows: allRes } = await sql`SELECT id FROM residents WHERE block_id = ${DEFAULT_BLOCK_ID}`;
-  const rStart = rotation_start || null;
-  const rEnd   = rotation_end   || null;
 
   await sql`
     INSERT INTO residents
-      (id, person_id, block_id, name, pgy, hospital, status, pin, color, sort_order, rotation_start, rotation_end)
+      (id, person_id, block_id, name, pgy, hospital, status, pin, color, sort_order)
     VALUES
-      (${id}, ${personId}, ${DEFAULT_BLOCK_ID}, ${resName}, ${resPgy}, ${hospital}, ${status}, ${pin}, ${color}, ${allRes.length}, ${rStart}, ${rEnd})
+      (${id}, ${personId}, ${DEFAULT_BLOCK_ID}, ${resName}, ${resPgy}, ${hospital}, ${status}, ${pin}, ${color}, ${allRes.length})
   `;
 
   // Insert initial rotation segments if provided
