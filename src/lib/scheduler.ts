@@ -1019,6 +1019,8 @@ export function generateSchedule(
   rebalance(
     (r) => jrH[r.id] / rotPotentialHours[r.id],
     (jd) => !isWeekendCall(jd.dateKey) && !jd.isTrauma,
+    0.035, // tighter target for total hours (user wants within ~4%); safe — moves only
+           // weekday non-trauma shifts, so it can't disturb weekend or trauma balance.
   );
 
   } // end needJr
