@@ -127,7 +127,7 @@ export default function OverrideModal({ open, dateKeys, schedule, residents, all
 
   const offOnSelectedDates = new Set(
     allRequests
-      .filter((req) => req.type === 'vacation_official' && dateKeys.includes(req.date))
+      .filter((req) => (req.type === 'vacation_official' || req.type === 'vacation') && dateKeys.includes(req.date))
       .map((req) => req.resident_id),
   );
   const srs = residents.filter((r) => r.pgy >= 4 && r.status !== 'away' && !offOnSelectedDates.has(r.id));

@@ -2444,7 +2444,7 @@ export default function ScheduleView({
                 <label className="flb">Assign VA call</label>
                 <select value={poolOverrideResId} onChange={(e) => setPoolOverrideResId(e.target.value)}>
                   <option value="">— select resident —</option>
-                  {residents.filter((r) => r.status !== 'away' && !allRequests.some((req) => req.resident_id === r.id && req.type === 'vacation_official' && vaSched!.weeks[vaOverride.weekIndex] && req.date >= vaSched!.weeks[vaOverride.weekIndex].wS && req.date <= vaSched!.weeks[vaOverride.weekIndex].wE)).map((r) => (
+                  {residents.filter((r) => r.status !== 'away' && !allRequests.some((req) => req.resident_id === r.id && (req.type === 'vacation_official' || req.type === 'vacation') && vaSched!.weeks[vaOverride.weekIndex] && req.date >= vaSched!.weeks[vaOverride.weekIndex].wS && req.date <= vaSched!.weeks[vaOverride.weekIndex].wE)).map((r) => (
                     <option key={r.id} value={r.id}>{r.name} (PGY-{r.pgy})</option>
                   ))}
                 </select>
@@ -2494,7 +2494,7 @@ export default function ScheduleView({
                 <label className="flb">Assign CMC call</label>
                 <select value={poolOverrideResId} onChange={(e) => setPoolOverrideResId(e.target.value)}>
                   <option value="">— select resident —</option>
-                  {residents.filter((r) => r.status === 'active' && r.pgy >= 2 && r.pgy <= 4 && !(selectedKeys.length > 1 ? selectedKeys : [cmcOverride.dateKey]).some((dk2) => allRequests.some((req) => req.resident_id === r.id && req.type === 'vacation_official' && req.date === dk2))).map((r) => (
+                  {residents.filter((r) => r.status === 'active' && r.pgy >= 2 && r.pgy <= 4 && !(selectedKeys.length > 1 ? selectedKeys : [cmcOverride.dateKey]).some((dk2) => allRequests.some((req) => req.resident_id === r.id && (req.type === 'vacation_official' || req.type === 'vacation') && req.date === dk2))).map((r) => (
                     <option key={r.id} value={r.id}>{r.name} (PGY-{r.pgy})</option>
                   ))}
                 </select>
