@@ -239,25 +239,15 @@ export default function Requests({
     }
   }
 
-  // 3-state weekday cycle for resident view: empty → prefer-off → official vacation → empty
+  // 2-state weekday toggle: empty → prefer-off → empty
   async function cycleWeekday(key: string, isOff: boolean, isOfficial: boolean) {
     const resId = resIdForDate(key);
     if (isOfficial) {
       const ownerResId = reqOwner.get(`${key}:vacation_official`) ?? resId;
       await toggleDay(key, 'vacation_official', ownerResId);
     } else if (isOff) {
-      const usedThisQuarter = officialVacUsedForDate(key);
-      if (usedThisQuarter < 5) {
-        const ownerResId = reqOwner.get(`${key}:vacation`) ?? resId;
-        await toggleDay(key, 'vacation', ownerResId);
-        await toggleDay(key, 'vacation_official', resId);
-      } else {
-        // Limit hit: clear the vacation instead of getting stuck — inform the user why
-        const ownerResId = reqOwner.get(`${key}:vacation`) ?? resId;
-        await toggleDay(key, 'vacation', ownerResId);
-        const q = quarterOf(key);
-        showToast(`Cleared — official vacation limit already reached for ${q?.label ?? 'this quarter'}`, true);
-      }
+      const ownerResId = reqOwner.get(`${key}:vacation`) ?? resId;
+      await toggleDay(key, 'vacation', ownerResId);
     } else {
       await toggleDay(key, 'vacation', resId);
     }
