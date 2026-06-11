@@ -23,9 +23,7 @@ export async function GET() {
         r.person_id,
         r.hospital,
         r.status,
-        r.sort_order,
-        r.rotation_start,
-        r.rotation_end
+        r.sort_order
       FROM residents r
       LEFT JOIN persons p ON r.person_id = p.id
       WHERE r.id = ${session.residentId}

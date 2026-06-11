@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, type ReactElement } from 'react';
 import type { Block, Resident, Request, ScheduleData, CMCScheduleData, VAScheduleData, AnyScheduleData, Schedule, Tab, Role } from '@/types';
-import { HOLIDAYS, HOLIDAY_NAMES, TRAUMA_WEEKS, parseDate, fmtShort, dk, addDays, isWeekendCall } from '@/lib/scheduler';
+import { HOLIDAYS, HOLIDAY_NAMES, TRAUMA_WEEKS, parseDate, fmtShort, dk, addDays, isWeekendCall, isOnRotation } from '@/lib/scheduler';
 import { api } from '../App';
 import OverrideModal from '../modals/OverrideModal';
 
@@ -1081,15 +1081,11 @@ export default function ScheduleView({
             });
             const potMap: Record<string, number> = {};
             jrs.forEach((r) => {
-              const rS = r.rotation_start ? parseDate(r.rotation_start) : cuhBStart;
-              const rE = r.rotation_end   ? parseDate(r.rotation_end)   : cuhBEnd;
-              const effS = rS < cuhBStart ? cuhBStart : rS;
-              const effE = rE > cuhBEnd   ? cuhBEnd   : rE;
               const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
-              let pot = 0; let d = new Date(effS);
-              while (d <= effE) {
+              let pot = 0; let d = new Date(cuhBStart);
+              while (d <= cuhBEnd) {
                 const key = dk(d);
-                if (!offDays.has(key)) {
+                if (isOnRotation(r, key, ['CUH', 'PMH']) && !offDays.has(key)) {
                   const dow = d.getDay();
                   pot += (dow === 0 || dow === 6 || HOLIDAYS.has(key)) ? 24 : 12;
                 }
@@ -1112,13 +1108,9 @@ export default function ScheduleView({
             const srs = residents.filter((r) => r.pgy >= 4 && (r.status === 'active' || r.status === 'research'));
             const potDays: Record<string, number> = {};
             srs.forEach((r) => {
-              const rS = r.rotation_start ? parseDate(r.rotation_start) : cuhBStart;
-              const rE = r.rotation_end   ? parseDate(r.rotation_end)   : cuhBEnd;
-              const effS = rS < cuhBStart ? cuhBStart : rS;
-              const effE = rE > cuhBEnd   ? cuhBEnd   : rE;
               const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
-              let cnt = 0; let d = new Date(effS);
-              while (d <= effE) { if (!offDays.has(dk(d))) cnt++; d = addDays(d, 1); }
+              let cnt = 0; let d = new Date(cuhBStart);
+              while (d <= cuhBEnd) { const key = dk(d); if (isOnRotation(r, key, ['CUH', 'PMH', 'Research']) && !offDays.has(key)) cnt++; d = addDays(d, 1); }
               potDays[r.id] = Math.max(1, cnt);
             });
             const assignedDays: Record<string, number> = {};
@@ -1375,24 +1367,15 @@ export default function ScheduleView({
 
     // Potential call hours over the block, on the SAME basis the scheduler uses:
     // CUH/PMH/Research rotation segments (per-day), minus official vacation. Counts all days
-    // when traumaOnly=false, or only trauma-week days when true. Falls back to legacy
-    // rotation_start/end ONLY when the resident has no rotation segments.
-    // NOTE: the old version computed this from legacy rotation_start/end, which for a later
-    // block (e.g. Sept–Oct) could be an inverted window → 0 days → potential floored to 1h →
-    // a nonsense 18000% ratio. Prefer the scheduler's returned potentials when present.
+    // when traumaOnly=false, or only trauma-week days when true. Used as a fallback for older
+    // saved schedules that predate the scheduler returning jrPotentialHours/jrPotentialTraumaHours.
     function jrPotential(r: typeof jrs[number], traumaOnly: boolean): number {
       const off = new Set(allRequests.filter((q) => q.resident_id === r.id && q.type === 'vacation_official').map((q) => q.date));
-      const segs = (r.rotations ?? []).filter((s) => s.hospital === 'CUH' || s.hospital === 'PMH' || (s.hospital === 'Research' && r.pgy >= 4));
-      const hasSegs = (r.rotations?.length ?? 0) > 0;
-      const legacyS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
-      const legacyE = r.rotation_end   ? parseDate(r.rotation_end)   : bEnd;
+      const hospitals = r.pgy >= 4 ? ['CUH', 'PMH', 'Research'] : ['CUH', 'PMH'];
       let pot = 0; let d = new Date(bStart);
       while (d <= bEnd) {
         const key = dk(d);
-        const onRot = segs.length ? segs.some((s) => key >= s.start_date && key <= s.end_date)
-          : hasSegs ? false                       // has segments but none are CUH/PMH/Research
-          : (d >= legacyS && d <= legacyE);        // legacy fallback
-        if (onRot && !off.has(key) && (!traumaOnly || TRAUMA_WEEKS.has(key))) {
+        if (isOnRotation(r, key, hospitals) && !off.has(key) && (!traumaOnly || TRAUMA_WEEKS.has(key))) {
           const dow = d.getDay();
           pot += (dow === 0 || dow === 6 || HOLIDAYS.has(key)) ? 24 : 12;
         }

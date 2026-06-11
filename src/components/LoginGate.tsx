@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { Resident, Role } from '@/types';
+import { isOnRotation } from '@/lib/scheduler';
 import { api } from './App';
 
 interface Props {
@@ -53,8 +54,8 @@ export default function LoginGate({ residents, onLogin, showToast }: Props) {
     if (!prev) {
       uniquePersonMap.set(key, r);
     } else {
-      const covers = (r.rotation_start ?? '0000') <= todayStr && (r.rotation_end ?? '9999') >= todayStr;
-      const prevCovers = (prev.rotation_start ?? '0000') <= todayStr && (prev.rotation_end ?? '9999') >= todayStr;
+      const covers = isOnRotation(r, todayStr);
+      const prevCovers = isOnRotation(prev, todayStr);
       if (covers && !prevCovers) uniquePersonMap.set(key, r);
     }
   }

@@ -42,8 +42,6 @@ export interface Resident {
   pin: string;
   color: string;
   sort_order: number;
-  rotation_start?: string | null;  // legacy — superseded by rotations[]
-  rotation_end?: string | null;    // legacy — superseded by rotations[]
   rotations?: Rotation[];          // rotation segments from the rotations table
 }
 
