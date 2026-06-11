@@ -239,7 +239,7 @@ export default function Requests({
     }
   }
 
-  // 3-state weekday cycle for resident view: empty → prefer-off → official vacation → empty
+  // 3-state weekday cycle: empty → prefer-off → official vacation → empty
   async function cycleWeekday(key: string, isOff: boolean, isOfficial: boolean) {
     const resId = resIdForDate(key);
     if (isOfficial) {
@@ -249,10 +249,19 @@ export default function Requests({
       const usedThisQuarter = officialVacUsedForDate(key);
       if (usedThisQuarter < 5) {
         const ownerResId = reqOwner.get(`${key}:vacation`) ?? resId;
-        await toggleDay(key, 'vacation', ownerResId);
-        await toggleDay(key, 'vacation_official', resId);
+        try {
+          // Make both API calls first
+          await api('/requests/toggle', 'POST', { date: key, type: 'vacation', residentId: ownerResId });
+          await api('/requests/toggle', 'POST', { date: key, type: 'vacation_official', residentId: resId });
+          // Then update state once atomically: remove vacation, add vacation_official
+          onRequestsChanged([
+            ...allRequests.filter((r) => !(r.resident_id === ownerResId && r.date === key && r.type === 'vacation')),
+            { id: 'local_' + Date.now(), resident_id: resId, block_id: 'block_main', date: key, type: 'vacation_official' },
+          ]);
+        } catch (e) {
+          showToast((e as Error).message, true);
+        }
       } else {
-        // Limit hit: clear the vacation instead of getting stuck — inform the user why
         const ownerResId = reqOwner.get(`${key}:vacation`) ?? resId;
         await toggleDay(key, 'vacation', ownerResId);
         const q = quarterOf(key);

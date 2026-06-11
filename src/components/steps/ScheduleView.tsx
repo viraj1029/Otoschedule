@@ -630,8 +630,9 @@ export default function ScheduleView({
                   const wkndHrs = wkndDays.reduce((a, d) => a + d.shiftHrs, 0);
                   const wkdayHrs = wkdayDays.reduce((a, d) => a + d.shiftHrs, 0);
                   const roundingWknds = cuhSched!.juniorDays.filter((d) => d.cuhRounder?.id === res.id).length;
-                  const traumaHrs = cuhSched!.jrTH?.[res.id] ?? 0;
-                  const traumaDays = cuhSched!.jrTD?.[res.id] ?? 0;
+                  const traumaDays2 = cuhSched!.juniorDays.filter((d) => d.res.id === res.id && TRAUMA_WEEKS.has(d.dateKey));
+                  const traumaHrs = traumaDays2.reduce((a, d) => a + d.shiftHrs, 0);
+                  const traumaDays = traumaDays2.length;
                   return (
                     <tr key={res.id}>
                       <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{avatar(res)}<span style={{ fontWeight: 500 }}>{res.name}</span></div></td>
@@ -653,8 +654,8 @@ export default function ScheduleView({
                   const totWkdD = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.res.id === r.id && !isWeekendCall(d.dateKey)).length, 0);
                   const totWkdH = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.res.id === r.id && !isWeekendCall(d.dateKey)).reduce((s, d) => s + d.shiftHrs, 0), 0);
                   const totRounding = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.cuhRounder?.id === r.id).length, 0);
-                  const totTraumaH = jrs.reduce((a, r) => a + (cuhSched!.jrTH?.[r.id] ?? 0), 0);
-                  const totTraumaD = jrs.reduce((a, r) => a + (cuhSched!.jrTD?.[r.id] ?? 0), 0);
+                  const totTraumaH = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.res.id === r.id && TRAUMA_WEEKS.has(d.dateKey)).reduce((s, d) => s + d.shiftHrs, 0), 0);
+                  const totTraumaD = jrs.reduce((a, r) => a + cuhSched!.juniorDays.filter((d) => d.res.id === r.id && TRAUMA_WEEKS.has(d.dateKey)).length, 0);
                   return (
                     <tr style={{ background: 'rgba(0,0,0,.04)' }}>
                       <td colSpan={2} style={{ fontWeight: 600, fontSize: 12, padding: '10px 12px' }}>TOTAL</td>
@@ -1314,17 +1315,23 @@ export default function ScheduleView({
     const jrUtilRatio: Record<string, number> = {};
     jrs.forEach((r) => { jrUtilRatio[r.id] = Math.round((jrH[r.id] / jrPotentialHours[r.id]) * 1000) / 10; });
 
-    // Weekend utilization ratio: weekend-call hours / available weekend-call hours.
-    // Uses jrWkndPotentialHours (Fri=12, Sat/Sun/holiday=24, all requests excluded) so the
-    // numerator and denominator speak the same units and the ratio isn't inflated by requested-off days.
+    // Weekend hours: recalculated live from juniorDays so overrides are reflected immediately
+    const jrWkndHrsLive: Record<string, number> = {};
+    jrs.forEach((r) => {
+      jrWkndHrsLive[r.id] = cuhSched!.juniorDays.filter((d) => d.res.id === r.id && isWeekendCall(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
+    });
     const jrWkndUtilRatio: Record<string, number> = {};
     jrs.forEach((r) => {
-      const wkndH = cuhSched!.jrHwknd?.[r.id] ?? 0;
+      const wkndH = jrWkndHrsLive[r.id] ?? 0;
       const availWkndHrs = cuhSched!.jrWkndPotentialHours?.[r.id] ?? 1;
       jrWkndUtilRatio[r.id] = Math.round((wkndH / availWkndHrs) * 1000) / 10;
     });
 
-    // Trauma utilization ratio: trauma hours / potential trauma hours
+    // Trauma hours: recalculated live from juniorDays so overrides are reflected immediately
+    const jrTraumaHrsLive: Record<string, number> = {};
+    jrs.forEach((r) => {
+      jrTraumaHrsLive[r.id] = cuhSched!.juniorDays.filter((d) => d.res.id === r.id && TRAUMA_WEEKS.has(d.dateKey)).reduce((a, d) => a + d.shiftHrs, 0);
+    });
     const jrPotentialTraumaHours: Record<string, number> = {};
     jrs.forEach((r) => {
       const rS = r.rotation_start ? parseDate(r.rotation_start) : bStart;
@@ -1345,8 +1352,7 @@ export default function ScheduleView({
     });
     const jrTraumaUtilRatio: Record<string, number> = {};
     jrs.forEach((r) => {
-      const traumaH = cuhSched!.jrTH?.[r.id] ?? 0;
-      jrTraumaUtilRatio[r.id] = Math.round((traumaH / jrPotentialTraumaHours[r.id]) * 1000) / 10;
+      jrTraumaUtilRatio[r.id] = Math.round((jrTraumaHrsLive[r.id] / jrPotentialTraumaHours[r.id]) * 1000) / 10;
     });
 
     return (
@@ -1365,7 +1371,7 @@ export default function ScheduleView({
         </div>
         <div className="card">
           <div className="ch"><div className="ct">Junior Trauma Hours</div></div>
-          <div className="cb">{eqBars(jrs.map((r) => ({ name: r.name, val: cuhSched!.jrTH?.[r.id] ?? 0, color: r.color })), 'h')}</div>
+          <div className="cb">{eqBars(jrs.map((r) => ({ name: r.name, val: jrTraumaHrsLive[r.id] ?? 0, color: r.color })), 'h')}</div>
         </div>
         <div className="card">
           <div className="ch"><div className="ct">24h Shifts</div></div>
@@ -1378,7 +1384,7 @@ export default function ScheduleView({
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Weekend hours assigned ÷ potential weekend hours (Fri/Sat/Sun/holidays in rotation window minus official vacation) — equal bars = perfectly equitable</div>
             </div>
           </div>
-          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${cuhSched!.jrHwknd?.[r.id] ?? 0}h / ${cuhSched!.jrWkndPotentialHours?.[r.id] ?? 1}h avail`, val: jrWkndUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
+          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${jrWkndHrsLive[r.id] ?? 0}h / ${cuhSched!.jrWkndPotentialHours?.[r.id] ?? 1}h avail`, val: jrWkndUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
         </div>
         <div className="card">
           <div className="ch">
@@ -1396,7 +1402,7 @@ export default function ScheduleView({
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Trauma hours assigned ÷ potential trauma hours (trauma-week days in rotation window minus official vacation) — equal bars = perfectly equitable</div>
             </div>
           </div>
-          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${cuhSched!.jrTH?.[r.id] ?? 0}h / ${jrPotentialTraumaHours[r.id]}h`, val: jrTraumaUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
+          <div className="cb">{eqBars(jrs.map((r) => ({ name: `${r.name}  ${jrTraumaHrsLive[r.id] ?? 0}h / ${jrPotentialTraumaHours[r.id]}h`, val: jrTraumaUtilRatio[r.id] ?? 0, color: r.color })), '%')}</div>
         </div>
       </div>
     );
@@ -2402,8 +2408,9 @@ export default function ScheduleView({
                   dateKeys={overrideKeys}
                   schedule={currentTabSchedule as ScheduleData}
                   residents={residents}
+                  allRequests={allRequests}
                   onSave={(updated) => {
-                    onScheduleChanged(updated);
+                    persistSchedule(updated);
                     setOverrideKeys([]);
                     setSelectedKeys([]);
                     setSelectMode(false);
@@ -2437,7 +2444,7 @@ export default function ScheduleView({
                 <label className="flb">Assign VA call</label>
                 <select value={poolOverrideResId} onChange={(e) => setPoolOverrideResId(e.target.value)}>
                   <option value="">— select resident —</option>
-                  {residents.filter((r) => r.status !== 'away').map((r) => (
+                  {residents.filter((r) => r.status !== 'away' && !allRequests.some((req) => req.resident_id === r.id && (req.type === 'vacation_official' || req.type === 'vacation') && vaSched!.weeks[vaOverride.weekIndex] && req.date >= vaSched!.weeks[vaOverride.weekIndex].wS && req.date <= vaSched!.weeks[vaOverride.weekIndex].wE)).map((r) => (
                     <option key={r.id} value={r.id}>{r.name} (PGY-{r.pgy})</option>
                   ))}
                 </select>
@@ -2487,7 +2494,7 @@ export default function ScheduleView({
                 <label className="flb">Assign CMC call</label>
                 <select value={poolOverrideResId} onChange={(e) => setPoolOverrideResId(e.target.value)}>
                   <option value="">— select resident —</option>
-                  {residents.filter((r) => r.status === 'active' && r.pgy >= 2 && r.pgy <= 4).map((r) => (
+                  {residents.filter((r) => r.status === 'active' && r.pgy >= 2 && r.pgy <= 4 && !(selectedKeys.length > 1 ? selectedKeys : [cmcOverride.dateKey]).some((dk2) => allRequests.some((req) => req.resident_id === r.id && (req.type === 'vacation_official' || req.type === 'vacation') && req.date === dk2))).map((r) => (
                     <option key={r.id} value={r.id}>{r.name} (PGY-{r.pgy})</option>
                   ))}
                 </select>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { Resident, ScheduleData } from '@/types';
+import type { Resident, ScheduleData, Request } from '@/types';
 import { HOLIDAYS, parseDate, dk, addDays } from '@/lib/scheduler';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -12,6 +12,7 @@ interface Props {
   dateKeys: string[];
   schedule: ScheduleData;
   residents: Resident[];
+  allRequests: Request[];
   onSave: (updated: ScheduleData) => void;
   onClose: () => void;
   showToast: (msg: string, err?: boolean) => void;
@@ -87,7 +88,7 @@ function applyMultiDayOverride(updated: ScheduleData, keys: string[], newRes: Re
   }
 }
 
-export default function OverrideModal({ open, dateKeys, schedule, residents, onSave, onClose, showToast }: Props) {
+export default function OverrideModal({ open, dateKeys, schedule, residents, allRequests, onSave, onClose, showToast }: Props) {
   const [srId, setSrId] = useState('');
   const [jrId, setJrId] = useState('');
   const [note, setNote] = useState('');
@@ -124,8 +125,13 @@ export default function OverrideModal({ open, dateKeys, schedule, residents, onS
 
   if (!open || !dateKeys.length) return null;
 
-  const srs = residents.filter((r) => r.pgy >= 4 && r.status !== 'away');
-  const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
+  const offOnSelectedDates = new Set(
+    allRequests
+      .filter((req) => (req.type === 'vacation_official' || req.type === 'vacation') && dateKeys.includes(req.date))
+      .map((req) => req.resident_id),
+  );
+  const srs = residents.filter((r) => r.pgy >= 4 && r.status !== 'away' && !offOnSelectedDates.has(r.id));
+  const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active' && !offOnSelectedDates.has(r.id));
 
   function fmtDateKey(s: string) {
     const d = parseDate(s);
