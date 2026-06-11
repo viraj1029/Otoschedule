@@ -544,7 +544,7 @@ export function generateSchedule(
   });
 
   jrs.forEach((r) => {
-    let wknd = 0, wkday = 0, traumaHrs = 0;
+    let wknd = 0, wkday = 0, traumaHrs = 0, wkndPotHrs = 0;
     // Use full block range; equityOffMap already excludes off-rotation dates
     let dd = new Date(bStart);
     while (dd <= bEnd) {
@@ -554,6 +554,10 @@ export function generateSchedule(
       if (!equityOffMap[r.id].has(key)) {
         if (isWknd) wknd++; else wkday++;
         if (TRAUMA_WEEKS.has(key)) traumaHrs += isWknd ? 24 : 12;
+        // Weekend-call potential (Fri 12 + Sat/Sun/holiday 24) on the SAME equity basis as
+        // rotPotentialHours: informal vacation & weekend/holiday opt-outs are NOT subtracted,
+        // so they can't shrink the denominator and cause weekend under-assignment.
+        if (isWeekendCall(key)) wkndPotHrs += shiftHours(key);
       }
       dd = addDays(dd, 1);
     }
@@ -562,6 +566,7 @@ export function generateSchedule(
     rotAvailDays[r.id] = Math.max(1, wknd + wkday);
     rotPotentialHours[r.id] = Math.max(1, wknd * 24 + wkday * 12);
     rotPotentialTraumaHours[r.id] = Math.max(1, traumaHrs);
+    rotWkndPotentialHours[r.id] = Math.max(1, wkndPotHrs);
   });
 
   // Pick junior: enforce rest gap (2 days preferred, 1 day minimum), balance weekend/weekday separately
@@ -587,25 +592,21 @@ export function generateSchedule(
     }
   });
 
-  // Second pass: compute available weekend days + potential weekend-call hours now that
-  // rotEffStart/rotEffEnd are set. Days counts calendar weekend + holiday (for display/compat);
-  // potential hours uses the weekend-call definition (Fri included) and real shift length.
+  // Second pass: available weekend days for display/compat only (counts calendar weekend +
+  // holiday, Friday excluded). Uses the full offMap since this is a literal "days you could
+  // actually be put on weekend call" figure. The weekend EQUITY denominator
+  // (rotWkndPotentialHours) is computed above on the equity basis, not here.
   jrs.forEach((r) => {
     let wkndAvail = 0;
-    let wkndPotHrs = 0;
     let dd = new Date(bStart);
     while (dd <= bEnd) {
       const key = dk(dd);
       const dow = dd.getDay();
       const avail = !offMap[r.id].has(key) && dd >= rotEffStart[r.id] && dd <= rotEffEnd[r.id];
-      if (avail) {
-        if (dow === 0 || dow === 6 || HOLIDAYS.has(key)) wkndAvail++;
-        if (isWeekendCall(key)) wkndPotHrs += shiftHours(key);
-      }
+      if (avail && (dow === 0 || dow === 6 || HOLIDAYS.has(key))) wkndAvail++;
       dd = addDays(dd, 1);
     }
     rotWkndAvailDays[r.id] = Math.max(1, wkndAvail);
-    rotWkndPotentialHours[r.id] = Math.max(1, wkndPotHrs);
   });
 
   function pickJr(key: string, ex: string | null = null, isWeekendSlot = false, skipGap = false, isTraumaDay = false): Resident {
