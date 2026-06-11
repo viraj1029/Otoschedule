@@ -17,7 +17,7 @@ function academicYear(dateStr: string): number {
   return m >= 7 ? d.getFullYear() : d.getFullYear() - 1;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const session = await getSession();
   if (!session.role || !session.residentId) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
@@ -45,9 +45,14 @@ export async function GET() {
 
   const targetHours = pgy === 3 ? PGY3_ANNUAL_TARGET : PGY2_ANNUAL_TARGET;
 
-  // Determine the current academic year range
-  const now = new Date().toISOString().slice(0, 10);
-  const acYear = academicYear(now);
+  // Determine the academic year range.
+  // The client passes ?acYearStart=YYYY-07-01 derived from the block's start date,
+  // which avoids the server's "now" landing in the wrong year (e.g. June 2026
+  // would resolve to the 2025-2026 year instead of 2026-2027).
+  const params = new URL(req.url).searchParams;
+  const acYearStartParam = params.get('acYearStart');
+  const fallbackDate = acYearStartParam ?? new Date().toISOString().slice(0, 10);
+  const acYear = academicYear(fallbackDate);
   const acYearStart = `${acYear}-07-01`;
   const acYearEnd   = `${acYear + 1}-06-30`;
 

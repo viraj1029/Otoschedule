@@ -77,10 +77,21 @@ export default function ScheduleView({
 
   useEffect(() => {
     if (role !== 'resident' || !currentResId) return;
-    api<{ tracked: boolean; pgy?: number; hoursWorked?: number; targetHours?: number }>('/annual-hours')
+    // Pass the academic year start derived from the block so the API doesn't
+    // rely on server-side "now" (which would pick the wrong year if today is
+    // still in June before the Jul 1 year start).
+    const bStartStr = schedule?.bStart ?? block?.start_date;
+    const acYearParam = bStartStr ? (() => {
+      const d = parseDate(bStartStr);
+      const m = d.getMonth() + 1;
+      const y = m >= 7 ? d.getFullYear() : d.getFullYear() - 1;
+      return `${y}-07-01`;
+    })() : null;
+    const url = acYearParam ? `/annual-hours?acYearStart=${acYearParam}` : '/annual-hours';
+    api<{ tracked: boolean; pgy?: number; hoursWorked?: number; targetHours?: number }>(url)
       .then((data) => setAnnualHours(data))
       .catch(() => {});
-  }, [role, currentResId, schedule]);
+  }, [role, currentResId, schedule, block?.start_date]);
 
   useEffect(() => {
     if (schedule) {
@@ -1043,7 +1054,23 @@ export default function ScheduleView({
           const cuhBEnd   = parseDate(cuhSched!.bEnd);
 
           if (isJunior) {
-            const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
+            const cuhBStartKey = dk(cuhBStart);
+            const cuhBEndKey   = dk(cuhBEnd);
+            // Only include residents who are actually in the CUH/PMH pool for this block.
+            // Residents on CMC/VA rotation have 0 hours assigned, which would drag the
+            // average down and make everyone look like they're working more than average.
+            const jrs = residents.filter((r) => {
+              if (r.pgy > 3 || r.status !== 'active') return false;
+              if (r.rotations && r.rotations.length > 0) {
+                return r.rotations.some(
+                  (seg) =>
+                    (seg.hospital === 'CUH' || seg.hospital === 'PMH') &&
+                    seg.start_date <= cuhBEndKey &&
+                    seg.end_date   >= cuhBStartKey,
+                );
+              }
+              return r.hospital === 'CUH' || r.hospital === 'PMH';
+            });
             const potMap: Record<string, number> = {};
             jrs.forEach((r) => {
               const rS = r.rotation_start ? parseDate(r.rotation_start) : cuhBStart;
