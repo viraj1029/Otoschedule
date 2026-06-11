@@ -6,8 +6,8 @@ import { initDb } from '@/lib/init-db';
 // Annual CUH/PMH call hour targets for the 2026–2027 academic year.
 // Derived from total pool hours (5,748 h) distributed proportionally
 // to each resident's time in the pool (PGY3 = 8 months, PGY2 = 32 weeks).
-export const PGY3_ANNUAL_TARGET = 756;
-export const PGY2_ANNUAL_TARGET = 696;
+const PGY3_ANNUAL_TARGET = 756;
+const PGY2_ANNUAL_TARGET = 696;
 
 const DEFAULT_BLOCK_ID = 'block_main';
 
