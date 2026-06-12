@@ -137,6 +137,11 @@ export default function OverrideModal({ open, dateKeys, schedule, residents, all
   const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active' && !offOnSelectedDates.has(r.id));
   const offResidents = residents.filter((r) => offOnSelectedDates.has(r.id));
 
+  // Debug: show raw data so we can identify the mismatch
+  const vacReqsForDates = liveRequests.filter((req) =>
+    (req.type === 'vacation_official' || req.type === 'vacation') && dateKeys.includes(req.date)
+  );
+
   function fmtDateKey(s: string) {
     const d = parseDate(s);
     return `${DOW[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`;
@@ -157,6 +162,11 @@ export default function OverrideModal({ open, dateKeys, schedule, residents, all
           <button className="mx" onClick={onClose}>✕</button>
         </div>
         <div className="mb">
+          <div style={{ fontSize: 10, color: '#888', marginBottom: 8, padding: '5px 8px', background: 'rgba(0,0,0,0.05)', borderRadius: 6, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+            DEBUG: liveRequests={liveRequests.length} | dateKeys={JSON.stringify(dateKeys)}{'\n'}
+            vacReqs={JSON.stringify(vacReqsForDates.map(r=>({rid:r.resident_id,date:r.date,type:r.type})))}{'\n'}
+            offSet={JSON.stringify([...offOnSelectedDates])}
+          </div>
           {offResidents.length > 0 && (
             <div style={{ fontSize: 11, color: 'var(--orange)', marginBottom: 10, padding: '5px 8px', background: 'rgba(251,146,60,0.1)', borderRadius: 6, border: '1px solid rgba(251,146,60,0.25)' }}>
               ⚠ Excluded (requested off): {offResidents.map((r) => r.name).join(', ')}
