@@ -1273,6 +1273,30 @@ export function generateCMCSchedule(
     if (!candidates.length) candidates = pool.filter((r) => r.id !== lastPwId);
     if (!candidates.length) candidates = [...pool];
 
+    // Lookahead: for non-trauma weekends within 2 weeks of an upcoming trauma weekend,
+    // prefer PGY4 to keep both PGY2/PGY3 free for the trauma assignment (the lastPwId
+    // constraint would otherwise block one of them). If PGY4 is also blocked, give this
+    // slot to the PGY2/PGY3 with the HIGHEST trauma ratio so the least-loaded one is
+    // preserved for the trauma weekend.
+    if (!isPwTrauma) {
+      const isPwTraumaFn = (f: Date) =>
+        TRAUMA_WEEKS.has(dk(f)) || TRAUMA_WEEKS.has(dk(addDays(f, 1))) || TRAUMA_WEEKS.has(dk(addDays(f, 2)));
+      if (isPwTraumaFn(addDays(fri, 7)) || isPwTraumaFn(addDays(fri, 14))) {
+        const pgy4Only = candidates.filter((r) => r.pgy >= 4);
+        if (pgy4Only.length) {
+          candidates = pgy4Only;
+        } else {
+          // Give this non-trauma slot to the most trauma-loaded PGY2/PGY3.
+          const mostLoaded = [...candidates].sort(
+            (a, b) =>
+              traumaHours[b.id] / traumaPotentialHours[b.id] -
+              traumaHours[a.id] / traumaPotentialHours[a.id],
+          )[0];
+          if (mostLoaded) candidates = [mostLoaded];
+        }
+      }
+    }
+
     const pick = pickPowerWeekend(candidates, isPwTrauma);
     pwByFri.set(friKey, pick);
     lastPwId = pick.id;
