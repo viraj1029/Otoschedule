@@ -9,8 +9,6 @@ import { initDb } from '@/lib/init-db';
 const PGY3_ANNUAL_TARGET = 756;
 const PGY2_ANNUAL_TARGET = 696;
 
-const DEFAULT_BLOCK_ID = 'block_main';
-
 function academicYear(dateStr: string): number {
   const d = new Date(dateStr + 'T12:00:00');
   const m = d.getMonth() + 1;
@@ -60,8 +58,7 @@ export async function GET(req: Request) {
   const { rows: schedRows } = await sql`
     SELECT data
     FROM schedules
-    WHERE block_id       = ${DEFAULT_BLOCK_ID}
-      AND published      = TRUE
+    WHERE published      = TRUE
       AND COALESCE(schedule_type, 'cuh_pmh') = 'cuh_pmh'
       AND start_date    >= ${acYearStart}
       AND end_date      <= ${acYearEnd}

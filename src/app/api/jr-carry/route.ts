@@ -3,8 +3,6 @@ import { sql } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { initDb } from '@/lib/init-db';
 
-const DEFAULT_BLOCK_ID = 'block_main';
-
 function academicYear(dateStr: string): number {
   const d = new Date(dateStr + 'T12:00:00');
   const m = d.getMonth() + 1; // 1-indexed
@@ -40,8 +38,7 @@ export async function GET(req: Request) {
   const { rows } = await sql`
     SELECT DISTINCT ON (start_date) start_date, data
     FROM schedules
-    WHERE block_id = ${DEFAULT_BLOCK_ID}
-      AND published = TRUE
+    WHERE published = TRUE
       AND COALESCE(schedule_type, 'cuh_pmh') = 'cuh_pmh'
       AND end_date  <  ${before}
       AND start_date >= ${acYearStart}

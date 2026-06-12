@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import type { Block, Resident, Request, AnyScheduleData } from '@/types';
+import { useState, useEffect } from 'react';
+import type { Block, Resident, Request, AnyScheduleData, Schedule } from '@/types';
 import { parseDate, generateSchedule, generateCMCSchedule, generateVASchedule } from '@/lib/scheduler';
 import type { ScheduleMode } from '@/lib/scheduler';
 import { api } from '../App';
@@ -40,6 +40,11 @@ function avatar(res: Resident, size = 26) {
 export default function Generate({ block, residents, allRequests, onScheduleGenerated, onBack, showToast }: Props) {
   const [generating, setGenerating] = useState(false);
   const [mode, setMode] = useState<ScheduleMode>('merged');
+  const [existingSchedules, setExistingSchedules] = useState<Schedule[]>([]);
+
+  useEffect(() => {
+    api<Schedule[]>('/schedules').then(setExistingSchedules).catch(() => {});
+  }, []);
 
   const yearStart = block?.start_date ?? '2026-07-01';
   const yearEnd = block?.end_date ?? '2027-06-30';
@@ -276,6 +281,39 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
           </div>
         </div>
       )}
+
+      {(() => {
+        const typeKey = hospitalGroup === 'CUH_PMH' ? 'cuh_pmh' : hospitalGroup === 'CMC' ? 'cmc' : 'va';
+        const overlapping = existingSchedules.filter((s) => {
+          if ((s.schedule_type ?? 'cuh_pmh') !== typeKey) return false;
+          if (!s.start_date || !s.end_date) return false;
+          return parseDate(s.end_date) >= parseDate(schedStart) && parseDate(s.start_date) <= parseDate(schedEnd);
+        });
+        if (overlapping.length === 0) return null;
+        const published = overlapping.filter((s) => s.published);
+        return (
+          <div style={{ marginBottom: 16, padding: '12px 16px', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.4)', borderRadius: 'var(--r)', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+            <span style={{ fontSize: 16 }}>⚠️</span>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--orange)', marginBottom: 3 }}>
+                Overlapping {hospitalGroup.replace('_', '/')} schedule{overlapping.length > 1 ? 's' : ''} exist
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                {overlapping.map((s) => (
+                  <span key={s.id} style={{ marginRight: 8 }}>
+                    <strong>{s.name}</strong>{s.published ? ' (published)' : ' (draft)'}
+                  </span>
+                ))}
+              </div>
+              {published.length > 0 && (
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
+                  This will create a new draft — the existing published schedule stays live until you publish the new one and delete or unpublish the old one.
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <button className="btn bgh" onClick={onBack}>← Back</button>
