@@ -1223,9 +1223,9 @@ export function generateCMCSchedule(
     })[0];
   }
 
-  // Power weekend pick: weekend equity ratio (weekend hours / weekend potential hours), matching
-  // CUH/PMH. On trauma weekends use a blended score (weekend ratio + trauma ratio) so neither axis
-  // dominates — identical to the junior pickJr blend. pwCount/pwAvail remains a final tiebreak.
+  // Power weekend pick: weekend equity ratio primary, pwCount/pwAvail tiebreak.
+  // On trauma weekends, trauma ratio is the primary sort key so the person with the
+  // fewest trauma hours always gets the next trauma weekend; weekend ratio is secondary.
   function pickPowerWeekend(candidates: Resident[], isTraumaWeekend: boolean): Resident {
     return [...candidates].sort((a, b) => {
       const aW = wkndHours[a.id] / wkndPotentialHours[a.id];
@@ -1233,9 +1233,8 @@ export function generateCMCSchedule(
       if (isTraumaWeekend) {
         const aT = traumaHours[a.id] / traumaPotentialHours[a.id];
         const bT = traumaHours[b.id] / traumaPotentialHours[b.id];
-        const aBlend = aW + aT;
-        const bBlend = bW + bT;
-        if (Math.abs(aBlend - bBlend) > 1e-9) return aBlend - bBlend;
+        if (Math.abs(aT - bT) > 1e-9) return aT - bT;   // trauma ratio primary
+        if (Math.abs(aW - bW) > 1e-9) return aW - bW;   // weekend ratio secondary
       } else if (Math.abs(aW - bW) > 1e-9) {
         return aW - bW;
       }
@@ -1568,7 +1567,13 @@ export function generateCMCSchedule(
           const under = sorted[ui];
           const gapBefore = ratioOf(over) - ratioOf(under);
           if (gapBefore <= tol) continue;
-          const candidates = cmcDays.filter((day) => day.res.id === over.id && !day.isPowerWeekend && !day.override);
+          const candidates = cmcDays.filter(
+            (day) =>
+              day.res.id === over.id &&
+              !day.isPowerWeekend &&
+              !day.override &&
+              !(over.pgy >= 4 && TRAUMA_WEEKS.has(day.dateKey)), // protect PGY4 trauma weekdays
+          );
           for (const day of candidates) {
             if (!cmcCanReceiveWD(day.dateKey, under)) continue;
             cmcReassignWD(day.dateKey, over, under);
