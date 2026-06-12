@@ -1325,10 +1325,22 @@ export function generateCMCSchedule(
   }
 
   // ── Post-hoc rebalancing ────────────────────────────────────────────────────
-  // Two passes mirror the CUHPMH approach: weekend equity first, then weekday
-  // equity. Each pass iterates over all over→under resident pairs and makes the
-  // first legal, gap-shrinking move found, reverting any move that overshoots.
-  // Guaranteed monotone convergence; stops when gap ≤ tol or no legal move exists.
+  // Three passes mirror the CUHPMH approach:
+  //   1. Weekend equity — moves power weekends to even wkndHours / wkndPotentialHours.
+  //   2. Trauma swap    — swaps trauma ↔ non-trauma power weekends (equal total hours)
+  //                       to redistribute trauma without disturbing weekend equity.
+  //   3. Weekday equity — moves weekday shifts to even wdCount / wdAvail.
+
+  // Total CMC hours for a power weekend (may be <60h near block boundaries where
+  // Sat or Sun falls outside the block range).
+  function pwTotalHrs(friKey: string): number {
+    const fri = parseDate(friKey);
+    let h = 0;
+    for (const [d, hrs] of [[fri, 12], [addDays(fri, 1), 24], [addDays(fri, 2), 24]] as [Date, number][]) {
+      if (d >= bStart && d <= bEnd) h += hrs;
+    }
+    return h;
+  }
 
   // Reassign an entire power weekend (Fri+Sat+Sun) atomically from `from` to `to`.
   function cmcReassignPW(friKey: string, from: Resident, to: Resident) {
@@ -1350,8 +1362,35 @@ export function generateCMCSchedule(
     pwByFri.set(friKey, to);
   }
 
-  // A resident can receive a power weekend only if they are not fully off all three
-  // days and would not end up with back-to-back power weekends.
+  // Validate that all of a resident's power-weekend assignments satisfy:
+  //   - No back-to-back weekends (adjacent Fridays ≤7 days apart).
+  //   - No Thursday weekday call the day before any of their power weekends.
+  //   - No Monday weekday call the day after any of their power weekends.
+  // Used by cmcTraumaSwap to vet both sides of a swap simultaneously.
+  function cmcPwSpacingOk(res: Resident): boolean {
+    const myFridays = [...pwByFri.entries()]
+      .filter(([, r]) => r.id === res.id)
+      .map(([key]) => key)
+      .sort();
+    for (let i = 1; i < myFridays.length; i++) {
+      const a = parseDate(myFridays[i - 1]).getTime();
+      const b = parseDate(myFridays[i]).getTime();
+      if ((b - a) / 86400000 <= 7) return false;
+    }
+    for (const friKey of myFridays) {
+      const fri = parseDate(friKey);
+      const thuKey = dk(addDays(fri, -1));
+      const monKey = dk(addDays(fri,  3));
+      if (cmcDays.some((d) => d.dateKey === thuKey && !d.isPowerWeekend && d.res.id === res.id)) return false;
+      if (cmcDays.some((d) => d.dateKey === monKey && !d.isPowerWeekend && d.res.id === res.id)) return false;
+    }
+    return true;
+  }
+
+  // A resident can receive a power weekend only if:
+  //   - Not fully off all three days.
+  //   - Would not create back-to-back power weekends (adjacent Fri ±7d).
+  //   - The Thursday before and Monday after are not already their weekday shifts.
   function cmcCanReceivePW(friKey: string, res: Resident): boolean {
     const fri = parseDate(friKey);
     const satKey = dk(addDays(fri, 1));
@@ -1359,6 +1398,10 @@ export function generateCMCSchedule(
     if (offMap[res.id].has(friKey) && offMap[res.id].has(satKey) && offMap[res.id].has(sunKey)) return false;
     if (pwByFri.get(dk(addDays(fri, -7)))?.id === res.id) return false;
     if (pwByFri.get(dk(addDays(fri,  7)))?.id === res.id) return false;
+    const thuKey = dk(addDays(fri, -1));
+    const monKey = dk(addDays(fri,  3));
+    if (cmcDays.some((d) => d.dateKey === thuKey && !d.isPowerWeekend && d.res.id === res.id)) return false;
+    if (cmcDays.some((d) => d.dateKey === monKey && !d.isPowerWeekend && d.res.id === res.id)) return false;
     return true;
   }
 
@@ -1398,6 +1441,73 @@ export function generateCMCSchedule(
               break;
             }
             cmcReassignPW(friKey, under, over); // revert — overshoot
+          }
+        }
+      }
+      if (!moved) break;
+    }
+  }
+
+  // Redistribute trauma hours via compensating swaps: trade a trauma power weekend
+  // from the most over-loaded resident for an equal-total-hours non-trauma power
+  // weekend from the most under-loaded resident. Equal hours ⇒ each resident's
+  // wkndHours and total hours are unchanged; only traumaHours shifts.
+  // Mirrors CUHPMH's traumaSwap() pass.
+  function cmcTraumaSwap(tol = 0.05) {
+    const ratioOf = (r: Resident) => traumaHours[r.id] / traumaPotentialHours[r.id];
+
+    const isPwTraumaFn = (friKey: string) => {
+      const fri = parseDate(friKey);
+      return TRAUMA_WEEKS.has(friKey) || TRAUMA_WEEKS.has(dk(addDays(fri, 1))) || TRAUMA_WEEKS.has(dk(addDays(fri, 2)));
+    };
+
+    const hasPwOverride = (friKey: string, resId: string) => {
+      const fri = parseDate(friKey);
+      return cmcDays.some(
+        (d) =>
+          d.isPowerWeekend && d.res.id === resId && d.override &&
+          (d.dateKey === friKey || d.dateKey === dk(addDays(fri, 1)) || d.dateKey === dk(addDays(fri, 2))),
+      );
+    };
+
+    for (let iter = 0; iter < 400; iter++) {
+      const sorted = [...pool].sort((a, b) => ratioOf(a) - ratioOf(b));
+      if (ratioOf(sorted[sorted.length - 1]) - ratioOf(sorted[0]) <= tol) break;
+
+      let moved = false;
+      for (let oi = sorted.length - 1; oi >= 1 && !moved; oi--) {
+        const over = sorted[oi];
+        for (let ui = 0; ui < oi && !moved; ui++) {
+          const under = sorted[ui];
+          const gapBefore = ratioOf(over) - ratioOf(under);
+          if (gapBefore <= tol) continue;
+
+          const overTrauma = [...pwByFri.entries()]
+            .filter(([k, r]) => r.id === over.id && isPwTraumaFn(k) && !hasPwOverride(k, over.id))
+            .map(([k]) => k);
+
+          const underNonTrauma = [...pwByFri.entries()]
+            .filter(([k, r]) => r.id === under.id && !isPwTraumaFn(k) && !hasPwOverride(k, under.id))
+            .map(([k]) => k);
+
+          for (const ouKey of overTrauma) {
+            for (const uuKey of underNonTrauma) {
+              // Equal total hours ⇒ weekend equity is preserved after the swap.
+              if (pwTotalHrs(ouKey) !== pwTotalHrs(uuKey)) continue;
+
+              cmcReassignPW(ouKey, over, under);
+              cmcReassignPW(uuKey, under, over);
+
+              const ok =
+                cmcPwSpacingOk(over) &&
+                cmcPwSpacingOk(under) &&
+                Math.abs(ratioOf(over) - ratioOf(under)) < gapBefore - 1e-9;
+
+              if (ok) { moved = true; break; }
+              cmcReassignPW(ouKey, under, over);  // revert
+              cmcReassignPW(uuKey, over, under);
+            }
+            if (moved) break;
           }
         }
       }
@@ -1465,6 +1575,7 @@ export function generateCMCSchedule(
   }
 
   cmcRebalanceWeekend();
+  cmcTraumaSwap();
   cmcRebalanceWeekday();
 
   cmcDays.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
