@@ -203,6 +203,28 @@ export default function Requests({
   const [resTab, setResTab] = useState<'requests' | 'schedule'>('requests');
   const [chiefTab, setChiefTab] = useState<'requests' | 'vacations'>('requests');
 
+  const [showChangePinModal, setShowChangePinModal] = useState(false);
+  const [pinCurrent, setPinCurrent] = useState('');
+  const [pinNew, setPinNew] = useState('');
+  const [pinConfirm, setPinConfirm] = useState('');
+  const [pinChanging, setPinChanging] = useState(false);
+
+  async function doChangePin() {
+    if (pinNew !== pinConfirm) { showToast('New PINs do not match', true); return; }
+    if (!/^\d{4}$/.test(pinNew)) { showToast('New PIN must be exactly 4 digits', true); return; }
+    setPinChanging(true);
+    try {
+      await api('/auth/change-pin', 'POST', { currentPin: pinCurrent, newPin: pinNew });
+      showToast('PIN changed successfully');
+      setShowChangePinModal(false);
+      setPinCurrent(''); setPinNew(''); setPinConfirm('');
+    } catch (e) {
+      showToast((e as Error).message, true);
+    } finally {
+      setPinChanging(false);
+    }
+  }
+
   // If resident and schedule is published, show schedule view instead
   const isResidentWithPublishedSchedule =
     role === 'resident' && schedule && (schedule.published || block?.published);
@@ -365,14 +387,65 @@ export default function Requests({
 
   return (
     <div>
+      {/* Change PIN modal */}
+      {showChangePinModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }}>
+          <div style={{
+            background: 'var(--bg, #1e1e2e)', border: '1px solid var(--border, #333)',
+            borderRadius: 12, padding: 28, width: 320, boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+          }}>
+            <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 20 }}>Change Your PIN</div>
+            <div className="fl" style={{ marginBottom: 14 }}>
+              <label className="flb">Current PIN</label>
+              <input type="password" maxLength={4} placeholder="4-digit PIN"
+                value={pinCurrent} onChange={(e) => setPinCurrent(e.target.value)} />
+            </div>
+            <div className="fl" style={{ marginBottom: 14 }}>
+              <label className="flb">New PIN</label>
+              <input type="password" maxLength={4} placeholder="4-digit PIN"
+                value={pinNew} onChange={(e) => setPinNew(e.target.value)} />
+            </div>
+            <div className="fl" style={{ marginBottom: 22 }}>
+              <label className="flb">Confirm New PIN</label>
+              <input type="password" maxLength={4} placeholder="4-digit PIN"
+                value={pinConfirm} onChange={(e) => setPinConfirm(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && doChangePin()} />
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="btn bgh bsm" onClick={() => {
+                setShowChangePinModal(false);
+                setPinCurrent(''); setPinNew(''); setPinConfirm('');
+              }}>Cancel</button>
+              <button className="btn bg bsm" disabled={pinChanging} onClick={doChangePin}>
+                {pinChanging ? 'Saving…' : 'Save PIN'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Resident tab switcher when schedule is published */}
       {isResidentWithPublishedSchedule && (
-        <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 18, alignItems: 'center', flexWrap: 'wrap' }}>
           <button className={`btn bsm${resTab === 'schedule' ? ' bg' : ' bgh'}`} onClick={() => setResTab('schedule')}>
             📅 My Schedule
           </button>
           <button className={`btn bsm${resTab === 'requests' ? ' bg' : ' bgh'}`} onClick={() => setResTab('requests')}>
             ✏️ My Requests
+          </button>
+          <button className="btn bgh bsm" style={{ marginLeft: 'auto' }} onClick={() => setShowChangePinModal(true)}>
+            🔑 Change PIN
+          </button>
+        </div>
+      )}
+      {/* Change PIN button for residents without published schedule */}
+      {role === 'resident' && !isResidentWithPublishedSchedule && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+          <button className="btn bgh bsm" onClick={() => setShowChangePinModal(true)}>
+            🔑 Change PIN
           </button>
         </div>
       )}
