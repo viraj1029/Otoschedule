@@ -2547,7 +2547,13 @@ export default function ScheduleView({
                 <label className="flb">Assign VA call</label>
                 <select value={poolOverrideResId} onChange={(e) => setPoolOverrideResId(e.target.value)}>
                   <option value="">— select resident —</option>
-                  {residents.filter((r) => r.status !== 'away' && !freshRequests.some((req) => req.resident_id === r.id && (req.type === 'vacation_official' || req.type === 'vacation') && vaSched!.weeks[vaOverride.weekIndex] && req.date >= vaSched!.weeks[vaOverride.weekIndex].wS && req.date <= vaSched!.weeks[vaOverride.weekIndex].wE)).map((r) => (
+                  {residents.filter((r) => {
+                    if (r.status === 'away') return false;
+                    const w = vaSched!.weeks[vaOverride.weekIndex];
+                    if (!w) return false;
+                    if (!isOnRotation(r, w.wS, ['VA'])) return false;
+                    return !freshRequests.some((req) => req.resident_id === r.id && (req.type === 'vacation_official' || req.type === 'vacation' || req.type === 'holiday') && req.date >= w.wS && req.date <= w.wE);
+                  }).map((r) => (
                     <option key={r.id} value={r.id}>{r.name} (PGY-{r.pgy})</option>
                   ))}
                 </select>
@@ -2597,7 +2603,12 @@ export default function ScheduleView({
                 <label className="flb">Assign CMC call</label>
                 <select value={poolOverrideResId} onChange={(e) => setPoolOverrideResId(e.target.value)}>
                   <option value="">— select resident —</option>
-                  {residents.filter((r) => r.status === 'active' && r.pgy >= 2 && r.pgy <= 4 && !(selectedKeys.length > 1 ? selectedKeys : [cmcOverride.dateKey]).some((dk2) => freshRequests.some((req) => req.resident_id === r.id && (req.type === 'vacation_official' || req.type === 'vacation') && req.date === dk2))).map((r) => (
+                  {residents.filter((r) => {
+                    if (r.status !== 'active') return false;
+                    const keysToCheck = selectedKeys.length > 1 ? selectedKeys : [cmcOverride.dateKey];
+                    if (!keysToCheck.some((dk2) => isOnRotation(r, dk2, ['CMC']))) return false;
+                    return !keysToCheck.some((dk2) => freshRequests.some((req) => req.resident_id === r.id && (req.type === 'vacation_official' || req.type === 'vacation' || req.type === 'holiday') && req.date === dk2));
+                  }).map((r) => (
                     <option key={r.id} value={r.id}>{r.name} (PGY-{r.pgy})</option>
                   ))}
                 </select>

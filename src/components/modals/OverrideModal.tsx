@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import type { Resident, ScheduleData, Request } from '@/types';
-import { HOLIDAYS, parseDate, dk, addDays } from '@/lib/scheduler';
+import { HOLIDAYS, parseDate, dk, addDays, isOnRotation } from '@/lib/scheduler';
 import { api } from '../App';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -133,8 +133,14 @@ export default function OverrideModal({ open, dateKeys, schedule, residents, all
       .filter((req) => (req.type === 'vacation_official' || req.type === 'vacation' || req.type === 'holiday') && dateKeys.includes(req.date))
       .map((req) => req.resident_id),
   );
-  const srs = residents.filter((r) => r.pgy >= 4 && r.status !== 'away' && !offOnSelectedDates.has(r.id));
-  const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active' && !offOnSelectedDates.has(r.id));
+  const srs = residents.filter((r) => {
+    if (r.pgy < 4 || r.status === 'away' || offOnSelectedDates.has(r.id)) return false;
+    return dateKeys.some((k) => isOnRotation(r, k, ['CUH', 'PMH', 'Research']));
+  });
+  const jrs = residents.filter((r) => {
+    if (r.pgy > 3 || r.status !== 'active' || offOnSelectedDates.has(r.id)) return false;
+    return dateKeys.some((k) => isOnRotation(r, k, ['CUH', 'PMH']));
+  });
   const offResidents = residents.filter((r) => offOnSelectedDates.has(r.id));
 
   function fmtDateKey(s: string) {
