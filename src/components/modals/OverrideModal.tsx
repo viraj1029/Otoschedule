@@ -164,6 +164,7 @@ export default function OverrideModal({ open, dateKeys, schedule, residents, all
         <div className="mb">
           <div style={{ fontSize: 10, color: '#888', marginBottom: 8, padding: '5px 8px', background: 'rgba(0,0,0,0.05)', borderRadius: 6, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
             DEBUG: liveRequests={liveRequests.length} | dateKeys={JSON.stringify(dateKeys)}{'\n'}
+            sampleDates={JSON.stringify(liveRequests.slice(0,3).map(r=>r.date))}{'\n'}
             vacReqs={JSON.stringify(vacReqsForDates.map(r=>({rid:r.resident_id,date:r.date,type:r.type})))}{'\n'}
             offSet={JSON.stringify([...offOnSelectedDates])}
           </div>
