@@ -1197,6 +1197,8 @@ export function generateCMCSchedule(
       const key = dk(td);
       if (TRAUMA_WEEKS.has(key) && !cmcEquityOffMap[r.id].has(key)) {
         const dow = td.getDay();
+        // PGY4 residents don't take trauma power weekends; exclude Fri/Sat/Sun from their potential.
+        if (r.pgy >= 4 && (dow === 5 || dow === 6 || dow === 0)) { td = addDays(td, 1); continue; }
         h += (dow === 0 || dow === 6) ? 24 : 12;
       }
       td = addDays(td, 1);
@@ -1261,6 +1263,9 @@ export function generateCMCSchedule(
     let candidates = pool.filter(
       (r) => r.id !== lastPwId && !(offMap[r.id].has(friKey) && offMap[r.id].has(satKey) && offMap[r.id].has(sunKey)),
     );
+    // PGY4 residents don't take trauma power weekends.
+    if (isPwTrauma) candidates = candidates.filter((r) => r.pgy < 4);
+    if (!candidates.length && isPwTrauma) candidates = pool.filter((r) => r.pgy < 4 && r.id !== lastPwId);
     if (!candidates.length) candidates = pool.filter((r) => r.id !== lastPwId);
     if (!candidates.length) candidates = [...pool];
 
@@ -1391,6 +1396,7 @@ export function generateCMCSchedule(
   //   - Not fully off all three days.
   //   - Would not create back-to-back power weekends (adjacent Fri ±7d).
   //   - The Thursday before and Monday after are not already their weekday shifts.
+  //   - PGY4 residents cannot receive trauma power weekends.
   function cmcCanReceivePW(friKey: string, res: Resident): boolean {
     const fri = parseDate(friKey);
     const satKey = dk(addDays(fri, 1));
@@ -1402,6 +1408,7 @@ export function generateCMCSchedule(
     const monKey = dk(addDays(fri,  3));
     if (cmcDays.some((d) => d.dateKey === thuKey && !d.isPowerWeekend && d.res.id === res.id)) return false;
     if (cmcDays.some((d) => d.dateKey === monKey && !d.isPowerWeekend && d.res.id === res.id)) return false;
+    if (res.pgy >= 4 && (TRAUMA_WEEKS.has(friKey) || TRAUMA_WEEKS.has(satKey) || TRAUMA_WEEKS.has(sunKey))) return false;
     return true;
   }
 
@@ -1454,6 +1461,8 @@ export function generateCMCSchedule(
   // wkndHours and total hours are unchanged; only traumaHours shifts.
   // Mirrors CUHPMH's traumaSwap() pass.
   function cmcTraumaSwap(tol = 0.05) {
+    // PGY4 residents don't take trauma weekends — exclude them from trauma equity.
+    const traumaPool = pool.filter((r) => r.pgy < 4);
     const ratioOf = (r: Resident) => traumaHours[r.id] / traumaPotentialHours[r.id];
 
     const isPwTraumaFn = (friKey: string) => {
@@ -1471,7 +1480,7 @@ export function generateCMCSchedule(
     };
 
     for (let iter = 0; iter < 400; iter++) {
-      const sorted = [...pool].sort((a, b) => ratioOf(a) - ratioOf(b));
+      const sorted = [...traumaPool].sort((a, b) => ratioOf(a) - ratioOf(b));
       if (ratioOf(sorted[sorted.length - 1]) - ratioOf(sorted[0]) <= tol) break;
 
       let moved = false;
