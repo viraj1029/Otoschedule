@@ -150,7 +150,7 @@ export async function GET(req: Request) {
   const { rows: allResRows } = personId
     ? await sql`SELECT id FROM residents WHERE person_id = ${personId}`
     : await sql`SELECT id FROM residents WHERE id = ${residentId}`;
-  const myResIds = new Set(allResRows.map((r: { id: string }) => r.id));
+  const myResIds = new Set(allResRows.map((r) => r.id as string));
 
   // Academic year boundaries (July 1 → June 30)
   const params = new URL(req.url).searchParams;
