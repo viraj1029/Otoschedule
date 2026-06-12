@@ -83,11 +83,29 @@ export default function ScheduleView({
     targetHours?: number;
   } | null>(null);
 
+  interface MyStatsData {
+    residentId: string;
+    academicYearStart: string;
+    isJunior: boolean;
+    periods: Array<{
+      scheduleId: string; name: string; startDate: string; endDate: string;
+      cuhPmhJr?: { totalHrs: number; wkdayCount: number; wkdayHrs: number; wkndCount: number; wkndHrs: number; holCount: number; holHrs: number; cuhRdrCount: number; traumaCount: number; traumaHrs: number };
+      cuhPmhSr?: { totalCount: number; wkdayCount: number; wkndCount: number; holCount: number };
+      cmc?: { totalHrs: number; wkdayCount: number; wkdayHrs: number; wkndCount: number; wkndHrs: number; holCount: number; holHrs: number; pwCount: number };
+      va?: { weekCount: number; totalHrs: number; wkdayCount: number; wkdayHrs: number; wkndCount: number; wkndHrs: number; holCount: number; holHrs: number };
+    }>;
+    ytd: {
+      cuhPmhJr?: MyStatsData['periods'][0]['cuhPmhJr'];
+      cuhPmhSr?: MyStatsData['periods'][0]['cuhPmhSr'];
+      cmc?: MyStatsData['periods'][0]['cmc'];
+      va?: MyStatsData['periods'][0]['va'];
+    };
+  }
+  const [myStats, setMyStats] = useState<MyStatsData | null>(null);
+  const [expandedPeriods, setExpandedPeriods] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     if (role !== 'resident' || !currentResId) return;
-    // Pass the academic year start derived from the block so the API doesn't
-    // rely on server-side "now" (which would pick the wrong year if today is
-    // still in June before the Jul 1 year start).
     const bStartStr = schedule?.bStart ?? block?.start_date;
     const acYearParam = bStartStr ? (() => {
       const d = parseDate(bStartStr);
@@ -95,6 +113,10 @@ export default function ScheduleView({
       const y = m >= 7 ? d.getFullYear() : d.getFullYear() - 1;
       return `${y}-07-01`;
     })() : null;
+
+    const statsUrl = acYearParam ? `/my-stats?acYearStart=${acYearParam}` : '/my-stats';
+    api<MyStatsData>(statsUrl).then(setMyStats).catch(() => {});
+
     const url = acYearParam ? `/annual-hours?acYearStart=${acYearParam}` : '/annual-hours';
     api<{ tracked: boolean; pgy?: number; hoursWorked?: number; targetHours?: number }>(url)
       .then((data) => setAnnualHours(data))
@@ -846,103 +868,139 @@ export default function ScheduleView({
     );
   }
 
-  // ── Stats tab (resident personal dashboard) ───────────────────────────────────
+  // ── Stats tab (resident personal dashboard — year-to-date across all published schedules) ──
   function renderStatsTab() {
-    if (!currentResId || !schedule) return null;
+    if (!currentResId) return null;
     const res = residents.find((r) => r.id === currentResId);
     if (!res) return null;
 
-    // Resolve all resident-record IDs belonging to the same person (multi-rotation support)
-    const personId = res.person_id;
-    const myResIds = new Set(
-      personId ? residents.filter((r) => r.person_id === personId).map((r) => r.id) : [currentResId],
-    );
+    const isJunior = myStats ? myStats.isJunior : res.pgy <= 3;
 
-    if (!cuhSched) {
-      return (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--muted)', flexDirection: 'column', gap: 12 }}>
-          <div>Personal stats are based on the CUH/PMH schedule.</div>
-          {schedules.some((s) => (s.schedule_type ?? 'cuh_pmh') === 'cuh_pmh') && (
-            <button className="btn bsm bgh" onClick={() => switchToTab('cuh_pmh')}>Load CUH/PMH Schedule</button>
-          )}
-        </div>
-      );
-    }
-    const isJunior = res.pgy <= 3;
-    const months = getBlockMonths();
-    const prefix = statsMonth
-      ? `${statsMonth.year}-${String(statsMonth.month + 1).padStart(2, '0')}-`
-      : null;
+    const resInitials = (() => {
+      const parts = res.name.trim().split(/\s+/);
+      return (parts.length === 1 ? parts[0].slice(0, 2) : parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    })();
 
-    function computeJrStats() {
-      const days = cuhSched!.juniorDays.filter(
-        (d) => myResIds.has(d.res.id) && (!prefix || d.dateKey.startsWith(prefix)),
-      );
-      const cuhRdrDays = cuhSched!.juniorDays.filter(
-        (d) => (d.cuhRounder?.id ? myResIds.has(d.cuhRounder.id) : false) && (!prefix || d.dateKey.startsWith(prefix)),
-      );
-      const wkday  = days.filter((d) => !isWeekendCall(d.dateKey));
-      const wknd   = days.filter((d) => isWeekendCall(d.dateKey) && !HOLIDAYS.has(d.dateKey));
-      const hol    = days.filter((d) => HOLIDAYS.has(d.dateKey));
-      const trauma = days.filter((d) => d.isTrauma);
-      return {
-        wkdayCount: wkday.length, wkdayHrs: wkday.reduce((a, d) => a + d.shiftHrs, 0),
-        wkndCount:  wknd.length,  wkndHrs:  wknd.reduce((a, d) => a + d.shiftHrs, 0),
-        holCount:   hol.length,   holHrs:   hol.reduce((a, d) => a + d.shiftHrs, 0),
-        totalHrs:   days.reduce((a, d) => a + d.shiftHrs, 0),
-        cuhRdrCount: cuhRdrDays.length,
-        traumaCount: trauma.length, traumaHrs: trauma.reduce((a, d) => a + d.shiftHrs, 0),
-      };
-    }
-
-    function computeSrStats() {
-      const srWeeks = cuhSched!.seniorWeeks.filter((w) => myResIds.has(w.res.id));
-      let wkdayCount = 0, wkndCount = 0, holCount = 0;
-      srWeeks.forEach((w) => {
-        let d = parseDate(w.wS); const end = parseDate(w.wE);
-        while (d <= end) {
-          const key = dk(d);
-          if (!prefix || key.startsWith(prefix)) {
-            if (HOLIDAYS.has(key)) holCount++;
-            else if (d.getDay() === 0 || d.getDay() === 6) wkndCount++;
-            else wkdayCount++;
-          }
-          d = addDays(d, 1);
-        }
-      });
-      return { wkdayCount, wkndCount, holCount, totalCount: wkdayCount + wkndCount + holCount };
-    }
-
-    const jrS = isJunior ? computeJrStats() : null;
-    const srS = !isJunior ? computeSrStats() : null;
-
-    function sc(
-      label: string, value: number, unit: string, color: string, sub?: string,
-    ) {
+    function sc(label: string, value: number, unit: string, color: string, sub?: string) {
       return (
         <div className="card" style={{ padding: '18px 20px' }}>
           <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10 }}>
             {label}
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-            <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 34, fontWeight: 700, color, lineHeight: 1 }}>
-              {value}
-            </span>
+            <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 34, fontWeight: 700, color, lineHeight: 1 }}>{value}</span>
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>{unit}</span>
           </div>
-          {sub && (
-            <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color, marginTop: 6, opacity: 0.8 }}>
-              {sub}
-            </div>
-          )}
+          {sub && <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color, marginTop: 6, opacity: 0.8 }}>{sub}</div>}
         </div>
       );
     }
 
-    const resInitials = (() => {
-      const parts = res.name.trim().split(/\s+/);
-      return (parts.length === 1 ? parts[0].slice(0, 2) : parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-    })();
+    function heroBar(items: { label: string; value: number; color: string }[]) {
+      return (
+        <div className={`sg${items.length}`} style={{ marginBottom: 18, background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', overflow: 'hidden' }}>
+          {items.map(({ label, value, color }, i) => (
+            <div key={label} style={{ padding: '20px 24px', borderLeft: i > 0 ? '1px solid var(--border)' : undefined }}>
+              <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8, fontWeight: 600 }}>{label}</div>
+              <div style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 700, color, lineHeight: 1 }}>
+                <span style={{ fontSize: 38 }}>{value}</span>
+                <span style={{ fontSize: 18 }}>h</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    function renderJrSection(
+      s: NonNullable<typeof myStats>['ytd']['cuhPmhJr'],
+      title: string, accentColor: string,
+    ) {
+      if (!s) return null;
+      return (
+        <div style={{ marginBottom: 28 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: accentColor, marginBottom: 12 }}>
+            {title}
+          </div>
+          {heroBar([
+            { label: 'Total Hours on Call', value: s.totalHrs, color: 'var(--green)' },
+            { label: 'Weekday Hours', value: s.wkdayHrs, color: 'var(--blue)' },
+            { label: 'Weekend & Holiday Hours', value: s.wkndHrs + s.holHrs, color: 'var(--purple)' },
+          ])}
+          <div className="sg3" style={{ gap: 14 }}>
+            {sc('Weekday Call Days', s.wkdayCount, 'days', 'var(--blue)', `${s.wkdayHrs}h`)}
+            {sc('Weekend Call Days', s.wkndCount, 'days', 'var(--purple)', `${s.wkndHrs}h`)}
+            {sc('Holiday Call Days', s.holCount, 'days', 'var(--orange)', `${s.holHrs}h`)}
+            {sc('Weekend Rounding Days', s.wkndCount + s.holCount + s.cuhRdrCount, 'days', 'var(--teal)',
+              s.cuhRdrCount > 0 ? `${s.wkndCount + s.holCount} primary + ${s.cuhRdrCount} CUH rounder` : 'as primary call')}
+            {sc('CUH Rounder Duties', s.cuhRdrCount, 'days', 'var(--green)', 'additional rounding')}
+            {sc('Trauma Call Days', s.traumaCount, 'days', 'var(--red)', `${s.traumaHrs}h`)}
+          </div>
+        </div>
+      );
+    }
+
+    function renderSrSection(s: NonNullable<typeof myStats>['ytd']['cuhPmhSr'], title: string, accentColor: string) {
+      if (!s) return null;
+      return (
+        <div style={{ marginBottom: 28 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: accentColor, marginBottom: 12 }}>{title}</div>
+          <div className="sg4" style={{ gap: 14 }}>
+            {sc('Total Call Days', s.totalCount, 'days', 'var(--gold)')}
+            {sc('Weekday Call Days', s.wkdayCount, 'days', 'var(--blue)')}
+            {sc('Weekend Call Days', s.wkndCount, 'days', 'var(--purple)')}
+            {sc('Holiday Call Days', s.holCount, 'days', 'var(--orange)')}
+          </div>
+        </div>
+      );
+    }
+
+    function renderCMCSection(s: NonNullable<typeof myStats>['ytd']['cmc'], title: string) {
+      if (!s) return null;
+      return (
+        <div style={{ marginBottom: 28 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--blue)', marginBottom: 12 }}>{title}</div>
+          {heroBar([
+            { label: 'Total Hours on Call', value: s.totalHrs, color: 'var(--green)' },
+            { label: 'Weekday Hours', value: s.wkdayHrs, color: 'var(--blue)' },
+            { label: 'Weekend & Holiday Hours', value: s.wkndHrs + s.holHrs, color: 'var(--purple)' },
+          ])}
+          <div className="sg3" style={{ gap: 14 }}>
+            {sc('Weekday Call Days', s.wkdayCount, 'days', 'var(--blue)', `${s.wkdayHrs}h`)}
+            {sc('Weekend Call Days', s.wkndCount, 'days', 'var(--purple)', `${s.wkndHrs}h`)}
+            {sc('Power Weekends', s.pwCount, 'wknds', 'var(--teal)', '60h Fri–Sun blocks')}
+          </div>
+        </div>
+      );
+    }
+
+    function renderVASection(s: NonNullable<typeof myStats>['ytd']['va'], title: string) {
+      if (!s) return null;
+      return (
+        <div style={{ marginBottom: 28 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--orange)', marginBottom: 12 }}>{title}</div>
+          {heroBar([
+            { label: 'Total Hours on Call', value: s.totalHrs, color: 'var(--green)' },
+            { label: 'Weekday Hours', value: s.wkdayHrs, color: 'var(--blue)' },
+            { label: 'Weekend & Holiday Hours', value: s.wkndHrs + s.holHrs, color: 'var(--purple)' },
+          ])}
+          <div className="sg4" style={{ gap: 14 }}>
+            {sc('Call Weeks', s.weekCount, 'wks', 'var(--gold)')}
+            {sc('Weekday Days', s.wkdayCount, 'days', 'var(--blue)', `${s.wkdayHrs}h`)}
+            {sc('Weekend Days', s.wkndCount, 'days', 'var(--purple)', `${s.wkndHrs}h`)}
+            {sc('Holiday Days', s.holCount, 'days', 'var(--orange)', `${s.holHrs}h`)}
+          </div>
+        </div>
+      );
+    }
+
+    const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    function fmtPeriodLabel(startDate: string, endDate: string) {
+      const s = parseDate(startDate); const e = parseDate(endDate);
+      return `${M[s.getMonth()]} ${s.getDate()} – ${M[e.getMonth()]} ${e.getDate()}, ${e.getFullYear()}`;
+    }
+
+    const hasNoStats = myStats && myStats.periods.length === 0;
 
     return (
       <div>
@@ -957,9 +1015,15 @@ export default function ScheduleView({
               PGY-{res.pgy} · {res.hospital} · {isJunior ? 'Junior Call' : 'Senior Call'}
             </div>
           </div>
+          {myStats && (
+            <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted)', textAlign: 'right' }}>
+              <div style={{ fontWeight: 600 }}>Academic Year</div>
+              <div>{myStats.academicYearStart.slice(0, 4)}–{String(Number(myStats.academicYearStart.slice(0, 4)) + 1)}</div>
+            </div>
+          )}
         </div>
 
-        {/* Annual call hours progress bar (PGY2 / PGY3 only) */}
+        {/* Annual CUH/PMH hours progress bar (PGY2/PGY3) */}
         {annualHours?.tracked && annualHours.targetHours != null && annualHours.hoursWorked != null && (
           (() => {
             const worked = annualHours.hoursWorked!;
@@ -967,170 +1031,90 @@ export default function ScheduleView({
             const pct = Math.min(100, Math.round((worked / target) * 100));
             const over = worked > target;
             const barColor = over ? 'var(--orange)' : pct >= 80 ? 'var(--green)' : 'var(--blue)';
-            const remaining = target - worked;
             return (
-              <div style={{ marginBottom: 20, padding: '16px 20px', background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)' }}>
+              <div style={{ marginBottom: 24, padding: '16px 20px', background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Annual CUH/PMH Call Hours
-                  </span>
-                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 13, fontWeight: 700, color: barColor }}>
-                    {worked}h / {target}h
-                  </span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Annual CUH/PMH Call Hours</span>
+                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 13, fontWeight: 700, color: barColor }}>{worked}h / {target}h</span>
                 </div>
                 <div style={{ height: 10, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
                   <div style={{ height: '100%', width: `${pct}%`, background: barColor, borderRadius: 99, transition: 'width 0.4s ease' }} />
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 7, fontSize: 11, color: 'var(--muted)' }}>
                   <span>{pct}% of annual target</span>
-                  <span>{over ? `${worked - target}h over target` : `${remaining}h remaining`}</span>
+                  <span>{over ? `${worked - target}h over target` : `${target - worked}h remaining`}</span>
                 </div>
               </div>
             );
           })()
         )}
 
-        {/* Month selector */}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
-          <button className={`btn bsm ${!statsMonth ? 'bg' : 'bgh'}`} onClick={() => setStatsMonth(null)}>
-            Total Block
-          </button>
-          {months.map((m) => (
-            <button
-              key={`${m.year}-${m.month}`}
-              className={`btn bsm ${statsMonth?.year === m.year && statsMonth?.month === m.month ? 'bg' : 'bgh'}`}
-              onClick={() => setStatsMonth(m)}
-            >
-              {MONTHS[m.month].slice(0, 3)} {m.year}
-            </button>
-          ))}
-        </div>
-
-        {/* Junior stats */}
-        {isJunior && jrS && (
-          <>
-            {/* Hours hero */}
-            <div className="sg3" style={{ marginBottom: 18, background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', overflow: 'hidden' }}>
-              {([
-                { label: 'Total Hours on Call', value: jrS.totalHrs, color: 'var(--green)' },
-                { label: 'Weekday Hours', value: jrS.wkdayHrs, color: 'var(--blue)' },
-                { label: 'Weekend & Holiday Hours', value: jrS.wkndHrs + jrS.holHrs, color: 'var(--purple)' },
-              ] as { label: string; value: number; color: string }[]).map(({ label, value, color }, i) => (
-                <div key={label} style={{ padding: '20px 24px', borderLeft: i > 0 ? '1px solid var(--border)' : undefined }}>
-                  <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8, fontWeight: 600 }}>{label}</div>
-                  <div style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 700, color, lineHeight: 1 }}>
-                    <span style={{ fontSize: 38 }}>{value}</span>
-                    <span style={{ fontSize: 18 }}>h</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Stat cards grid */}
-            <div className="sg3" style={{ gap: 14 }}>
-              {sc('Weekday Call Days', jrS.wkdayCount, 'days', 'var(--blue)', `${jrS.wkdayHrs}h`)}
-              {sc('Weekend Call Days', jrS.wkndCount, 'days', 'var(--purple)', `${jrS.wkndHrs}h`)}
-              {sc('Holiday Call Days', jrS.holCount, 'days', 'var(--orange)', `${jrS.holHrs}h`)}
-              {sc(
-                'Weekend Rounding Days',
-                jrS.wkndCount + jrS.holCount + jrS.cuhRdrCount,
-                'days',
-                'var(--teal)',
-                jrS.cuhRdrCount > 0
-                  ? `${jrS.wkndCount + jrS.holCount} primary call + ${jrS.cuhRdrCount} CUH rounder`
-                  : 'as primary call',
-              )}
-              {sc('CUH Rounder Duties', jrS.cuhRdrCount, 'days', 'var(--green)', 'additional rounding')}
-              {sc('Trauma Call Days', jrS.traumaCount, 'days', 'var(--red)', `${jrS.traumaHrs}h`)}
-            </div>
-          </>
+        {!myStats && (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>Loading stats…</div>
         )}
 
-        {/* Senior stats */}
-        {!isJunior && srS && (
-          <div className="sg4" style={{ gap: 14 }}>
-            {sc('Total Call Days', srS.totalCount, 'days', 'var(--gold)')}
-            {sc('Weekday Call Days', srS.wkdayCount, 'days', 'var(--blue)')}
-            {sc('Weekend Call Days', srS.wkndCount, 'days', 'var(--purple)')}
-            {sc('Holiday Call Days', srS.holCount, 'days', 'var(--orange)')}
+        {hasNoStats && (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>
+            No published schedules found for this academic year.
           </div>
         )}
 
-        {/* ── Equity gauge (block-level, not filtered by month) ─────────────── */}
-        {(() => {
-          const cuhBStart = parseDate(cuhSched!.bStart);
-          const cuhBEnd   = parseDate(cuhSched!.bEnd);
+        {myStats && !hasNoStats && (
+          <>
+            {/* ── Year-to-date totals ── */}
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
+              Year-to-Date Totals
+            </div>
 
-          if (isJunior) {
-            const cuhBStartKey = dk(cuhBStart);
-            const cuhBEndKey   = dk(cuhBEnd);
-            // Only include residents who are actually in the CUH/PMH pool for this block.
-            // Residents on CMC/VA rotation have 0 hours assigned, which would drag the
-            // average down and make everyone look like they're working more than average.
-            const jrs = residents.filter((r) => {
-              if (r.pgy > 3 || r.status !== 'active') return false;
-              if (r.rotations && r.rotations.length > 0) {
-                return r.rotations.some(
-                  (seg) =>
-                    (seg.hospital === 'CUH' || seg.hospital === 'PMH') &&
-                    seg.start_date <= cuhBEndKey &&
-                    seg.end_date   >= cuhBStartKey,
+            {renderJrSection(myStats.ytd.cuhPmhJr, 'CUH / PMH · Junior Call', 'var(--green)')}
+            {renderSrSection(myStats.ytd.cuhPmhSr, 'CUH / PMH · Senior Call', 'var(--gold)')}
+            {renderCMCSection(myStats.ytd.cmc, "CMC · Children's Medical Center")}
+            {renderVASection(myStats.ytd.va, 'VA · Veterans Affairs')}
+
+            {/* ── Per-period breakdown ── */}
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, paddingBottom: 8, borderBottom: '1px solid var(--border)', marginTop: 8 }}>
+              By Schedule Period
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 24 }}>
+              {myStats.periods.map((p) => {
+                const isExpanded = expandedPeriods.has(p.scheduleId);
+                const hospitals = [
+                  p.cuhPmhJr ? 'CUH/PMH (Jr)' : null,
+                  p.cuhPmhSr ? 'CUH/PMH (Sr)' : null,
+                  p.cmc ? 'CMC' : null,
+                  p.va ? 'VA' : null,
+                ].filter(Boolean).join(' · ');
+                return (
+                  <div key={p.scheduleId} style={{ border: '1px solid var(--border)', borderRadius: 'var(--r)', overflow: 'hidden' }}>
+                    <button
+                      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: isExpanded ? 'var(--blue-dim)' : 'var(--s1)', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                      onClick={() => {
+                        setExpandedPeriods((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(p.scheduleId)) next.delete(p.scheduleId); else next.add(p.scheduleId);
+                          return next;
+                        });
+                      }}
+                    >
+                      <span style={{ fontSize: 12, fontWeight: 600, flex: 1 }}>{p.name}</span>
+                      <span style={{ fontSize: 11, color: 'var(--muted)' }}>{fmtPeriodLabel(p.startDate, p.endDate)}</span>
+                      <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 8 }}>{hospitals}</span>
+                      <span style={{ fontSize: 12, marginLeft: 8, color: 'var(--muted)' }}>{isExpanded ? '▲' : '▼'}</span>
+                    </button>
+                    {isExpanded && (
+                      <div style={{ padding: '16px 14px', borderTop: '1px solid var(--border)' }}>
+                        {renderJrSection(p.cuhPmhJr, 'CUH / PMH · Junior Call', 'var(--green)')}
+                        {renderSrSection(p.cuhPmhSr, 'CUH / PMH · Senior Call', 'var(--gold)')}
+                        {renderCMCSection(p.cmc, "CMC · Children's Medical Center")}
+                        {renderVASection(p.va, 'VA · Veterans Affairs')}
+                      </div>
+                    )}
+                  </div>
                 );
-              }
-              return r.hospital === 'CUH' || r.hospital === 'PMH';
-            });
-            const potMap: Record<string, number> = {};
-            jrs.forEach((r) => {
-              const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
-              let pot = 0; let d = new Date(cuhBStart);
-              while (d <= cuhBEnd) {
-                const key = dk(d);
-                if (isOnRotation(r, key, ['CUH', 'PMH']) && !offDays.has(key)) {
-                  const dow = d.getDay();
-                  pot += (dow === 0 || dow === 6 || HOLIDAYS.has(key)) ? 24 : 12;
-                }
-                d = addDays(d, 1);
-              }
-              potMap[r.id] = Math.max(1, pot);
-            });
-            const hrsMap: Record<string, number> = {};
-            jrs.forEach((r) => { hrsMap[r.id] = cuhSched!.juniorDays.filter((d) => d.res.id === r.id).reduce((a, d) => a + d.shiftHrs, 0); });
-            const ratioMap: Record<string, number> = {};
-            jrs.forEach((r) => { ratioMap[r.id] = Math.round((hrsMap[r.id] / potMap[r.id]) * 1000) / 10; });
-
-            // Sum across all rotation records for the same person
-            const myAssigned = [...myResIds].reduce((a, id) => a + (hrsMap[id] ?? 0), 0);
-            const myPotential = [...myResIds].reduce((a, id) => a + (potMap[id] ?? 0), 0) || 1;
-            const myRatio = Math.round((myAssigned / myPotential) * 1000) / 10;
-            return renderEquityGauge(myRatio, myAssigned, myPotential, Object.values(ratioMap), 'h');
-          } else {
-            // Senior: days assigned / potential call days
-            const srs = residents.filter((r) => r.pgy >= 4 && (r.status === 'active' || r.status === 'research'));
-            const potDays: Record<string, number> = {};
-            srs.forEach((r) => {
-              const offDays = new Set(allRequests.filter((req) => req.resident_id === r.id && req.type === 'vacation_official').map((req) => req.date));
-              let cnt = 0; let d = new Date(cuhBStart);
-              while (d <= cuhBEnd) { const key = dk(d); if (isOnRotation(r, key, ['CUH', 'PMH', 'Research']) && !offDays.has(key)) cnt++; d = addDays(d, 1); }
-              potDays[r.id] = Math.max(1, cnt);
-            });
-            const assignedDays: Record<string, number> = {};
-            srs.forEach((r) => {
-              let cnt = 0;
-              cuhSched!.seniorWeeks.filter((w) => w.res.id === r.id).forEach((w) => {
-                let d = parseDate(w.wS); const end = parseDate(w.wE);
-                while (d <= end) { cnt++; d = addDays(d, 1); }
-              });
-              assignedDays[r.id] = cnt;
-            });
-            const ratioMap: Record<string, number> = {};
-            srs.forEach((r) => { ratioMap[r.id] = Math.round((assignedDays[r.id] / potDays[r.id]) * 1000) / 10; });
-
-            const myAssigned = [...myResIds].reduce((a, id) => a + (assignedDays[id] ?? 0), 0);
-            const myPotential = [...myResIds].reduce((a, id) => a + (potDays[id] ?? 0), 0) || 1;
-            const myRatio = Math.round((myAssigned / myPotential) * 1000) / 10;
-            return renderEquityGauge(myRatio, myAssigned, myPotential, Object.values(ratioMap), 'd');
-          }
-        })()}
+              })}
+            </div>
+          </>
+        )}
       </div>
     );
   }
@@ -2151,41 +2135,98 @@ export default function ScheduleView({
 
       {!tabLoading && (
         <div>
-          {/* Per-tab schedule selector */}
-          {role === 'chief' && tabScheduleList.length > 0 && (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>SCHEDULE</span>
-              {tabScheduleList.map((s) => {
-                const isActive = s.id === currentSchedId;
-                return (
-                  <span key={s.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 0 }}>
-                    <button
-                      className={`btn bsm${isActive ? ' bg' : ' bgh'}`}
-                      onClick={async () => {
-                        if (!isActive) await onScheduleSelected?.(s.id);
-                      }}
-                      style={{ position: 'relative' }}
-                    >
-                      {s.name}
-                      {s.published && <span style={{ marginLeft: 5, fontSize: 9, color: 'var(--green)', fontWeight: 700 }}>●</span>}
-                    </button>
-                    {role === 'chief' && (
-                      <button
-                        style={{ fontSize: 9, color: 'var(--red)', marginLeft: 2, cursor: 'pointer', border: 'none', background: 'none', padding: '0 3px' }}
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          if (!confirm(`Delete "${s.name}"?`)) return;
-                          await onScheduleDeleted?.(s.id);
-                          onScheduleListChanged?.();
-                          showToast('Schedule deleted');
+          {/* Schedule Library (chief only) */}
+          {role === 'chief' && (
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Schedule Library
+                </span>
+                <button className="btn bsm bg" onClick={onRegenerate}>＋ New Schedule</button>
+              </div>
+              {tabScheduleList.length === 0 ? (
+                <div style={{ padding: '14px 16px', background: 'var(--s2)', borderRadius: 'var(--r)', color: 'var(--muted)', fontSize: 13 }}>
+                  No {hospitalTab === 'cuh_pmh' ? 'CUH/PMH' : hospitalTab.toUpperCase()} schedules generated yet.
+                </div>
+              ) : (
+                <div style={{ background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 'var(--r)', overflow: 'hidden' }}>
+                  {tabScheduleList.map((s, i) => {
+                    const isActive = s.id === currentSchedId;
+                    const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                    const fmtPeriod = (d: string) => {
+                      const dt = parseDate(d);
+                      return `${M[dt.getMonth()]} ${dt.getDate()}, ${dt.getFullYear()}`;
+                    };
+                    return (
+                      <div
+                        key={s.id}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                          borderTop: i > 0 ? '1px solid var(--border)' : undefined,
+                          background: isActive ? 'var(--blue-dim)' : undefined,
+                          transition: 'background 0.15s',
                         }}
-                        title="Delete schedule"
-                      >✕</button>
-                    )}
-                  </span>
-                );
-              })}
-              <button className="btn bsm bgh" onClick={onRegenerate} style={{ marginLeft: 'auto' }}>＋ New Schedule</button>
+                      >
+                        {/* Status badge */}
+                        <div style={{
+                          flexShrink: 0, width: 70, textAlign: 'center',
+                          padding: '3px 8px', borderRadius: 99, fontSize: 11, fontWeight: 700,
+                          background: s.published ? 'rgba(34,197,94,0.15)' : 'rgba(148,163,184,0.15)',
+                          color: s.published ? 'var(--green)' : 'var(--muted)',
+                          border: `1px solid ${s.published ? 'rgba(34,197,94,0.3)' : 'rgba(148,163,184,0.3)'}`,
+                        }}>
+                          {s.published ? '● Live' : '○ Draft'}
+                        </div>
+
+                        {/* Name & period */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: isActive ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {s.name}
+                          </div>
+                          {s.start_date && s.end_date && (
+                            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
+                              {fmtPeriod(s.start_date)} → {fmtPeriod(s.end_date)}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Actions */}
+                        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                          {!isActive && (
+                            <button className="btn bsm bgh" onClick={() => onScheduleSelected?.(s.id)}>
+                              View
+                            </button>
+                          )}
+                          {isActive && (
+                            <button
+                              className={`btn bsm ${s.published ? 'bg' : 'bgh'}`}
+                              onClick={togglePublish}
+                            >
+                              {s.published ? '✓ Unpublish' : 'Publish'}
+                            </button>
+                          )}
+                          <button
+                            className="btn bsm"
+                            style={{ color: 'var(--red)', border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.06)' }}
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              const msg = s.published
+                                ? `Delete "${s.name}"?\n\nThis is a PUBLISHED schedule — residents will immediately lose access to it. To replace it, generate a new schedule for the same date range and publish it first.`
+                                : `Delete draft "${s.name}"?`;
+                              if (!confirm(msg)) return;
+                              await onScheduleDeleted?.(s.id);
+                              onScheduleListChanged?.();
+                              showToast('Schedule deleted');
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -2199,16 +2240,18 @@ export default function ScheduleView({
                 </div>
                 {role === 'chief' && (
                   <div style={{ display: 'flex', gap: 8 }}>
-                    {tabScheduleList.length === 0 && <button className="btn bgh bsm" onClick={onRegenerate}>← Regenerate</button>}
-                    <button className={`btn bsm ${published ? 'bg' : 'bgh'}`} onClick={togglePublish}>
-                      {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
-                    </button>
                     <button className="btn bgh bsm" onClick={exportVAICS}>📅 iCal</button>
                     <button className="btn bg bsm" onClick={exportVAExcel}>📊 Excel</button>
                   </div>
                 )}
               </div>
               <div className="page-sub">{fmtDate(currentTabSchedule.bStart)} → {fmtDate(currentTabSchedule.bEnd)}</div>
+              {role === 'chief' && published && (
+                <div style={{ marginBottom: 12, padding: '8px 14px', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: 'var(--r)', display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
+                  <span>⚠️</span>
+                  <span><strong>Live schedule</strong> — edits and overrides go live immediately for residents.</span>
+                </div>
+              )}
               <div className="tabrow">
                 {TABS.map((t) => (
                   <button key={t.id} className={`tabbtn${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
@@ -2278,16 +2321,18 @@ export default function ScheduleView({
                 </div>
                 {role === 'chief' && (
                   <div style={{ display: 'flex', gap: 8 }}>
-                    {tabScheduleList.length === 0 && <button className="btn bgh bsm" onClick={onRegenerate}>← Regenerate</button>}
-                    <button className={`btn bsm ${published ? 'bg' : 'bgh'}`} onClick={togglePublish}>
-                      {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
-                    </button>
                     <button className="btn bgh bsm" onClick={exportCMCICS}>📅 iCal</button>
                     <button className="btn bg bsm" onClick={exportCMCExcel}>📊 Excel</button>
                   </div>
                 )}
               </div>
               <div className="page-sub">{fmtDate(currentTabSchedule.bStart)} → {fmtDate(currentTabSchedule.bEnd)}</div>
+              {role === 'chief' && published && (
+                <div style={{ marginBottom: 12, padding: '8px 14px', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: 'var(--r)', display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
+                  <span>⚠️</span>
+                  <span><strong>Live schedule</strong> — edits and overrides go live immediately for residents.</span>
+                </div>
+              )}
               <div className="tabrow">
                 {TABS.map((t) => (
                   <button key={t.id} className={`tabbtn${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
@@ -2361,15 +2406,6 @@ export default function ScheduleView({
                 <div className="page-title">{currentTabSchedule.blockName}</div>
                 {role === 'chief' && (
                   <div style={{ display: 'flex', gap: 8 }}>
-                    {tabScheduleList.length === 0 && (
-                      <button className="btn bgh bsm" onClick={onRegenerate}>← Regenerate</button>
-                    )}
-                    <button
-                      className={`btn bsm ${published ? 'bg' : 'bgh'}`}
-                      onClick={togglePublish}
-                    >
-                      {published ? '✓ Published — Unpublish' : 'Publish to Residents'}
-                    </button>
                     <button className="btn bgh bsm" onClick={exportICS}>📅 iCal</button>
                     <button className="btn bg bsm" onClick={exportExcel}>📊 Excel</button>
                   </div>
@@ -2379,6 +2415,14 @@ export default function ScheduleView({
               <div className="page-sub">
                 {fmtDate(currentTabSchedule.bStart)} → {fmtDate(currentTabSchedule.bEnd)}
               </div>
+
+              {/* Live-edit warning */}
+              {role === 'chief' && published && (
+                <div style={{ marginBottom: 12, padding: '8px 14px', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: 'var(--r)', display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
+                  <span>⚠️</span>
+                  <span><strong>Live schedule</strong> — edits and overrides go live immediately for residents.</span>
+                </div>
+              )}
 
               {/* CUH/PMH sub-tabs */}
               <div className="tabrow">
