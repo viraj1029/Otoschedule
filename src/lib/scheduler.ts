@@ -1259,12 +1259,17 @@ export function generateCMCSchedule(
     const sunKey = dk(addDays(fri, 2));
     const isPwTrauma = TRAUMA_WEEKS.has(friKey) || TRAUMA_WEEKS.has(satKey) || TRAUMA_WEEKS.has(sunKey);
 
-    let candidates = pool.filter(
-      (r) => r.id !== lastPwId && !(offMap[r.id].has(friKey) && offMap[r.id].has(satKey) && offMap[r.id].has(sunKey)),
-    );
-    // PGY4 residents don't take trauma power weekends.
-    if (isPwTrauma) candidates = candidates.filter((r) => r.pgy < 4);
-    if (!candidates.length && isPwTrauma) candidates = pool.filter((r) => r.pgy < 4 && r.id !== lastPwId);
+    const notFullyOff = (r: Resident) =>
+      !(offMap[r.id].has(friKey) && offMap[r.id].has(satKey) && offMap[r.id].has(sunKey));
+    const notPgy4 = (r: Resident) => !isPwTrauma || r.pgy < 4;
+
+    // Fallback chain: PGY4 excluded from trauma weekends at every level until no other option.
+    let candidates = pool.filter((r) => notPgy4(r) && r.id !== lastPwId && notFullyOff(r));
+    if (!candidates.length) candidates = pool.filter((r) => notPgy4(r) && r.id !== lastPwId);
+    if (!candidates.length) candidates = pool.filter((r) => notPgy4(r) && notFullyOff(r));
+    if (!candidates.length) candidates = pool.filter((r) => notPgy4(r));
+    // Only allow PGY4 on a trauma weekend if truly no other option exists.
+    if (!candidates.length) candidates = pool.filter((r) => r.id !== lastPwId && notFullyOff(r));
     if (!candidates.length) candidates = pool.filter((r) => r.id !== lastPwId);
     if (!candidates.length) candidates = [...pool];
 
@@ -1413,7 +1418,7 @@ export function generateCMCSchedule(
 
   // Move entire power weekends from over- to under-assigned residents until the
   // weekend-ratio gap (wkndHours / wkndPotentialHours) is ≤ tol.
-  function cmcRebalanceWeekend(tol = 0.05) {
+  function cmcRebalanceWeekend(tol = 0.04) {
     const ratioOf = (r: Resident) => wkndHours[r.id] / wkndPotentialHours[r.id];
     for (let iter = 0; iter < 400; iter++) {
       const sorted = [...pool].sort((a, b) => ratioOf(a) - ratioOf(b));
@@ -1459,7 +1464,7 @@ export function generateCMCSchedule(
   // weekend from the most under-loaded resident. Equal hours ⇒ each resident's
   // wkndHours and total hours are unchanged; only traumaHours shifts.
   // Mirrors CUHPMH's traumaSwap() pass.
-  function cmcTraumaSwap(tol = 0.05) {
+  function cmcTraumaSwap(tol = 0.04) {
     // PGY4 residents don't take trauma weekends — exclude them from trauma equity.
     const traumaPool = pool.filter((r) => r.pgy < 4);
     const ratioOf = (r: Resident) => traumaHours[r.id] / traumaPotentialHours[r.id];
@@ -1555,7 +1560,7 @@ export function generateCMCSchedule(
 
   // Move individual weekday shifts from over- to under-assigned residents until
   // the weekday-count ratio (wdCount / wdAvail) gap is ≤ tol.
-  function cmcRebalanceWeekday(tol = 0.05) {
+  function cmcRebalanceWeekday(tol = 0.04) {
     const ratioOf = (r: Resident) => wdCount[r.id] / wdAvail[r.id];
     for (let iter = 0; iter < 400; iter++) {
       const sorted = [...pool].sort((a, b) => ratioOf(a) - ratioOf(b));
