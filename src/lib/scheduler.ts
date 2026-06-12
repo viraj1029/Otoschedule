@@ -1524,6 +1524,7 @@ export function generateCMCSchedule(
     }
   }
 
+
   // Reassign a single weekday shift atomically.
   function cmcReassignWD(dateKey: string, from: Resident, to: Resident) {
     const day = cmcDays.find((d) => d.dateKey === dateKey && !d.isPowerWeekend && d.res.id === from.id);
