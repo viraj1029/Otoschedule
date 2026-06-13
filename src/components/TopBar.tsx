@@ -22,7 +22,7 @@ export default function TopBar({ role, step, residentName, onGoStep, onSignOut }
   return (
     <div className="topbar">
       <div className="brand">
-        OTO Schedule
+        SHAH
       </div>
       <div className="topbar-spacer" />
 
