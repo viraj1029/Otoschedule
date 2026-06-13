@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'OTO Schedule',
-  description: 'Otolaryngology call schedule management',
+  title: 'SHAH',
+  description: 'Scheduling hours and availability Hub',
 };
 
 export const viewport: Viewport = {

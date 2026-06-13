@@ -83,15 +83,15 @@ export default function LoginGate({ residents, onLogin, showToast }: Props) {
         }}
       >
         <div className="brand">
-          OTO Scheduler <span>UTSW · CUH / PMH Block</span>
+          SHAH
         </div>
       </div>
 
       <div className="login-wrap">
         <div className="login-card">
-          <div className="login-logo">OTO Scheduler</div>
+          <div className="login-logo">SHAH</div>
           <div className="login-sub">
-            UTSW · CUH/PMH Block
+            Scheduling hours and availability Hub
             <br />
             Sign in to access your call schedule portal.
           </div>
