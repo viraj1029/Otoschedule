@@ -362,12 +362,20 @@ export default function Requests({
   }
 
   // Build map of other residents' official vacation days (for resident personal view)
+  // Only include peers who are at the same hospital as the current resident on that date.
+  function hospOnDate(res: Resident, dateStr: string): string {
+    if (res.rotations && res.rotations.length > 0) {
+      const seg = res.rotations.find((s) => dateStr >= s.start_date && dateStr <= s.end_date);
+      return seg?.hospital ?? res.hospital;
+    }
+    return res.hospital;
+  }
   const othersVacOffMap: Record<string, Resident[]> = {};
-  if (role === 'resident') {
+  if (role === 'resident' && currentResidentFull) {
     allRequests.forEach((req) => {
       if (req.type === 'vacation_official' && !personResIds.includes(req.resident_id)) {
         const res = residents.find((r) => r.id === req.resident_id);
-        if (res) {
+        if (res && hospOnDate(res, req.date) === hospOnDate(currentResidentFull, req.date)) {
           if (!othersVacOffMap[req.date]) othersVacOffMap[req.date] = [];
           if (!othersVacOffMap[req.date].find((x) => x.id === res.id)) othersVacOffMap[req.date].push(res);
         }
