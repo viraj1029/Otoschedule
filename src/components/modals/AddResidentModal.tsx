@@ -144,7 +144,7 @@ export default function AddResidentModal({ open, onClose, onAdded, showToast, ex
   }
 
   async function doAdd() {
-    if (segments.length === 0) { showToast('Add at least one rotation segment', true); return; }
+    if (segments.length === 0 && parseInt(pgy) > 1) { showToast('Add at least one rotation segment', true); return; }
     setLoading(true);
     try {
       // Derive a primary hospital from the first segment
@@ -225,7 +225,8 @@ export default function AddResidentModal({ open, onClose, onAdded, showToast, ex
               </div>
               <div className="fl">
                 <label className="flb">PGY Level</label>
-                <select value={pgy} onChange={(e) => setPgy(e.target.value)}>
+                <select value={pgy} onChange={(e) => { setPgy(e.target.value); if (e.target.value === '1') setSegments([]); }}>
+                  <option value="1">PGY-1 (Intern)</option>
                   <option value="2">PGY-2</option>
                   <option value="3">PGY-3</option>
                   <option value="4">PGY-4</option>
@@ -272,6 +273,7 @@ export default function AddResidentModal({ open, onClose, onAdded, showToast, ex
             </>
           )}
 
+          {parseInt(pgy) > 1 && (
           <div className="fl">
             <label className="flb">Rotation Schedule</label>
             <div className="hint" style={{ marginBottom: 6 }}>
@@ -286,6 +288,12 @@ export default function AddResidentModal({ open, onClose, onAdded, showToast, ex
               pgy={parseInt(pgy) || 4}
             />
           </div>
+          )}
+          {parseInt(pgy) === 1 && (
+          <div className="hint" style={{ marginTop: 4 }}>
+            PGY-1 interns are not included in any call schedule. They will appear in the resident list for vacation request tracking only.
+          </div>
+          )}
         </div>
 
         <div className="mf">
@@ -293,7 +301,7 @@ export default function AddResidentModal({ open, onClose, onAdded, showToast, ex
           <button
             className="btn bg"
             onClick={doAdd}
-            disabled={loading || !canSubmit || segments.length === 0 || (mode === 'existing' && available.length === 0)}
+            disabled={loading || !canSubmit || (segments.length === 0 && parseInt(pgy) > 1) || (mode === 'existing' && available.length === 0)}
           >
             {loading ? <span className="spinner" /> : mode === 'new' ? 'Add & Generate PIN' : 'Add to Block'}
           </button>

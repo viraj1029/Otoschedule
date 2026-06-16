@@ -198,7 +198,7 @@ export default function Requests({
     role === 'resident' ? (currentResId ?? '') :
     residents.length > 0 ? '__all__' : ''
   );
-  const [resFilter, setResFilter] = useState<'all' | 'senior' | 'junior'>('all');
+  const [resFilter, setResFilter] = useState<'all' | 'senior' | 'junior' | 'intern'>('all');
 
   const [resTab, setResTab] = useState<'requests' | 'schedule'>('requests');
   const [chiefTab, setChiefTab] = useState<'requests' | 'vacations'>('requests');
@@ -511,13 +511,13 @@ export default function Requests({
           </div>
           {isAllView && (
             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-              {(['all', 'senior', 'junior'] as const).map((f) => (
+              {(['all', 'senior', 'junior', 'intern'] as const).map((f) => (
                 <button
                   key={f}
                   className={`btn bsm${resFilter === f ? ' bg' : ' bgh'}`}
                   onClick={() => setResFilter(f)}
                 >
-                  {f === 'all' ? 'All' : f === 'senior' ? 'Senior (PGY4/5)' : 'Junior (PGY2/3)'}
+                  {f === 'all' ? 'All' : f === 'senior' ? 'Senior (PGY4/5)' : f === 'junior' ? 'Junior (PGY2/3)' : 'Intern (PGY1)'}
                 </button>
               ))}
             </div>
@@ -585,7 +585,8 @@ export default function Requests({
                   const allForDay = allResMap[key] ?? [];
                   const rList = allForDay.filter((r) =>
                     resFilter === 'senior' ? r.pgy >= 4 :
-                    resFilter === 'junior' ? r.pgy <= 3 : true
+                    resFilter === 'junior' ? (r.pgy >= 2 && r.pgy <= 3) :
+                    resFilter === 'intern' ? r.pgy === 1 : true
                   );
                   let cls = 'rc';
                   if (!inBlock) cls += ' rcoff';
