@@ -15,10 +15,11 @@ export async function GET() {
     return NextResponse.json(rows);
   }
 
-  // Resident — only their own
+  // Resident — their own requests + other residents' official vacation (read-only context)
   const { rows } = await sql`
     SELECT * FROM requests
-    WHERE resident_id = ${session.residentId!} AND block_id = ${DEFAULT_BLOCK_ID}
+    WHERE block_id = ${DEFAULT_BLOCK_ID}
+      AND (resident_id = ${session.residentId!} OR type = 'vacation_official')
   `;
   return NextResponse.json(rows);
 }

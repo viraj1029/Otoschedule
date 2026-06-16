@@ -361,6 +361,20 @@ export default function Requests({
     return q ? (officialVacByQuarter[q.label] ?? 0) : 0;
   }
 
+  // Build map of other residents' official vacation days (for resident personal view)
+  const othersVacOffMap: Record<string, Resident[]> = {};
+  if (role === 'resident') {
+    allRequests.forEach((req) => {
+      if (req.type === 'vacation_official' && !personResIds.includes(req.resident_id)) {
+        const res = residents.find((r) => r.id === req.resident_id);
+        if (res) {
+          if (!othersVacOffMap[req.date]) othersVacOffMap[req.date] = [];
+          if (!othersVacOffMap[req.date].find((x) => x.id === res.id)) othersVacOffMap[req.date].push(res);
+        }
+      }
+    });
+  }
+
   // Build all-residents request map for chief "all" view
   const allResMap: Record<string, Resident[]> = {};
   if (isAllView) {
@@ -632,6 +646,7 @@ export default function Requests({
                   (!isWk && !isHol && !isAllView)
                     ? () => cycleWeekday(key, isVac, isVacOff)
                     : () => toggleDay(key, type, toggleResId);
+                const othersOnDay = role === 'resident' ? (othersVacOffMap[key] ?? []) : [];
                 return (
                   <div
                     key={key}
@@ -640,6 +655,18 @@ export default function Requests({
                     onClick={handleClick}
                   >
                     {day}
+                    {othersOnDay.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 1, marginTop: 2, justifyContent: 'center' }}>
+                        {othersOnDay.map((r) => (
+                          <div key={r.id} title={`${r.name} — official vacation`} style={{
+                            background: r.color, color: '#000', borderRadius: 2,
+                            fontSize: 8, fontWeight: 700, padding: '0 2px', lineHeight: 1.4, opacity: 0.75, flexShrink: 0,
+                          }}>
+                            {initials(r.name)}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -657,6 +684,12 @@ export default function Requests({
                   {label}
                 </div>
               ))}
+              {role === 'resident' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <div style={{ width: 10, height: 10, background: 'var(--muted)', borderRadius: 2, opacity: 0.75 }} />
+                  Initials = peer official vacation (read-only)
+                </div>
+              )}
             </div>
           </div>
         </div>
