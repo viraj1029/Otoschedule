@@ -90,7 +90,10 @@ function RotationEditor({
             <div className="fl">
               <label className="flb">Hospital</label>
               <select value={newHosp} onChange={(e) => setNewHosp(e.target.value as Hospital)}>
-                {ALL_HOSPITALS.filter((h) => h !== 'Research' || pgy >= 4).map((h) => <option key={h} value={h}>{h === 'Research' ? 'Research (backup)' : h}</option>)}
+                {ALL_HOSPITALS.filter((h) => {
+                  if (pgy === 1) return h === 'CUH' || h === 'PMH';
+                  return h !== 'Research' || pgy >= 4;
+                }).map((h) => <option key={h} value={h}>{h === 'Research' ? 'Research (backup)' : h}</option>)}
               </select>
             </div>
           </div>
@@ -225,7 +228,8 @@ export default function AddResidentModal({ open, onClose, onAdded, showToast, ex
               </div>
               <div className="fl">
                 <label className="flb">PGY Level</label>
-                <select value={pgy} onChange={(e) => setPgy(e.target.value)}>
+                <select value={pgy} onChange={(e) => { setPgy(e.target.value); if (e.target.value === '1') setSegments([]); }}>
+                  <option value="1">PGY-1 (Intern)</option>
                   <option value="2">PGY-2</option>
                   <option value="3">PGY-3</option>
                   <option value="4">PGY-4</option>
@@ -275,8 +279,9 @@ export default function AddResidentModal({ open, onClose, onAdded, showToast, ex
           <div className="fl">
             <label className="flb">Rotation Schedule</label>
             <div className="hint" style={{ marginBottom: 6 }}>
-              Add one segment per hospital rotation. The scheduler pulls the resident into the call
-              pool only during their active segments.
+              {parseInt(pgy) === 1
+                ? 'Add one segment per hospital rotation (CUH / PMH). Used for grouping vacation requests — interns are not included in call scheduling.'
+                : 'Add one segment per hospital rotation. The scheduler pulls the resident into the call pool only during their active segments.'}
             </div>
             <RotationEditor
               segments={segments}

@@ -513,7 +513,7 @@ export default function ScheduleView({
   }
 
   function renderHoursTab() {
-    const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active')
+    const jrs = residents.filter((r) => r.pgy >= 2 && r.pgy <= 3 && r.status === 'active')
       .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
     const bd = jrs.map((res) => {
       const days = cuhSched!.juniorDays.filter((d) => d.res.id === res.id);
@@ -874,7 +874,7 @@ export default function ScheduleView({
     const res = residents.find((r) => r.id === currentResId);
     if (!res) return null;
 
-    const isJunior = myStats ? myStats.isJunior : res.pgy <= 3;
+    const isJunior = myStats ? myStats.isJunior : (res.pgy >= 2 && res.pgy <= 3);
 
     const resInitials = (() => {
       const parts = res.name.trim().split(/\s+/);
@@ -1325,7 +1325,7 @@ export default function ScheduleView({
   function renderEquityTab() {
     const srs = residents.filter((r) => r.pgy >= 4 && (r.status === 'active' || r.status === 'research' ||
         r.rotations?.some((seg) => seg.hospital === 'Research')));
-    const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
+    const jrs = residents.filter((r) => r.pgy >= 2 && r.pgy <= 3 && r.status === 'active');
     const bStart = parseDate(cuhSched!.bStart);
     const bEnd = parseDate(cuhSched!.bEnd);
 

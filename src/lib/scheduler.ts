@@ -191,7 +191,7 @@ export function generateSchedule(
     .filter((r) => r.pgy >= 4 && r.status === 'active' && !resRIds.has(r.id))
     .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
   const jrs = eligibleResidents
-    .filter((r) => r.pgy <= 3 && r.status === 'active')
+    .filter((r) => r.pgy >= 2 && r.pgy <= 3 && r.status === 'active')
     .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
 
   const needSr = mode === 'merged' || mode === 'senior';

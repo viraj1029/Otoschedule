@@ -95,7 +95,8 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
 
   const sorted = [...residents].sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
   const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active');
-  const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active');
+  const jrs = residents.filter((r) => r.pgy >= 2 && r.pgy <= 3 && r.status === 'active');
+  const interns = residents.filter((r) => r.pgy === 1);
 
   function hasRotationAt(r: Resident, hosp: Hospital) {
     return r.rotations?.some((rot) => rot.hospital === hosp) ?? r.hospital === hosp;
@@ -438,7 +439,7 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
                     <td><span className={`bdg ${r.pgy >= 4 ? 'bg2' : 'bb'}`}>PGY-{r.pgy}</span></td>
                     <td>
                       <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-                        {r.pgy >= 4 ? 'Senior Call' : 'Junior Call'}
+                        {r.pgy >= 4 ? 'Senior Call' : r.pgy === 1 ? 'Intern (No Call)' : 'Junior Call'}
                       </span>
                     </td>
                     <td>{statusBadge}</td>
@@ -477,11 +478,12 @@ export default function BlockSetup({ block, residents, onBlockSaved, onResidents
       </div>
 
       {/* Pool summary */}
-      <div className="srow" style={{ gridTemplateColumns: 'repeat(6,1fr)', marginBottom: 20 }}>
+      <div className="srow" style={{ gridTemplateColumns: 'repeat(7,1fr)', marginBottom: 20 }}>
         {[
           { l: 'Seniors', v: srs.length, c: 'var(--gold)' },
           { l: 'Research Rot', v: residents.filter((r) => r.rotations?.some((rot) => rot.hospital === 'Research')).length, c: 'var(--pink)' },
           { l: 'Juniors PGY-2/3', v: jrs.length, c: 'var(--blue)' },
+          { l: 'Interns PGY-1', v: interns.length, c: 'var(--muted)' },
           { l: 'CUH', v: residents.filter((r) => r.status !== 'away' && hasRotationAt(r, 'CUH')).length, c: 'var(--green)' },
           { l: 'PMH', v: residents.filter((r) => r.status !== 'away' && hasRotationAt(r, 'PMH')).length, c: 'var(--purple)' },
           { l: 'CMC', v: residents.filter((r) => r.status !== 'away' && hasRotationAt(r, 'CMC')).length, c: 'var(--blue)' },

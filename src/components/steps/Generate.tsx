@@ -88,7 +88,7 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
   const resR = residents.filter((r) => r.pgy >= 4 && hasResearchRotation(r));
   const resRIds = new Set(resR.map((r) => r.id));
   const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active' && !resRIds.has(r.id) && (hasHospRotation(r, 'CUH') || hasHospRotation(r, 'PMH')));
-  const jrs = residents.filter((r) => r.pgy <= 3 && r.status === 'active' && (hasHospRotation(r, 'CUH') || hasHospRotation(r, 'PMH')));
+  const jrs = residents.filter((r) => r.pgy >= 2 && r.pgy <= 3 && r.status === 'active' && (hasHospRotation(r, 'CUH') || hasHospRotation(r, 'PMH')));
   const cmcPool = residents.filter((r) => r.pgy >= 2 && r.pgy <= 4 && r.status === 'active' && hasHospRotation(r, 'CMC'));
   const vaPool  = residents.filter((r) => (r.pgy === 2 || r.pgy === 4) && r.status === 'active' && hasHospRotation(r, 'VA'));
 
