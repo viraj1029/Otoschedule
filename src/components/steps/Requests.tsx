@@ -268,8 +268,7 @@ export default function Requests({
       const ownerResId = reqOwner.get(`${key}:vacation_official`) ?? resId;
       await toggleDay(key, 'vacation_official', ownerResId);
     } else if (isOff) {
-      const usedThisQuarter = officialVacUsedForDate(key);
-      if (usedThisQuarter < 5) {
+      if (totalOfficialVacUsed < TOTAL_OFFICIAL_VAC_LIMIT) {
         const ownerResId = reqOwner.get(`${key}:vacation`) ?? resId;
         try {
           // Make both API calls first
@@ -287,7 +286,7 @@ export default function Requests({
         const ownerResId = reqOwner.get(`${key}:vacation`) ?? resId;
         await toggleDay(key, 'vacation', ownerResId);
         const q = quarterOf(key);
-        showToast(`Cleared — official vacation limit already reached for ${q?.label ?? 'this quarter'}`, true);
+        showToast(`Cleared — official vacation limit of ${TOTAL_OFFICIAL_VAC_LIMIT} days already reached`, true);
       }
     } else {
       await toggleDay(key, 'vacation', resId);
@@ -353,6 +352,9 @@ export default function Requests({
     const q = quarterOf(d);
     if (q) officialVacByQuarter[q.label] = (officialVacByQuarter[q.label] ?? 0) + 1;
   }
+
+  const TOTAL_OFFICIAL_VAC_LIMIT = 20;
+  const totalOfficialVacUsed = Object.values(officialVacByQuarter).reduce((a, b) => a + b, 0);
 
   function officialVacUsedForDate(dateStr: string): number {
     const q = quarterOf(dateStr);
@@ -645,7 +647,7 @@ export default function Requests({
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12, fontSize: 11, color: 'var(--muted)' }}>
               {[
                 { cls: 'rcvac', label: 'Prefer off / unavailable' },
-                ...((role === 'resident' || (role === 'chief' && activeResId && !isAllView)) ? [{ cls: 'rcvacoff', label: 'Official vacation (5-day limit)' }] : []),
+                ...((role === 'resident' || (role === 'chief' && activeResId && !isAllView)) ? [{ cls: 'rcvacoff', label: 'Official vacation (20-day total limit)' }] : []),
                 { cls: 'rcwk', label: 'Weekend off' },
                 { cls: 'rchol', label: 'Holiday (click to request off)' },
                 { cls: 'rcholreq', label: 'Holiday requested off' },
@@ -667,15 +669,19 @@ export default function Requests({
             <div className="cb" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {(role === 'resident' || (role === 'chief' && activeResId && !isAllView)) && (
                 <div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Official vacation (5 days / quarter)</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>Official vacation</span>
+                    <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: totalOfficialVacUsed >= TOTAL_OFFICIAL_VAC_LIMIT ? 'var(--red)' : totalOfficialVacUsed > 0 ? 'var(--orange)' : 'var(--muted2)' }}>
+                      {totalOfficialVacUsed} / {TOTAL_OFFICIAL_VAC_LIMIT}
+                    </span>
+                  </div>
                   {quarters.map((q) => {
                     const used = officialVacByQuarter[q.label] ?? 0;
-                    const atLimit = used >= 5;
                     return (
                       <div key={q.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
                         <span style={{ fontSize: 11, color: 'var(--muted2)' }}>{q.label}</span>
-                        <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: atLimit ? 'var(--red)' : used > 0 ? 'var(--orange)' : 'var(--muted2)' }}>
-                          {used} / 5
+                        <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: used > 0 ? 'var(--orange)' : 'var(--muted2)' }}>
+                          {used}
                         </span>
                       </div>
                     );
