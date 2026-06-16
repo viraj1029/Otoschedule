@@ -90,7 +90,10 @@ function RotationEditor({
             <div className="fl">
               <label className="flb">Hospital</label>
               <select value={newHosp} onChange={(e) => setNewHosp(e.target.value as Hospital)}>
-                {ALL_HOSPITALS.filter((h) => h !== 'Research' || pgy >= 4).map((h) => <option key={h} value={h}>{h === 'Research' ? 'Research (backup)' : h}</option>)}
+                {ALL_HOSPITALS.filter((h) => {
+                  if (pgy === 1) return h === 'CUH' || h === 'PMH';
+                  return h !== 'Research' || pgy >= 4;
+                }).map((h) => <option key={h} value={h}>{h === 'Research' ? 'Research (backup)' : h}</option>)}
               </select>
             </div>
           </div>
@@ -144,7 +147,7 @@ export default function AddResidentModal({ open, onClose, onAdded, showToast, ex
   }
 
   async function doAdd() {
-    if (segments.length === 0 && parseInt(pgy) > 1) { showToast('Add at least one rotation segment', true); return; }
+    if (segments.length === 0) { showToast('Add at least one rotation segment', true); return; }
     setLoading(true);
     try {
       // Derive a primary hospital from the first segment
@@ -273,12 +276,12 @@ export default function AddResidentModal({ open, onClose, onAdded, showToast, ex
             </>
           )}
 
-          {parseInt(pgy) > 1 && (
           <div className="fl">
             <label className="flb">Rotation Schedule</label>
             <div className="hint" style={{ marginBottom: 6 }}>
-              Add one segment per hospital rotation. The scheduler pulls the resident into the call
-              pool only during their active segments.
+              {parseInt(pgy) === 1
+                ? 'Add one segment per hospital rotation (CUH / PMH). Used for grouping vacation requests — interns are not included in call scheduling.'
+                : 'Add one segment per hospital rotation. The scheduler pulls the resident into the call pool only during their active segments.'}
             </div>
             <RotationEditor
               segments={segments}
@@ -288,12 +291,6 @@ export default function AddResidentModal({ open, onClose, onAdded, showToast, ex
               pgy={parseInt(pgy) || 4}
             />
           </div>
-          )}
-          {parseInt(pgy) === 1 && (
-          <div className="hint" style={{ marginTop: 4 }}>
-            PGY-1 interns are not included in any call schedule. They will appear in the resident list for vacation request tracking only.
-          </div>
-          )}
         </div>
 
         <div className="mf">
@@ -301,7 +298,7 @@ export default function AddResidentModal({ open, onClose, onAdded, showToast, ex
           <button
             className="btn bg"
             onClick={doAdd}
-            disabled={loading || !canSubmit || (segments.length === 0 && parseInt(pgy) > 1) || (mode === 'existing' && available.length === 0)}
+            disabled={loading || !canSubmit || segments.length === 0 || (mode === 'existing' && available.length === 0)}
           >
             {loading ? <span className="spinner" /> : mode === 'new' ? 'Add & Generate PIN' : 'Add to Block'}
           </button>
