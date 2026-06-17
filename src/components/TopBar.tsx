@@ -7,8 +7,10 @@ interface Props {
   step: Step;
   residentName: string | null;
   block: Block | null;
+  theme: 'dark' | 'light';
   onGoStep: (s: Step) => void;
   onSignOut: () => void;
+  onToggleTheme: () => void;
 }
 
 const STEPS: { n: Step; label: string }[] = [
@@ -18,7 +20,7 @@ const STEPS: { n: Step; label: string }[] = [
   { n: 4, label: 'Schedule' },
 ];
 
-export default function TopBar({ role, step, residentName, onGoStep, onSignOut }: Props) {
+export default function TopBar({ role, step, residentName, theme, onGoStep, onSignOut, onToggleTheme }: Props) {
   return (
     <div className="topbar">
       <div className="brand">
@@ -48,6 +50,14 @@ export default function TopBar({ role, step, residentName, onGoStep, onSignOut }
       )}
 
       <div className="topbar-right">
+        <button
+          className="mode-btn"
+          onClick={onToggleTheme}
+          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          style={{ fontSize: 13, padding: '4px 8px' }}
+        >
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
         <div
           className="res-badge"
           style={{
