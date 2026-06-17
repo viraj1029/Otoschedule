@@ -2085,6 +2085,59 @@ export default function ScheduleView({
     showToast('CMC iCal exported');
   }
 
+  function exportMyICS() {
+    if (!currentResId) return;
+    const loginRes = residents.find((r) => r.id === currentResId);
+    const personId = loginRes?.person_id;
+    const myResIds = new Set(
+      personId ? residents.filter((r) => r.person_id === personId).map((r) => r.id) : [currentResId]
+    );
+
+    let ics = 'BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//OTO Scheduler//UTSW//EN\n';
+    let count = 0;
+
+    if (cuhSched) {
+      cuhSched.juniorDays.filter((jd) => myResIds.has(jd.res.id)).forEach((jd) => {
+        const ds = jd.dateKey.replace(/-/g, '');
+        const de = dk(addDays(parseDate(jd.dateKey), 1)).replace(/-/g, '');
+        ics += `BEGIN:VEVENT\nDTSTART;VALUE=DATE:${ds}\nDTEND;VALUE=DATE:${de}\nSUMMARY:Jr Call · ${jd.shiftHrs}h\nEND:VEVENT\n`;
+        count++;
+      });
+      cuhSched.seniorWeeks.filter((w) => myResIds.has(w.res.id)).forEach((w) => {
+        const ds = w.wS.replace(/-/g, '');
+        const de = dk(addDays(parseDate(w.wE), 1)).replace(/-/g, '');
+        ics += `BEGIN:VEVENT\nDTSTART;VALUE=DATE:${ds}\nDTEND;VALUE=DATE:${de}\nSUMMARY:${w.isBackup ? 'Research Backup' : 'Sr Call'}\nEND:VEVENT\n`;
+        count++;
+      });
+    }
+
+    if (vaSched) {
+      vaSched.weeks.filter((w) => myResIds.has(w.res.id)).forEach((w) => {
+        const ds = w.wS.replace(/-/g, '');
+        const de = dk(addDays(parseDate(w.wE), 1)).replace(/-/g, '');
+        ics += `BEGIN:VEVENT\nDTSTART;VALUE=DATE:${ds}\nDTEND;VALUE=DATE:${de}\nSUMMARY:VA Call\nEND:VEVENT\n`;
+        count++;
+      });
+    }
+
+    if (cmcDayData) {
+      cmcDayData.days.filter((d) => myResIds.has(d.res.id)).forEach((day) => {
+        const ds = day.dateKey.replace(/-/g, '');
+        const de = dk(addDays(parseDate(day.dateKey), 1)).replace(/-/g, '');
+        ics += `BEGIN:VEVENT\nDTSTART;VALUE=DATE:${ds}\nDTEND;VALUE=DATE:${de}\nSUMMARY:CMC Call · ${day.shiftHrs}h\nEND:VEVENT\n`;
+        count++;
+      });
+    }
+
+    ics += 'END:VCALENDAR';
+    if (count === 0) { showToast('No call shifts found for you in this schedule'); return; }
+    const blob = new Blob([ics], { type: 'text/calendar' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'my_call_schedule.ics'; a.click();
+    URL.revokeObjectURL(url);
+    showToast(`Exported ${count} shift${count !== 1 ? 's' : ''} to iCal`);
+  }
+
   function navCal(dir: number) {
     let m = calMonth + dir; let y = calYear;
     if (m > 11) { m = 0; y++; } if (m < 0) { m = 11; y--; }
@@ -2279,6 +2332,9 @@ export default function ScheduleView({
                     <button className="btn bg bsm" onClick={exportVAExcel}>📊 Excel</button>
                   </div>
                 )}
+                {role === 'resident' && currentResId && (
+                  <button className="btn bgh bsm" onClick={exportMyICS}>📅 My iCal</button>
+                )}
               </div>
               <div className="page-sub">{fmtDate(currentTabSchedule.bStart)} → {fmtDate(currentTabSchedule.bEnd)}</div>
               {role === 'chief' && published && (
@@ -2359,6 +2415,9 @@ export default function ScheduleView({
                     <button className="btn bgh bsm" onClick={exportCMCICS}>📅 iCal</button>
                     <button className="btn bg bsm" onClick={exportCMCExcel}>📊 Excel</button>
                   </div>
+                )}
+                {role === 'resident' && currentResId && (
+                  <button className="btn bgh bsm" onClick={exportMyICS}>📅 My iCal</button>
                 )}
               </div>
               <div className="page-sub">{fmtDate(currentTabSchedule.bStart)} → {fmtDate(currentTabSchedule.bEnd)}</div>
@@ -2444,6 +2503,9 @@ export default function ScheduleView({
                     <button className="btn bgh bsm" onClick={exportICS}>📅 iCal</button>
                     <button className="btn bg bsm" onClick={exportExcel}>📊 Excel</button>
                   </div>
+                )}
+                {role === 'resident' && currentResId && (
+                  <button className="btn bgh bsm" onClick={exportMyICS}>📅 My iCal</button>
                 )}
               </div>
 
