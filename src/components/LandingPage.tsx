@@ -68,7 +68,7 @@ function AppFrame({ children }: { children: React.ReactNode }) {
         padding: '0 16px',
         gap: 10,
       }}>
-        <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 800, color: '#f59e0b' }}>SHAH</span>
+        <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 800, color: '#f59e0b' }}>AuriCall</span>
         <div style={{ flex: 1 }} />
         <div style={{ width: 60, height: 18, background: '#27272a', borderRadius: 100 }} />
         <div style={{ width: 44, height: 18, background: '#27272a', borderRadius: 100 }} />

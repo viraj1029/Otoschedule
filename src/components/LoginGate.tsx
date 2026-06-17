@@ -83,15 +83,15 @@ export default function LoginGate({ residents, onLogin, showToast }: Props) {
         }}
       >
         <div className="brand">
-          SHAH
+          AuriCall
         </div>
       </div>
 
       <div className="login-wrap">
         <div className="login-card">
-          <div className="login-logo">SHAH</div>
+          <div className="login-logo">AuriCall</div>
           <div className="login-sub">
-            Scheduling hours and availability Hub
+            ENT Residency Scheduling Platform
             <br />
             Sign in to access your call schedule portal.
           </div>

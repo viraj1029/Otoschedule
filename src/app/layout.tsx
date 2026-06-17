@@ -10,7 +10,7 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: 'OtoScheduler — ENT Residency Scheduling Platform',
+  title: 'AuriCall — ENT Residency Scheduling Platform',
   description: 'Automate call schedules, manage resident requests, and track equity for otolaryngology residency programs.',
 };
 
