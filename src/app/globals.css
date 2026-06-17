@@ -40,8 +40,9 @@ body { height: 100%; overflow: hidden; }
 /* ── Mobile: natural document scroll (most reliable on iOS Safari) ── */
 @media (max-width: 640px) {
   html, body { height: auto; overflow: visible; }
+  body { display: block; }
   .topbar { position: sticky; top: 0; z-index: 100; }
-  .app-body { display: block; position: static; flex: none; }
+  .app-body { display: block; position: static; }
   .main { position: static; overflow: visible; height: auto; }
 }
 
