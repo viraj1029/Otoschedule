@@ -43,3 +43,14 @@ export async function PUT(req: Request) {
   await sql`UPDATE schedules SET data = ${JSON.stringify(scheduleData)} WHERE id = ${id}`;
   return NextResponse.json({ ok: true });
 }
+
+export async function PATCH(req: Request) {
+  const session = await getSession();
+  if (session.role !== 'chief') {
+    return NextResponse.json({ error: 'Chief access required' }, { status: 401 });
+  }
+  const { id, name } = await req.json() as { id: string; name: string };
+  if (!id || !name?.trim()) return NextResponse.json({ error: 'Missing id or name' }, { status: 400 });
+  await sql`UPDATE schedules SET name = ${name.trim()} WHERE id = ${id}`;
+  return NextResponse.json({ ok: true });
+}
