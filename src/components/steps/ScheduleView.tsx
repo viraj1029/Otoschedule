@@ -68,6 +68,8 @@ export default function ScheduleView({
   useEffect(() => { setFreshRequests(allRequests); }, [allRequests]);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [editingRounding, setEditingRounding] = useState<string | null>(null);
+  const [editingScheduleName, setEditingScheduleName] = useState<string | null>(null); // schedule id being renamed
+  const [scheduleNameDraft, setScheduleNameDraft] = useState('');
 
   const initialHospTab: HospitalTab = schedule?.type === 'va' ? 'va' : schedule?.type === 'cmc' ? 'cmc' : 'cuh_pmh';
   const [hospitalTab, setHospitalTab] = useState<HospitalTab>(initialHospTab);
@@ -2180,9 +2182,42 @@ export default function ScheduleView({
 
                         {/* Name & period */}
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: isActive ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {s.name}
-                          </div>
+                          {editingScheduleName === s.id ? (
+                            <form
+                              style={{ display: 'flex', gap: 6, alignItems: 'center' }}
+                              onSubmit={async (e) => {
+                                e.preventDefault();
+                                const trimmed = scheduleNameDraft.trim();
+                                if (!trimmed) return;
+                                await api('/schedule', { method: 'PATCH', body: JSON.stringify({ id: s.id, name: trimmed }) });
+                                setEditingScheduleName(null);
+                                onScheduleListChanged?.();
+                                showToast('Schedule renamed');
+                              }}
+                            >
+                              <input
+                                autoFocus
+                                value={scheduleNameDraft}
+                                onChange={(e) => setScheduleNameDraft(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Escape') setEditingScheduleName(null); }}
+                                style={{
+                                  flex: 1, minWidth: 0, fontSize: 13, fontWeight: isActive ? 600 : 400,
+                                  background: 'var(--s2)', border: '1px solid var(--blue)', borderRadius: 4,
+                                  color: 'var(--fg)', padding: '2px 6px', outline: 'none',
+                                }}
+                              />
+                              <button type="submit" className="btn bsm bg" style={{ flexShrink: 0 }}>Save</button>
+                              <button type="button" className="btn bsm" style={{ flexShrink: 0 }} onClick={() => setEditingScheduleName(null)}>✕</button>
+                            </form>
+                          ) : (
+                            <div
+                              style={{ fontSize: 13, fontWeight: isActive ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'text' }}
+                              title="Click to rename"
+                              onClick={() => { setEditingScheduleName(s.id); setScheduleNameDraft(s.name); }}
+                            >
+                              {s.name}
+                            </div>
+                          )}
                           {s.start_date && s.end_date && (
                             <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
                               {fmtPeriod(s.start_date)} → {fmtPeriod(s.end_date)}
