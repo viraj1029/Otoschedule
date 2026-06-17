@@ -37,6 +37,14 @@
 html { height: 100%; }
 body { height: 100%; overflow: hidden; }
 
+/* ── Mobile: natural document scroll (most reliable on iOS Safari) ── */
+@media (max-width: 640px) {
+  html, body { height: auto; overflow: visible; }
+  .topbar { position: sticky; top: 0; z-index: 100; }
+  .app-body { display: block; position: static; flex: none; }
+  .main { position: static; overflow: visible; height: auto; }
+}
+
 body {
   font-family: 'Inter', sans-serif;
   background: var(--bg);
@@ -720,8 +728,7 @@ select {
   /* Truncate resident name badge */
   .res-badge { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  /* Main content area — app-body already clips horizontal overflow */
-  .main { padding: 12px 12px 24px; }
+  .main { padding: 12px 12px 48px; }
 
   /* Login */
   .login-card { width: calc(100vw - 24px); padding: 22px 16px; border-radius: 14px; }
