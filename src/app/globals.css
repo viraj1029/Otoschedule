@@ -783,7 +783,10 @@ select {
     top: 48px;
     left: 0;
     right: 0;
+    /* Use dynamic viewport height so the container shrinks when Safari's
+       bottom toolbar is visible — prevents content being cut off */
     bottom: 0;
+    height: calc(100dvh - 48px);
     display: block;
   }
   .main {
@@ -792,6 +795,7 @@ select {
     left: 0;
     right: 0;
     bottom: 0;
+    overflow-x: hidden;
     overflow-y: scroll;
     -webkit-overflow-scrolling: touch;
   }
@@ -810,7 +814,9 @@ select {
   .step .step-num { font-size: 9px; }
   .step-divider { width: 10px; }
 
-  .main { padding: 12px 12px 48px; }
+  .main { padding: 12px 12px calc(env(safe-area-inset-bottom, 0px) + 60px); }
+  /* Remove overflow:hidden from calgrid on mobile — it clips calendar rows */
+  .calgrid { overflow: visible; }
 
   /* Login */
   .login-card { width: calc(100vw - 24px); padding: 22px 16px; border-radius: 14px; }
