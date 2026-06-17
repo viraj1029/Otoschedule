@@ -34,7 +34,8 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-html, body { height: 100%; overflow: hidden; }
+html { height: 100%; }
+body { height: 100%; overflow: hidden; }
 
 body {
   font-family: 'Inter', sans-serif;
@@ -130,8 +131,14 @@ body {
 .mode-btn:hover { color: var(--text); border-color: var(--border2); }
 
 /* ── App body / layout ── */
-.app-body { display: flex; flex: 1; overflow: hidden; min-height: 0; }
-.main { flex: 1; overflow-y: auto; padding: 28px 32px; min-height: 0; -webkit-overflow-scrolling: touch; }
+.app-body { position: relative; flex: 1; min-height: 0; }
+.main {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 28px 32px;
+}
 
 /* ── Typography helpers ── */
 .page-title {
