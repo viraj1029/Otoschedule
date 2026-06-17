@@ -271,7 +271,7 @@ export default function LandingPage() {
           letterSpacing: '0.01em',
           whiteSpace: 'nowrap',
         }}>
-          Oto<span style={{ fontWeight: 600 }}>Scheduler</span>
+          Auri<span style={{ fontWeight: 600 }}>Call</span>
         </span>
 
         <div style={{ flex: 1 }} />
@@ -339,25 +339,6 @@ export default function LandingPage() {
         padding: '80px 40px 72px',
         textAlign: 'center',
       }}>
-        <div style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: '5px 14px',
-          borderRadius: 100,
-          background: NAVY_DIM,
-          border: `1px solid ${NAVY_BORDER}`,
-          fontSize: 11,
-          fontWeight: 500,
-          color: NAVY,
-          fontFamily: "'DM Sans', sans-serif",
-          letterSpacing: '0.06em',
-          textTransform: 'uppercase',
-          marginBottom: 28,
-        }}>
-          Built for ENT Residency Programs
-        </div>
-
         <h1 style={{
           fontFamily: "'DM Sans', sans-serif",
           fontSize: 'clamp(28px, 4vw, 42px)',
@@ -735,7 +716,7 @@ export default function LandingPage() {
                 title="Sign in to your program"
                 desc="Every institution gets its own secure login page. Chiefs use a password; residents log in by name and PIN — no email accounts to manage."
                 imgSrc="/screenshots/step-login.png"
-                imgAlt="OtoScheduler login screen"
+                imgAlt="AuriCall login screen"
                 flip={false}
               />
 
@@ -825,10 +806,10 @@ export default function LandingPage() {
           color: WHITE,
           letterSpacing: '0.01em',
         }}>
-          Oto<span style={{ fontWeight: 600 }}>Scheduler</span>
+          Auri<span style={{ fontWeight: 600 }}>Call</span>
         </span>
         <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', fontWeight: 300 }}>
-          © {new Date().getFullYear()} OtoScheduler. Built for ENT residency programs.
+          © {new Date().getFullYear()} AuriCall. Built for ENT residency programs.
         </span>
       </footer>
     </div>
