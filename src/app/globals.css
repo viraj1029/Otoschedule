@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Inter:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Inter:wght@300;400;500;600&display=swap');
 
 :root {
   color-scheme: dark;
@@ -100,7 +100,7 @@ html { height: 100%; }
 body { height: 100%; overflow: hidden; }
 
 body {
-  font-family: 'Inter', sans-serif;
+  font-family: 'DM Sans', 'Inter', sans-serif;
   background: var(--bg);
   color: var(--text);
   display: flex;
@@ -188,7 +188,7 @@ body {
   border: 1px solid var(--border);
   background: transparent;
   color: var(--muted);
-  font-family: 'Inter', sans-serif;
+  font-family: 'DM Sans', 'Inter', sans-serif;
 }
 .mode-btn:hover { color: var(--text); border-color: var(--border2); }
 
@@ -240,7 +240,7 @@ body {
   cursor: pointer;
   transition: all 0.15s;
   border: 1px solid transparent;
-  font-family: 'Inter', sans-serif;
+  font-family: 'DM Sans', 'Inter', sans-serif;
   white-space: nowrap;
 }
 .bg { background: var(--gold); color: #000; }
@@ -290,7 +290,7 @@ select {
   color: var(--text);
   padding: 8px 12px;
   font-size: 13px;
-  font-family: 'Inter', sans-serif;
+  font-family: 'DM Sans', 'Inter', sans-serif;
   width: 100%;
   outline: none;
   transition: border-color 0.15s;
@@ -391,7 +391,7 @@ select {
   border-left: none;
   border-right: none;
   margin-bottom: -1px;
-  font-family: 'Inter', sans-serif;
+  font-family: 'DM Sans', 'Inter', sans-serif;
 }
 .tabbtn:hover { color: var(--text); }
 .tabbtn.active { color: var(--gold); border-bottom-color: var(--gold); }
@@ -648,7 +648,7 @@ select {
   background: transparent;
   color: var(--muted);
   border: none;
-  font-family: 'Inter', sans-serif;
+  font-family: 'DM Sans', 'Inter', sans-serif;
   transition: all 0.15s;
 }
 .ltab.active { background: var(--gold); color: #000; }
