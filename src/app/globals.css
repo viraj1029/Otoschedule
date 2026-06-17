@@ -37,15 +37,6 @@
 html { height: 100%; }
 body { height: 100%; overflow: hidden; }
 
-/* ── Mobile: natural document scroll (most reliable on iOS Safari) ── */
-@media (max-width: 640px) {
-  html, body { height: auto; overflow: visible; }
-  body { display: block; }
-  .topbar { position: sticky; top: 0; z-index: 100; }
-  .app-body { display: block; position: static; }
-  .main { position: static; overflow: visible; height: auto; }
-}
-
 body {
   font-family: 'Inter', sans-serif;
   background: var(--bg);
@@ -720,6 +711,13 @@ select {
 
 /* ── Mobile / responsive ── */
 @media (max-width: 640px) {
+  /* Natural document scroll — most reliable on iOS Safari */
+  html, body { height: auto; overflow: visible; }
+  body { display: block; }
+  .topbar { position: sticky; top: 0; z-index: 100; }
+  .app-body { display: block; position: static; }
+  .main { position: static; overflow: visible; height: auto; }
+
   /* Topbar */
   .topbar { padding: 0 12px; gap: 6px; height: 48px; }
   .brand { font-size: 13px; }
