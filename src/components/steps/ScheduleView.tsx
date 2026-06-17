@@ -2242,7 +2242,7 @@ export default function ScheduleView({
                                 e.preventDefault();
                                 const trimmed = scheduleNameDraft.trim();
                                 if (!trimmed) return;
-                                await api('/schedule', { method: 'PATCH', body: JSON.stringify({ id: s.id, name: trimmed }) });
+                                await api('/schedule', 'PATCH', { id: s.id, name: trimmed });
                                 setEditingScheduleName(null);
                                 onScheduleListChanged?.();
                                 showToast('Schedule renamed');
