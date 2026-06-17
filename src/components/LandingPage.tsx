@@ -15,6 +15,179 @@ const GRAY_BORDER = '#e4e7ed';
 const TEXT = '#0a1628';
 const MUTED = '#5a6578';
 
+/* ── Step row: alternating image/text layout ── */
+function StepRow({ n, title, desc, imgSrc, imgAlt, mockup, flip }: {
+  n: string; title: string; desc: string;
+  imgSrc?: string; imgAlt?: string;
+  mockup?: React.ReactNode;
+  flip: boolean;
+}) {
+  const visual = imgSrc
+    ? <img src={imgSrc} alt={imgAlt ?? title} style={{ width: '100%', borderRadius: 10, border: `1px solid ${GRAY_BORDER}`, display: 'block', boxShadow: '0 8px 32px rgba(0,0,0,0.10)' }} />
+    : mockup;
+
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: 52,
+      alignItems: 'center',
+    }}>
+      {flip ? <>{visual}<TextBlock n={n} title={title} desc={desc} /></> : <><TextBlock n={n} title={title} desc={desc} />{visual}</>}
+    </div>
+  );
+}
+
+function TextBlock({ n, title, desc }: { n: string; title: string; desc: string }) {
+  return (
+    <div>
+      <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 40, fontWeight: 200, color: NAVY_BORDER, lineHeight: 1, marginBottom: 16 }}>{n}</div>
+      <div style={{ fontFamily: "'DM Sans', sans-serif", fontWeight: 500, fontSize: 18, color: TEXT, marginBottom: 10 }}>{title}</div>
+      <div style={{ fontSize: 14, color: MUTED, lineHeight: 1.7, fontWeight: 300 }}>{desc}</div>
+    </div>
+  );
+}
+
+/* ── Dark app mockup frames ── */
+function AppFrame({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      background: '#09090b',
+      borderRadius: 10,
+      border: '1px solid #2e2e33',
+      overflow: 'hidden',
+      boxShadow: '0 12px 40px rgba(0,0,0,0.18)',
+    }}>
+      {/* fake topbar */}
+      <div style={{
+        height: 42,
+        background: '#111113',
+        borderBottom: '1px solid #2e2e33',
+        display: 'flex',
+        alignItems: 'center',
+        padding: '0 16px',
+        gap: 10,
+      }}>
+        <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 800, color: '#f59e0b' }}>SHAH</span>
+        <div style={{ flex: 1 }} />
+        <div style={{ width: 60, height: 18, background: '#27272a', borderRadius: 100 }} />
+        <div style={{ width: 44, height: 18, background: '#27272a', borderRadius: 100 }} />
+      </div>
+      <div style={{ padding: '16px' }}>{children}</div>
+    </div>
+  );
+}
+
+function RequestsMockup() {
+  const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  const rows = [
+    [0,0,0,1,0,0,0],
+    [0,1,1,0,0,0,0],
+    [0,0,0,0,1,0,0],
+    [1,0,0,0,0,0,0],
+  ];
+  return (
+    <AppFrame>
+      <div style={{ fontSize: 11, color: '#71717a', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>July 2025 — Vacation Requests</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3, marginBottom: 10 }}>
+        {days.map(d => <div key={d} style={{ textAlign: 'center', fontSize: 9, color: '#52525b', fontFamily: 'monospace', padding: '4px 0' }}>{d}</div>)}
+        {rows.flat().map((v, i) => (
+          <div key={i} style={{
+            aspectRatio: '1',
+            borderRadius: 4,
+            background: v ? '#f59e0b' : '#18181b',
+            border: `1px solid ${v ? 'rgba(245,158,11,0.4)' : '#2e2e33'}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 9, color: v ? '#000' : '#3f3f46', fontFamily: 'monospace', fontWeight: 700,
+          }}>{i + 1 <= 28 ? i + 1 : ''}</div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {['Patel A. · Vacation · Jul 4', 'Kim J. · Conference · Jul 8–9', 'Osei M. · Vacation · Jul 12'].map(r => (
+          <div key={r} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', background: '#111113', border: '1px solid #27272a', borderRadius: 6 }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', flexShrink: 0 }} />
+            <span style={{ fontSize: 11, color: '#a1a1aa', fontFamily: 'monospace' }}>{r}</span>
+            <div style={{ marginLeft: 'auto', fontSize: 9, color: '#34d399', background: 'rgba(52,211,153,0.12)', padding: '2px 6px', borderRadius: 100, fontFamily: 'monospace' }}>Approved</div>
+          </div>
+        ))}
+      </div>
+    </AppFrame>
+  );
+}
+
+function GenerateMockup() {
+  return (
+    <AppFrame>
+      <div style={{ fontSize: 11, color: '#71717a', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>Schedule Generation</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 12 }}>
+        {[
+          { l: 'Block', v: 'July 2025' },
+          { l: 'Senior residents', v: '3' },
+          { l: 'Junior residents', v: '4' },
+        ].map(s => (
+          <div key={s.l} style={{ background: '#111113', border: '1px solid #27272a', borderRadius: 6, padding: '8px 10px' }}>
+            <div style={{ fontSize: 9, color: '#52525b', fontFamily: 'monospace', textTransform: 'uppercase', marginBottom: 4 }}>{s.l}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#fafafa', fontFamily: 'monospace' }}>{s.v}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ background: '#111113', border: '1px solid #27272a', borderRadius: 6, padding: '10px 12px', marginBottom: 10 }}>
+        <div style={{ fontSize: 10, color: '#71717a', fontFamily: 'monospace', marginBottom: 6 }}>Equity preview</div>
+        {[
+          { name: 'Patel A.', pct: 82 },
+          { name: 'Kim J.', pct: 75 },
+          { name: 'Osei M.', pct: 68 },
+        ].map(r => (
+          <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+            <span style={{ fontSize: 10, color: '#a1a1aa', fontFamily: 'monospace', width: 60 }}>{r.name}</span>
+            <div style={{ flex: 1, height: 4, background: '#27272a', borderRadius: 2 }}>
+              <div style={{ width: `${r.pct}%`, height: '100%', background: '#f59e0b', borderRadius: 2 }} />
+            </div>
+            <span style={{ fontSize: 10, color: '#71717a', fontFamily: 'monospace' }}>{r.pct}%</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ background: '#f59e0b', color: '#000', borderRadius: 6, padding: '8px 14px', fontSize: 12, fontWeight: 700, textAlign: 'center', fontFamily: 'monospace', cursor: 'pointer' }}>
+        ⚡ Generate Schedule
+      </div>
+    </AppFrame>
+  );
+}
+
+function ScheduleMockup() {
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const assignments = [
+    ['Patel A.', '', 'Kim J.', '', 'Osei M.', 'Patel A.', 'Kim J.'],
+    ['', 'Osei M.', '', 'Patel A.', '', '', ''],
+  ];
+  return (
+    <AppFrame>
+      <div style={{ fontSize: 11, color: '#71717a', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>July 2025 — Call Schedule</div>
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `60px repeat(7, 1fr)`, gap: 0 }}>
+          <div style={{ fontSize: 8, color: '#52525b', padding: '5px 4px', background: '#111113', borderRadius: '4px 0 0 0' }} />
+          {days.map(d => (
+            <div key={d} style={{ fontSize: 9, color: '#71717a', fontFamily: 'monospace', textAlign: 'center', padding: '5px 2px', background: '#111113', borderBottom: '1px solid #27272a' }}>{d}</div>
+          ))}
+          {['Week 1', 'Week 2'].map((wk, wi) => [
+            <div key={wk} style={{ fontSize: 9, color: '#52525b', fontFamily: 'monospace', padding: '8px 4px', background: '#111113', borderRight: '1px solid #27272a', display: 'flex', alignItems: 'center' }}>{wk}</div>,
+            ...assignments[wi].map((name, di) => (
+              <div key={di} style={{ border: '1px solid #27272a', minHeight: 36, padding: '4px', background: name ? 'rgba(245,158,11,0.08)' : '#09090b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {name && <span style={{ fontSize: 9, color: '#f59e0b', fontFamily: 'monospace', fontWeight: 600 }}>{name}</span>}
+              </div>
+            ))
+          ])}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+        <div style={{ flex: 1, background: '#111113', border: '1px solid #27272a', borderRadius: 5, padding: '6px 10px', fontSize: 10, color: '#71717a', fontFamily: 'monospace', textAlign: 'center' }}>Export Excel</div>
+        <div style={{ flex: 1, background: '#111113', border: '1px solid #27272a', borderRadius: 5, padding: '6px 10px', fontSize: 10, color: '#71717a', fontFamily: 'monospace', textAlign: 'center' }}>Print View</div>
+        <div style={{ flex: 1, background: 'rgba(96,165,250,0.12)', border: '1px solid rgba(96,165,250,0.25)', borderRadius: 5, padding: '6px 10px', fontSize: 10, color: '#60a5fa', fontFamily: 'monospace', textAlign: 'center' }}>My iCal</div>
+      </div>
+    </AppFrame>
+  );
+}
+
 const features = [
   {
     icon: '⚡',
@@ -267,8 +440,8 @@ export default function LandingPage() {
           {[
             { n: '< 10s', l: 'Schedule Generated' },
             { n: '100%', l: 'Conflict Detection' },
-            { n: '2 sites', l: 'Simultaneous Coverage' },
-            { n: '0 emails', l: 'Needed to Collect Requests' },
+            { n: 'Multiple', l: 'Sites Supported' },
+            { n: 'Zero hassle', l: 'Request Collection' },
           ].map(s => (
             <div key={s.l}>
               <div style={{
@@ -529,9 +702,9 @@ export default function LandingPage() {
           background: GRAY_BG,
           borderTop: `1px solid ${GRAY_BORDER}`,
           borderBottom: `1px solid ${GRAY_BORDER}`,
-          padding: '64px 40px',
+          padding: '72px 40px',
         }}>
-          <div style={{ maxWidth: 820, margin: '0 auto' }}>
+          <div style={{ maxWidth: 1000, margin: '0 auto' }}>
             <div style={{
               fontSize: 11,
               fontWeight: 500,
@@ -549,41 +722,49 @@ export default function LandingPage() {
               fontWeight: 300,
               letterSpacing: '-0.01em',
               textAlign: 'center',
-              marginBottom: 52,
+              marginBottom: 56,
               color: TEXT,
             }}>
               From setup to schedule <span style={{ fontWeight: 600, color: NAVY }}>in minutes</span>
             </h2>
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-              gap: 36,
-            }}>
-              {[
-                { n: '01', title: 'Add Residents', desc: 'Enter your residents, PGY levels, and rotation assignments for the block.' },
-                { n: '02', title: 'Collect Requests', desc: 'Residents log in and submit vacation, conference, and holiday requests.' },
-                { n: '03', title: 'Generate Schedule', desc: 'One click runs the algorithm — conflict-free, equitable, ready to review.' },
-                { n: '04', title: 'Publish & Export', desc: 'Review, make tweaks if needed, then export to Excel or print.' },
-              ].map(step => (
-                <div key={step.n}>
-                  <div style={{
-                    fontFamily: "'DM Sans', sans-serif",
-                    fontSize: 36,
-                    fontWeight: 200,
-                    color: NAVY_BORDER,
-                    lineHeight: 1,
-                    marginBottom: 14,
-                  }}>{step.n}</div>
-                  <div style={{
-                    fontFamily: "'DM Sans', sans-serif",
-                    fontWeight: 500,
-                    fontSize: 15,
-                    marginBottom: 6,
-                    color: TEXT,
-                  }}>{step.title}</div>
-                  <div style={{ fontSize: 13, color: MUTED, lineHeight: 1.65, fontWeight: 300 }}>{step.desc}</div>
-                </div>
-              ))}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 56 }}>
+              {/* Step 01 */}
+              <StepRow
+                n="01"
+                title="Sign in to your program"
+                desc="Every institution gets its own secure login page. Chiefs use a password; residents log in by name and PIN — no email accounts to manage."
+                imgSrc="/screenshots/step-login.png"
+                imgAlt="OtoScheduler login screen"
+                flip={false}
+              />
+
+              {/* Step 02 — mockup */}
+              <StepRow
+                n="02"
+                title="Residents submit requests"
+                desc="Residents open the request portal and tap vacation, conference, or holiday days directly on the calendar. Chiefs see all requests in one view."
+                mockup={<RequestsMockup />}
+                flip={true}
+              />
+
+              {/* Step 03 — mockup */}
+              <StepRow
+                n="03"
+                title="Generate the schedule"
+                desc="One click runs the scheduling algorithm. It checks every constraint — call limits, equity, conflicts, rotations — and produces a ready-to-review schedule."
+                mockup={<GenerateMockup />}
+                flip={false}
+              />
+
+              {/* Step 04 — mockup */}
+              <StepRow
+                n="04"
+                title="Review, export & share"
+                desc="Browse the full call calendar, spot any issues, and export to Excel or print for distribution. Residents can also export their personal iCal feed."
+                mockup={<ScheduleMockup />}
+                flip={true}
+              />
             </div>
           </div>
         </section>
