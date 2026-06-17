@@ -710,13 +710,26 @@ select {
 .req-layout { display: grid; grid-template-columns: 1fr 340px; gap: 18px; align-items: start; }
 
 /* ── Mobile / responsive ── */
-@media (max-width: 640px) {
-  /* Natural document scroll — most reliable on iOS Safari */
-  html, body { height: auto; overflow: visible; }
+@media (max-width: 768px) {
+  /* iOS Safari scroll fix: position: fixed container with overflow-y: scroll
+     is the most reliable pattern — avoids all body/html scroll quirks */
+  html, body { height: 100%; overflow: hidden; }
   body { display: block; }
-  .topbar { position: sticky; top: 0; z-index: 100; }
-  .app-body { display: block; position: static; }
-  .main { position: static; overflow: visible; height: auto; }
+  .topbar { position: fixed !important; top: 0; left: 0; right: 0; z-index: 100; }
+  .app-body {
+    position: fixed;
+    top: 48px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: block;
+  }
+  .main {
+    position: static;
+    height: 100%;
+    overflow-y: scroll;
+    -webkit-overflow-scrolling: touch;
+  }
 
   /* Topbar */
   .topbar { padding: 0 12px; gap: 6px; height: 48px; }
