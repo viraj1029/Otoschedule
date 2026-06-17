@@ -228,7 +228,6 @@ const FEATURE_DEFS = [
 ];
 
 export default function LandingPage() {
-  const [activeTab, setActiveTab] = useState<'features' | 'pricing'>('features');
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
@@ -267,8 +266,8 @@ export default function LandingPage() {
         <div style={{ flex: 1 }} />
 
         <div className="lp-nav-links" style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-          <button onClick={() => setActiveTab('features')} style={{ background: 'none', border: 'none', color: activeTab === 'features' ? C.navLinkActive : C.navLinkInactive, fontSize: 14, fontWeight: 400, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", letterSpacing: '0.01em', padding: '4px 2px', transition: 'color 0.15s' }}>Features</button>
-          <button onClick={() => setActiveTab('pricing')} style={{ background: 'none', border: 'none', color: activeTab === 'pricing' ? C.navLinkActive : C.navLinkInactive, fontSize: 14, fontWeight: 400, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", letterSpacing: '0.01em', padding: '4px 2px', transition: 'color 0.15s' }}>Pricing</button>
+          <Link href="/" style={{ color: C.navLinkActive, fontSize: 14, fontWeight: 400, fontFamily: "'DM Sans', sans-serif", letterSpacing: '0.01em', padding: '4px 2px', textDecoration: 'none' }}>Features</Link>
+          <Link href="/pricing" style={{ color: C.navLinkInactive, fontSize: 14, fontWeight: 400, fontFamily: "'DM Sans', sans-serif", letterSpacing: '0.01em', padding: '4px 2px', textDecoration: 'none' }}>Pricing</Link>
         </div>
 
         <button
@@ -299,9 +298,9 @@ export default function LandingPage() {
           <Link href="/login" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 28px', borderRadius: 7, background: C.orange, color: '#ffffff', fontSize: 15, fontWeight: 500, textDecoration: 'none', fontFamily: "'DM Sans', sans-serif", letterSpacing: '0.01em' }}>
             Access Your Program →
           </Link>
-          <button onClick={() => setActiveTab('pricing')} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 28px', borderRadius: 7, background: 'transparent', color: C.navy, border: `1px solid ${C.navyBorder}`, fontSize: 15, fontWeight: 500, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", letterSpacing: '0.01em' }}>
+          <Link href="/pricing" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 28px', borderRadius: 7, background: 'transparent', color: C.navy, border: `1px solid ${C.navyBorder}`, fontSize: 15, fontWeight: 500, fontFamily: "'DM Sans', sans-serif", letterSpacing: '0.01em', textDecoration: 'none' }}>
             View Pricing
-          </button>
+          </Link>
         </div>
       </section>
 
@@ -322,83 +321,32 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── Tab content ── */}
+      {/* ── Features ── */}
       <section className="lp-section-pad" style={{ maxWidth: 960, margin: '0 auto', padding: '64px 40px' }}>
-        <div style={{ display: 'flex', borderBottom: `1px solid ${C.grayBorder}`, marginBottom: 48 }}>
-          {(['features', 'pricing'] as const).map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)} style={{ padding: '10px 20px', fontSize: 14, fontWeight: 400, color: activeTab === tab ? C.navy : C.muted, borderBottom: `2px solid ${activeTab === tab ? C.navy : 'transparent'}`, marginBottom: -1, background: 'none', border: 'none', borderBottomWidth: 2, borderBottomStyle: 'solid', borderBottomColor: activeTab === tab ? C.navy : 'transparent', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", textTransform: 'capitalize', transition: 'all 0.15s', letterSpacing: '0.01em' }}>
-              {tab}
-            </button>
-          ))}
-        </div>
-
-        {/* ── Features tab ── */}
-        {activeTab === 'features' && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18 }}>
-            {FEATURE_DEFS.map(f => {
-              const color = f.fixed?.color ?? C.navy;
-              const dim = f.fixed?.dim ?? C.navyDim;
-              const border = f.fixed?.border ?? C.navyBorder;
-              return (
-                <div key={f.title} style={{ background: C.cardBg, border: `1px solid ${C.grayBorder}`, borderRadius: 10, padding: '24px', display: 'flex', flexDirection: 'column', gap: 12, transition: 'border-color 0.15s, box-shadow 0.15s' }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = border; e.currentTarget.style.boxShadow = `0 4px 16px ${dim}`; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.grayBorder; e.currentTarget.style.boxShadow = 'none'; }}
-                >
-                  <div style={{ width: 42, height: 42, borderRadius: 10, background: dim, border: `1px solid ${border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
-                    {f.icon}
-                  </div>
-                  <div>
-                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontWeight: 500, fontSize: 15, marginBottom: 6, color: C.text }}>{f.title}</div>
-                    <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.65, fontWeight: 300 }}>{f.desc}</div>
-                  </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18 }}>
+          {FEATURE_DEFS.map(f => {
+            const dim = f.fixed?.dim ?? C.navyDim;
+            const border = f.fixed?.border ?? C.navyBorder;
+            return (
+              <div key={f.title} style={{ background: C.cardBg, border: `1px solid ${C.grayBorder}`, borderRadius: 10, padding: '24px', display: 'flex', flexDirection: 'column', gap: 12, transition: 'border-color 0.15s, box-shadow 0.15s' }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = border; e.currentTarget.style.boxShadow = `0 4px 16px ${dim}`; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = C.grayBorder; e.currentTarget.style.boxShadow = 'none'; }}
+              >
+                <div style={{ width: 42, height: 42, borderRadius: 10, background: dim, border: `1px solid ${border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
+                  {f.icon}
                 </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* ── Pricing tab ── */}
-        {activeTab === 'pricing' && (
-          <div style={{ maxWidth: 540, margin: '0 auto', textAlign: 'center' }}>
-            <h2 style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 28, fontWeight: 300, letterSpacing: '-0.01em', color: C.text, marginBottom: 12 }}>
-              Pricing built around <span style={{ fontWeight: 600, color: C.navy }}>your program</span>
-            </h2>
-            <p style={{ fontSize: 15, color: C.muted, lineHeight: 1.7, fontWeight: 300, marginBottom: 40 }}>
-              Every residency program is different. Pricing is individualized based on the number of residents and the complexity of your call schedule structure.
-            </p>
-
-            <div style={{ background: C.cardBg, border: `1px solid ${C.navyBorder}`, borderRadius: 12, overflow: 'hidden', boxShadow: `0 8px 32px ${C.navyDim}` }}>
-              <div className="lp-pricing-header" style={{ background: isDark ? '#1e3a5f' : '#002868', padding: '32px 36px', textAlign: 'left' }}>
-                <div style={{ fontSize: 11, fontWeight: 500, color: 'rgba(255,255,255,0.55)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>Per Program Subscription</div>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 32, fontWeight: 300, color: '#ffffff', lineHeight: 1.2, marginBottom: 8 }}>Individualized pricing</div>
-                <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.65)', fontWeight: 300 }}>Tailored to your program's size and scheduling needs</div>
+                <div>
+                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontWeight: 500, fontSize: 15, marginBottom: 6, color: C.text }}>{f.title}</div>
+                  <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.65, fontWeight: 300 }}>{f.desc}</div>
+                </div>
               </div>
-
-              <div className="lp-pricing-inner" style={{ padding: '32px 36px', textAlign: 'left' }}>
-                <div style={{ fontSize: 11, fontWeight: 500, color: C.muted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 16 }}>Everything included</div>
-                <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 11, marginBottom: 32 }}>
-                  {['Unlimited schedule generation', 'All resident & chief accounts', 'Request & approval portal', 'Equity analytics dashboard', 'Multi-site support', 'Excel export & print views', 'Dedicated support'].map(feat => (
-                    <li key={feat} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, color: C.text, fontWeight: 300 }}>
-                      <span style={{ width: 18, height: 18, borderRadius: '50%', background: C.navyDim, border: `1px solid ${C.navyBorder}`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: C.navy, fontWeight: 600, flexShrink: 0 }}>✓</span>
-                      {feat}
-                    </li>
-                  ))}
-                </ul>
-                <a href="mailto:viraj_shah@hotmail.com" style={{ display: 'block', textAlign: 'center', padding: '13px', borderRadius: 7, background: C.orange, color: '#ffffff', fontSize: 14, fontWeight: 500, textDecoration: 'none', fontFamily: "'DM Sans', sans-serif", letterSpacing: '0.01em', transition: 'opacity 0.15s' }}>
-                  Contact us — viraj_shah@hotmail.com
-                </a>
-                <p style={{ textAlign: 'center', fontSize: 12, color: C.muted, marginTop: 10, lineHeight: 1.5, fontWeight: 300 }}>
-                  Reach out to discuss your program's needs. No commitment required.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
+            );
+          })}
+        </div>
       </section>
 
-      {/* ── How it works (features tab only) ── */}
-      {activeTab === 'features' && (
-        <section className="lp-how-section" style={{ background: C.grayBg, borderTop: `1px solid ${C.grayBorder}`, borderBottom: `1px solid ${C.grayBorder}`, padding: '72px 40px' }}>
+      {/* ── How it works ── */}
+      <section className="lp-how-section" style={{ background: C.grayBg, borderTop: `1px solid ${C.grayBorder}`, borderBottom: `1px solid ${C.grayBorder}`, padding: '72px 40px' }}>
           <div style={{ maxWidth: 1000, margin: '0 auto' }}>
             <div style={{ fontSize: 11, fontWeight: 500, color: C.muted, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8, textAlign: 'center' }}>How it works</div>
             <h2 style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 28, fontWeight: 300, letterSpacing: '-0.01em', textAlign: 'center', marginBottom: 56, color: C.text }}>
@@ -412,8 +360,7 @@ export default function LandingPage() {
               <StepRow n="04" title="Review, export & share" desc="Browse the full call calendar, spot any issues, and export to Excel or print for distribution. Residents can also export their personal iCal feed." mockup={<ScheduleMockup />} flip={true} C={C} />
             </div>
           </div>
-        </section>
-      )}
+      </section>
 
       {/* ── CTA banner ── */}
       <section className="lp-cta" style={{ maxWidth: 820, margin: '0 auto', padding: '72px 40px', textAlign: 'center' }}>
