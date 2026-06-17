@@ -48,6 +48,35 @@ function TextBlock({ n, title, desc }: { n: string; title: string; desc: string 
   );
 }
 
+function LoginMockup() {
+  return (
+    <div style={{
+      background: '#09090b',
+      borderRadius: 10,
+      border: '1px solid #2e2e33',
+      overflow: 'hidden',
+      boxShadow: '0 12px 40px rgba(0,0,0,0.18)',
+    }}>
+      <div style={{ height: 42, background: '#111113', borderBottom: '1px solid #2e2e33', display: 'flex', alignItems: 'center', padding: '0 16px' }}>
+        <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 800, color: '#f59e0b' }}>AuriCall</span>
+      </div>
+      <div style={{ padding: '32px 16px', display: 'flex', justifyContent: 'center' }}>
+        <div style={{ background: '#111113', border: '1px solid #2e2e33', borderRadius: 12, padding: '24px 28px', width: '100%', maxWidth: 300 }}>
+          <div style={{ fontFamily: 'monospace', fontSize: 18, fontWeight: 800, color: '#f59e0b', marginBottom: 4 }}>AuriCall</div>
+          <div style={{ fontSize: 11, color: '#71717a', fontFamily: 'monospace', marginBottom: 16, lineHeight: 1.5 }}>ENT Residency Scheduling Platform<br />Sign in to access your call schedule portal.</div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+            <div style={{ flex: 1, background: '#f59e0b', color: '#000', borderRadius: 6, padding: '7px 0', fontSize: 11, fontFamily: 'monospace', fontWeight: 700, textAlign: 'center' }}>👑 Chief / Admin</div>
+            <div style={{ flex: 1, background: '#27272a', color: '#71717a', borderRadius: 6, padding: '7px 0', fontSize: 11, fontFamily: 'monospace', textAlign: 'center' }}>🩺 Resident</div>
+          </div>
+          <div style={{ fontSize: 9, color: '#52525b', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>Admin Password</div>
+          <div style={{ background: '#27272a', border: '1px solid #3f3f46', borderRadius: 6, padding: '8px 10px', fontSize: 11, color: '#52525b', fontFamily: 'monospace', marginBottom: 12 }}>Enter admin password</div>
+          <div style={{ background: '#f59e0b', color: '#000', borderRadius: 6, padding: '9px', fontSize: 12, fontWeight: 700, textAlign: 'center', fontFamily: 'monospace' }}>Sign In as Chief →</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Dark app mockup frames ── */
 function AppFrame({ children }: { children: React.ReactNode }) {
   return (
@@ -715,8 +744,7 @@ export default function LandingPage() {
                 n="01"
                 title="Sign in to your program"
                 desc="Every institution gets its own secure login page. Chiefs use a password; residents log in by name and PIN — no email accounts to manage."
-                imgSrc="/screenshots/step-login.png"
-                imgAlt="AuriCall login screen"
+                mockup={<LoginMockup />}
                 flip={false}
               />
 
