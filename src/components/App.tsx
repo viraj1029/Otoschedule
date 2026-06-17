@@ -53,6 +53,25 @@ export default function App() {
   });
 
   const [toast, setToast] = useState<{ msg: string; err: boolean } | null>(null);
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+
+  useEffect(() => {
+    const saved = localStorage.getItem('theme') as 'dark' | 'light' | null;
+    const initial = saved ?? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    setTheme(initial);
+    document.documentElement.dataset.theme = initial;
+    document.documentElement.style.colorScheme = initial;
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setTheme(t => {
+      const next = t === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('theme', next);
+      document.documentElement.dataset.theme = next;
+      document.documentElement.style.colorScheme = next;
+      return next;
+    });
+  }, []);
 
   const showToast = useCallback((msg: string, err = false) => {
     setToast({ msg, err });
@@ -185,8 +204,10 @@ export default function App() {
             step={state.step}
             residentName={state.currentResidentFull?.name ?? null}
             block={state.block}
+            theme={theme}
             onGoStep={goStep}
             onSignOut={handleSignOut}
+            onToggleTheme={toggleTheme}
           />
           <div className="app-body">
             <div className="main">
