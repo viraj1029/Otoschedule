@@ -1,5 +1,13 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { DM_Sans } from 'next/font/google';
+
+const dmSans = DM_Sans({
+  subsets: ['latin'],
+  weight: ['200', '300', '400', '500', '600'],
+  variable: '--font-dm-sans',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'OtoScheduler — ENT Residency Scheduling Platform',
@@ -14,7 +22,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" style={{ colorScheme: 'dark' }}>
-      <body>{children}</body>
+      <body className={dmSans.variable}>{children}</body>
     </html>
   );
 }
