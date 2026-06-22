@@ -78,14 +78,40 @@ export default function App() {
     setTimeout(() => setToast(null), 2800);
   }, []);
 
-  const loadData = useCallback(async () => {
-    const [block, residents, allRequests, schedule, schedules] = await Promise.all([
+  const loadData = useCallback(async (residentPgy?: number) => {
+    const [block, residents, allRequests, schedules] = await Promise.all([
       api<Block | null>('/block').catch(() => null),
       api<Resident[]>('/residents').catch(() => [] as Resident[]),
       api<Request[]>('/requests').catch(() => [] as Request[]),
-      api<AnyScheduleData | null>('/schedule').catch(() => null),
       api<Schedule[]>('/schedules').catch(() => [] as Schedule[]),
     ]);
+
+    // For residents, prefer a schedule matching their level (junior/senior) by name keyword
+    let schedule: AnyScheduleData | null = null;
+    if (residentPgy !== undefined && schedules.length > 0) {
+      const isJunior = residentPgy >= 2 && residentPgy <= 3;
+      const isSenior = residentPgy >= 4;
+      const keyword = isJunior ? 'junior' : isSenior ? 'senior' : null;
+      let bestId: string | null = null;
+      if (keyword) {
+        const cuhSchedules = schedules.filter((s) => (s.schedule_type ?? 'cuh_pmh') === 'cuh_pmh');
+        const match = cuhSchedules.find((s) => s.name.toLowerCase().includes(keyword));
+        if (match) bestId = match.id;
+      }
+      if (!bestId) {
+        // Fall back to most recently generated published schedule
+        const sorted = [...schedules].sort((a, b) =>
+          new Date(b.generated_at ?? 0).getTime() - new Date(a.generated_at ?? 0).getTime(),
+        );
+        bestId = sorted[0]?.id ?? null;
+      }
+      if (bestId) {
+        schedule = await api<AnyScheduleData | null>(`/schedule?id=${bestId}`).catch(() => null);
+      }
+    } else {
+      schedule = await api<AnyScheduleData | null>('/schedule').catch(() => null);
+    }
+
     setState((s) => ({ ...s, block: block ?? s.block, residents, allRequests, schedule, schedules }));
   }, []);
 
@@ -104,7 +130,7 @@ export default function App() {
             currentResId: me.resident!.id,
             currentResidentFull: me.resident!,
           }));
-          await loadData();
+          await loadData(me.resident!.pgy);
         } else {
           // Load residents for the login dropdown even when not authed
           const residents = await api<Resident[]>('/residents').catch(() => [] as Resident[]);
@@ -129,7 +155,7 @@ export default function App() {
           currentResidentFull: residentFull ?? null,
         }));
       }
-      await loadData();
+      await loadData(residentFull?.pgy);
     },
     [loadData],
   );
