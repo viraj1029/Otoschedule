@@ -16,12 +16,22 @@ interface Props {
   showToast: (msg: string, err?: boolean) => void;
 }
 
-function defaultScheduleName(start: string, end: string): string {
+function defaultScheduleName(
+  start: string,
+  end: string,
+  hospitalGroup: 'CUH_PMH' | 'CMC' | 'VA' = 'CUH_PMH',
+  mode: ScheduleMode = 'merged',
+): string {
   const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const s = parseDate(start); const e = parseDate(end);
-  return s.getFullYear() === e.getFullYear()
+  const dateRange = s.getFullYear() === e.getFullYear()
     ? `${M[s.getMonth()]} – ${M[e.getMonth()]} ${s.getFullYear()}`
     : `${M[s.getMonth()]} ${s.getFullYear()} – ${M[e.getMonth()]} ${e.getFullYear()}`;
+  if (hospitalGroup === 'CUH_PMH') {
+    const suffix = mode === 'senior' ? 'Senior Schedule' : mode === 'junior' ? 'Junior Schedule' : 'Junior/Senior Schedule';
+    return `${dateRange} - ${suffix}`;
+  }
+  return dateRange;
 }
 
 function avatar(res: Resident, size = 26) {
@@ -60,19 +70,22 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
 
   const [schedStart, setSchedStart] = useState(yearStart);
   const [schedEnd, setSchedEnd] = useState(defaultEnd);
-  const [scheduleName, setScheduleName] = useState(() => defaultScheduleName(yearStart, defaultEnd));
+  const [scheduleName, setScheduleName] = useState(() => defaultScheduleName(yearStart, defaultEnd, 'CUH_PMH', 'merged'));
   const [nameEdited, setNameEdited] = useState(false);
+  const [hospitalGroup, setHospitalGroup] = useState<'CUH_PMH' | 'CMC' | 'VA'>('CUH_PMH');
+
+  useEffect(() => {
+    if (!nameEdited) setScheduleName(defaultScheduleName(schedStart, schedEnd, hospitalGroup, mode));
+  }, [mode, hospitalGroup, nameEdited, schedStart, schedEnd]);
 
   function handleStartChange(v: string) {
     setSchedStart(v);
-    if (!nameEdited) setScheduleName(defaultScheduleName(v, schedEnd));
+    if (!nameEdited) setScheduleName(defaultScheduleName(v, schedEnd, hospitalGroup, mode));
   }
   function handleEndChange(v: string) {
     setSchedEnd(v);
-    if (!nameEdited) setScheduleName(defaultScheduleName(schedStart, v));
+    if (!nameEdited) setScheduleName(defaultScheduleName(schedStart, v, hospitalGroup, mode));
   }
-
-  const [hospitalGroup, setHospitalGroup] = useState<'CUH_PMH' | 'CMC' | 'VA'>('CUH_PMH');
 
   function hasHospRotation(r: typeof residents[0], hosp: string) {
     if (r.rotations && r.rotations.length > 0)
