@@ -2190,6 +2190,31 @@ export default function ScheduleView({
 
       {!tabLoading && (
         <div>
+          {/* Schedule picker (residents only) — shown when multiple published schedules exist for this hospital type */}
+          {role === 'resident' && tabScheduleList.length > 1 && (
+            <div style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Schedule:</span>
+              {tabScheduleList.map((s) => {
+                const isActive = s.id === currentSchedId;
+                return (
+                  <button
+                    key={s.id}
+                    className={`tabbtn${isActive ? ' active' : ''}`}
+                    style={{ fontSize: 12 }}
+                    onClick={async () => {
+                      if (!isActive) {
+                        setTabLoading(true);
+                        try { await onScheduleSelected?.(s.id); } finally { setTimeout(() => setTabLoading(false), 300); }
+                      }
+                    }}
+                  >
+                    {s.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {/* Schedule Library (chief only) */}
           {role === 'chief' && (
             <div style={{ marginBottom: 18 }}>
