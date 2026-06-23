@@ -2397,7 +2397,7 @@ export default function ScheduleView({
                         {selectedKeys.length > 0 && (
                           <button className="btn bg bsm" onClick={() => {
                             const weekIdx = vaWeekMap[selectedKeys[0]];
-                            if (weekIdx !== undefined) { setPoolOverrideResId(vaSched!.weeks[weekIdx].res.id); setVaOverride({ open: true, weekIndex: weekIdx }); }
+                            if (weekIdx !== undefined) { setPoolOverrideResId(vaSched!.weeks[weekIdx].res.id); setVaOverride({ open: true, weekIndex: weekIdx, dateKey: '' }); }
                             setSelectMode(false); setSelectedKeys([]);
                           }}>Override week</button>
                         )}
@@ -2670,8 +2670,8 @@ export default function ScheduleView({
           <div className="modal">
             <div className="mh">
               <div>
-                <div className="mt">Override VA Day</div>
-                <div className="ms">{fmtShort(vaOverride.dateKey)}</div>
+                <div className="mt">{vaOverride.dateKey ? 'Override VA Day' : 'Override VA Week'}</div>
+                <div className="ms">{vaOverride.dateKey ? fmtShort(vaOverride.dateKey) : (() => { const w = vaSched!.weeks[vaOverride.weekIndex]; return w ? `Week of ${fmtShort(w.wS)} – ${fmtShort(w.wE)}` : ''; })()}</div>
               </div>
               <button className="mx" onClick={() => setVaOverride({ open: false, weekIndex: -1, dateKey: '' })}>✕</button>
             </div>
@@ -2685,7 +2685,7 @@ export default function ScheduleView({
                     const w = vaSched!.weeks[vaOverride.weekIndex];
                     if (!w) return false;
                     if (!isOnRotation(r, w.wS, ['VA'])) return false;
-                    return !freshRequests.some((req) => req.resident_id === r.id && (req.type === 'vacation_official' || req.type === 'vacation' || req.type === 'holiday') && req.date === vaOverride.dateKey);
+                    return !freshRequests.some((req) => req.resident_id === r.id && (req.type === 'vacation_official' || req.type === 'vacation' || req.type === 'holiday') && (vaOverride.dateKey ? req.date === vaOverride.dateKey : req.date >= w.wS && req.date <= w.wE));
                   }).map((r) => (
                     <option key={r.id} value={r.id}>{r.name} (PGY-{r.pgy})</option>
                   ))}
@@ -2698,15 +2698,36 @@ export default function ScheduleView({
                 const newRes = residents.find((r) => r.id === poolOverrideResId);
                 if (!newRes || !vaSched) return;
                 const clickedKey = vaOverride.dateKey;
-                const oldRes = vaSched.dayOverrides?.[clickedKey] ?? vaSched.weeks[vaOverride.weekIndex].res;
-                const oldResId = oldRes.id; const newResId = newRes.id;
-                if (oldResId === newResId) { setVaOverride({ open: false, weekIndex: -1, dateKey: '' }); return; }
+                const oldWeek = vaSched.weeks[vaOverride.weekIndex];
                 const newCounts = { ...vaSched.counts }; const newDays2 = { ...vaSched.days }; const newHours2 = { ...vaSched.hours };
-                const dow2 = parseDate(clickedKey).getDay();
-                const hrs2 = (dow2 === 0 || dow2 === 6 || HOLIDAYS.has(clickedKey)) ? 24 : 12;
-                newDays2[oldResId] = Math.max(0, (newDays2[oldResId] ?? 0) - 1); newDays2[newResId] = (newDays2[newResId] ?? 0) + 1;
-                newHours2[oldResId] = Math.max(0, (newHours2[oldResId] ?? 0) - hrs2); newHours2[newResId] = (newHours2[newResId] ?? 0) + hrs2;
-                const newDayOverrides = { ...(vaSched.dayOverrides ?? {}), [clickedKey]: newRes };
+                const newDayOverrides = { ...(vaSched.dayOverrides ?? {}) };
+                if (clickedKey) {
+                  // Single-day override
+                  const oldRes = newDayOverrides[clickedKey] ?? oldWeek.res;
+                  const oldResId = oldRes.id; const newResId = newRes.id;
+                  if (oldResId !== newResId) {
+                    const dow2 = parseDate(clickedKey).getDay();
+                    const hrs2 = (dow2 === 0 || dow2 === 6 || HOLIDAYS.has(clickedKey)) ? 24 : 12;
+                    newDays2[oldResId] = Math.max(0, (newDays2[oldResId] ?? 0) - 1); newDays2[newResId] = (newDays2[newResId] ?? 0) + 1;
+                    newHours2[oldResId] = Math.max(0, (newHours2[oldResId] ?? 0) - hrs2); newHours2[newResId] = (newHours2[newResId] ?? 0) + hrs2;
+                    newDayOverrides[clickedKey] = newRes;
+                  }
+                } else {
+                  // Week-level override: update each day in the week
+                  let d2 = parseDate(oldWeek.wS); const wEnd = parseDate(oldWeek.wE);
+                  while (d2 <= wEnd) {
+                    const k2 = dk(d2); const dow2 = d2.getDay();
+                    const hrs2 = (dow2 === 0 || dow2 === 6 || HOLIDAYS.has(k2)) ? 24 : 12;
+                    const oldRes = newDayOverrides[k2] ?? oldWeek.res;
+                    const oldResId = oldRes.id; const newResId = newRes.id;
+                    if (oldResId !== newResId) {
+                      newDays2[oldResId] = Math.max(0, (newDays2[oldResId] ?? 0) - 1); newDays2[newResId] = (newDays2[newResId] ?? 0) + 1;
+                      newHours2[oldResId] = Math.max(0, (newHours2[oldResId] ?? 0) - hrs2); newHours2[newResId] = (newHours2[newResId] ?? 0) + hrs2;
+                    }
+                    newDayOverrides[k2] = newRes;
+                    d2 = addDays(d2, 1);
+                  }
+                }
                 persistSchedule({ ...vaSched, dayOverrides: newDayOverrides, counts: newCounts, days: newDays2, hours: newHours2 });
                 setVaOverride({ open: false, weekIndex: -1, dateKey: '' });
                 showToast('VA override saved');
