@@ -162,6 +162,7 @@ export interface VAScheduleData {
   bEnd: string;
   blockName: string;
   weeks: VAWeek[];
+  dayOverrides: Record<string, Resident>; // per-day resident overrides keyed by dateKey
   counts: Record<string, number>;  // call weeks per resident
   days: Record<string, number>;    // call days per resident
   hours: Record<string, number>;   // call hours per resident

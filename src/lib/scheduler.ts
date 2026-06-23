@@ -1770,6 +1770,7 @@ export function generateVASchedule(
     bEnd: bEndStr,
     blockName,
     weeks: vaWeeks,
+    dayOverrides: {},
     counts,
     days,
     hours,
