@@ -1459,8 +1459,17 @@ export default function ScheduleView({
   // ── VA Hours/Equity tabs ──────────────────────────────────────────────────────
   function renderVAHoursTab() {
     if (!vaSched) return null;
+    // Build the effective resident for each day (dayOverrides take priority)
     const resSet = new Map<string, Resident>();
-    vaSched.weeks.forEach((w) => resSet.set(w.res.id, w.res));
+    vaSched.weeks.forEach((w) => {
+      let d = parseDate(w.wS); const end = parseDate(w.wE);
+      while (d <= end) {
+        const key = dk(d);
+        const res = vaSched!.dayOverrides?.[key] ?? w.res;
+        resSet.set(res.id, res);
+        d = addDays(d, 1);
+      }
+    });
     const pool = [...resSet.values()].sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
     return (
       <div className="card">
@@ -1479,15 +1488,17 @@ export default function ScheduleView({
             </thead>
             <tbody>
               {pool.map((res) => {
-                const myWeeks = vaSched!.weeks.filter((w) => w.res.id === res.id);
                 let wkday = 0, wknd = 0, hol = 0;
-                myWeeks.forEach((w) => {
+                vaSched!.weeks.forEach((w) => {
                   let d = parseDate(w.wS); const end = parseDate(w.wE);
                   while (d <= end) {
                     const key = dk(d);
-                    if (HOLIDAYS.has(key)) hol++;
-                    else if (d.getDay() === 0 || d.getDay() === 6) wknd++;
-                    else wkday++;
+                    const effectiveRes = vaSched!.dayOverrides?.[key] ?? w.res;
+                    if (effectiveRes.id === res.id) {
+                      if (HOLIDAYS.has(key)) hol++;
+                      else if (d.getDay() === 0 || d.getDay() === 6) wknd++;
+                      else wkday++;
+                    }
                     d = addDays(d, 1);
                   }
                 });
@@ -1514,7 +1525,15 @@ export default function ScheduleView({
   function renderVAEquityTab() {
     if (!vaSched) return null;
     const resSet = new Map<string, Resident>();
-    vaSched.weeks.forEach((w) => resSet.set(w.res.id, w.res));
+    vaSched.weeks.forEach((w) => {
+      let d = parseDate(w.wS); const end = parseDate(w.wE);
+      while (d <= end) {
+        const key = dk(d);
+        const res = vaSched!.dayOverrides?.[key] ?? w.res;
+        resSet.set(res.id, res);
+        d = addDays(d, 1);
+      }
+    });
     const pool = [...resSet.values()].sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name));
 
     // Compute potential call hours per VA resident (VA rotation window minus vacation)
