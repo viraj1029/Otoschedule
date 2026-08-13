@@ -2,7 +2,10 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { initDb } from '@/lib/init-db';
-import { periodEquity, roundLines, zeroLine, type StoredSchedule } from '@/lib/equity';
+import {
+  periodEquity, roundLines, zeroLine, livePotentials,
+  type StoredSchedule, type Potentials, type RotationSeg, type RequestRow,
+} from '@/lib/equity';
 import type { PoolEquityMember, EquityPeriod, PoolEquityResponse } from '@/types';
 
 function academicYear(dateStr: string): number {
@@ -124,11 +127,51 @@ export async function GET(req: Request) {
     }
   }
 
+  // Current rotations and requests for everyone in any pool. The schedule blob carries a
+  // copy of each resident's potential hours frozen at generation time; a rotation edited
+  // afterwards would never reach the fair share unless the schedule were regenerated, so
+  // the denominators are recomputed here from live data instead.
+  const rotationsBy: Record<string, RotationSeg[]> = {};
+  const requestsBy: Record<string, RequestRow[]> = {};
+  if (allPoolIds.size > 0) {
+    const ids = [...allPoolIds];
+    const [rotRes, reqRes] = await Promise.all([
+      sql.query(
+        `SELECT resident_id, hospital, start_date, end_date FROM rotations WHERE resident_id = ANY($1)`,
+        [ids],
+      ),
+      sql.query(
+        `SELECT resident_id, date, type FROM requests WHERE resident_id = ANY($1)`,
+        [ids],
+      ),
+    ]);
+    for (const id of ids) { rotationsBy[id] = []; requestsBy[id] = []; }
+    for (const r of rotRes.rows) {
+      rotationsBy[r.resident_id]?.push({ hospital: r.hospital, start_date: r.start_date, end_date: r.end_date });
+    }
+    for (const q of reqRes.rows) {
+      requestsBy[q.resident_id]?.push({ date: q.date, type: q.type });
+    }
+  }
+
   const periods: EquityPeriod[] = [];
   const ytd: Record<string, PoolEquityMember> = {};
 
   for (const { row, data, poolIds } of parsed) {
-    const lines = periodEquity(data, poolIds);
+    // Only residents whose record still exists get a live denominator; anyone whose row
+    // has been deleted keeps the value stored in the schedule.
+    const live: Record<string, Potentials> = {};
+    for (const id of poolIds) {
+      const who = identity[id];
+      if (!who || !rotationsBy[id]) continue;
+      live[id] = livePotentials(
+        { pgy: who.pgy, rotations: rotationsBy[id], requests: requestsBy[id] ?? [] },
+        row.start_date,
+        row.end_date,
+      );
+    }
+
+    const lines = periodEquity(data, poolIds, live);
     const members: PoolEquityMember[] = [];
 
     for (const id of poolIds) {
