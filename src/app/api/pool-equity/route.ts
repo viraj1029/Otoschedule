@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { initDb } from '@/lib/init-db';
-import { periodEquity, zeroLine, type StoredSchedule } from '@/lib/equity';
+import { periodEquity, roundLines, zeroLine, type StoredSchedule } from '@/lib/equity';
 import type { PoolEquityMember, EquityPeriod, PoolEquityResponse } from '@/types';
 
 function academicYear(dateStr: string): number {
@@ -135,19 +135,21 @@ export async function GET(req: Request) {
       const who = identity[id];
       if (!who) continue;
 
+      const exact = lines[id];
       const member: PoolEquityMember = {
         personId: who.personId,
         name: who.name,
         pgy: who.pgy,
         color: who.color,
         isMe: myPersonId !== null && who.personId === myPersonId,
-        ...lines[id],
+        ...roundLines(exact),
       };
       members.push(member);
 
-      // Roll into the year. Targets are absolute hours, so the annual target is simply
-      // the sum of each block's share — which is what makes a resident who joins the
-      // pool mid-year, or leaves it, carry a correspondingly smaller annual target.
+      // Roll into the year from the UNROUNDED block figures, rounding once at the end.
+      // Targets are absolute hours, so the annual target is simply the sum of each
+      // block's share — which is what makes a resident who joins the pool mid-year, or
+      // leaves it, carry a correspondingly smaller annual target.
       const agg = (ytd[who.personId] ??= {
         personId: who.personId,
         name: who.name,
@@ -163,9 +165,9 @@ export async function GET(req: Request) {
       agg.pgy = who.pgy;
       agg.color = who.color;
       for (const axis of ['total', 'weekend', 'trauma'] as const) {
-        agg[axis].worked    += member[axis].worked;
-        agg[axis].target    += member[axis].target;
-        agg[axis].potential += member[axis].potential;
+        agg[axis].worked    += exact[axis].worked;
+        agg[axis].target    += exact[axis].target;
+        agg[axis].potential += exact[axis].potential;
       }
     }
 
@@ -183,7 +185,9 @@ export async function GET(req: Request) {
   const response: PoolEquityResponse = {
     academicYearStart: acYearStart,
     periods,
-    ytd: Object.values(ytd).sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name)),
+    ytd: Object.values(ytd)
+      .map((m) => ({ ...m, ...roundLines(m) }))
+      .sort((a, b) => b.pgy - a.pgy || a.name.localeCompare(b.name)),
   };
 
   return NextResponse.json(response);

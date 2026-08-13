@@ -1005,10 +1005,16 @@ export default function ScheduleView({
         <thead>
           <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '.5px' }}>
             <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>Resident</th>
+            <th
+              style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600 }}
+              title="Availability-weighted call hours this resident could have covered: each available weekend or holiday day counts 24h, each weekday 12h, with off-rotation days and official vacation removed. This is what fair share is proportional to — two residents differ here whenever their shares differ."
+            >
+              Available
+            </th>
             <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600 }}>Worked</th>
             <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600 }}>Fair share</th>
             <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600 }}>Balance</th>
-            <th style={{ width: '32%', padding: '6px 8px' }} />
+            <th style={{ width: '28%', padding: '6px 8px' }} />
           </tr>
         </thead>
         <tbody>
@@ -1029,6 +1035,7 @@ export default function ScheduleView({
                   <span style={{ fontWeight: m.isMe ? 700 : 400 }}>{m.name}</span>
                   <span style={{ color: 'var(--muted)', marginLeft: 6, fontSize: 11 }}>PGY-{m.pgy}</span>
                 </td>
+                <td style={{ padding: '8px', textAlign: 'right', fontFamily: "'JetBrains Mono',monospace", color: 'var(--muted)' }}>{line.potential}h</td>
                 <td style={{ padding: '8px', textAlign: 'right', fontFamily: "'JetBrains Mono',monospace" }}>{line.worked}h</td>
                 <td style={{ padding: '8px', textAlign: 'right', fontFamily: "'JetBrains Mono',monospace", color: 'var(--muted)' }}>{line.target}h</td>
                 <td style={{ padding: '8px', textAlign: 'right', fontFamily: "'JetBrains Mono',monospace", fontWeight: 700, color }}>
@@ -1141,7 +1148,7 @@ export default function ScheduleView({
           <div>
             <div className="ct">👥 Everyone&apos;s CUH/PMH Call — Year to Date</div>
             <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-              Every junior in the CUH/PMH pool, ranked by how far above or below their own fair share they are. Shares differ between residents because availability does.
+              Every junior in the CUH/PMH pool, ranked by how far above or below their own fair share they are. Fair share is strictly proportional to the Available column, so two residents share the same target only when that number matches — a weekend or holiday day counts 24h against a weekday&apos;s 12h, so equal-length rotations can still differ.
             </div>
           </div>
         </div>
@@ -1192,7 +1199,7 @@ export default function ScheduleView({
             <div>
               <div className="ct">👥 CUH/PMH Junior Call Usage — {acYear}–{Number(acYear) + 1}</div>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-                Worked hours against each resident&apos;s pro-rated fair share. Shares are weighted by availability, so they differ between residents and sum to the call that actually existed.
+                Worked hours against each resident&apos;s pro-rated fair share. Fair share is strictly proportional to the Available column — availability-weighted hours, counting weekend and holiday days at 24h and weekdays at 12h — so equal-length rotations can still carry different shares.
               </div>
             </div>
             <select

@@ -61,8 +61,19 @@ export interface ResidentEquityLines {
   trauma: EquityLine;
 }
 
-// Pro-rated shares for one block, keyed by resident id. Pure — exported so the
-// arithmetic can be exercised directly against a generated schedule.
+// Rounds a set of lines for display. Applied once, after any cross-block summing.
+export function roundLines(l: ResidentEquityLines): ResidentEquityLines {
+  const r = (line: EquityLine): EquityLine => ({
+    worked: Math.round(line.worked),
+    target: Math.round(line.target),
+    potential: Math.round(line.potential),
+  });
+  return { total: r(l.total), weekend: r(l.weekend), trauma: r(l.trauma) };
+}
+
+// Pro-rated shares for one block, keyed by resident id. Targets come back UNROUNDED —
+// see the note on `share` below. Pure, so the arithmetic can be exercised directly
+// against a generated schedule.
 //
 // Demand and worked hours are both read live from juniorDays so a chief's override is
 // reflected: reassigning a day moves hours between residents but leaves the pool's
@@ -104,8 +115,12 @@ export function periodEquity(
   const sumWknd   = pWknd   ? poolIds.reduce((s, id) => s + (pWknd[id]   ?? 0), 0) : 0;
   const sumTrauma = pTrauma ? poolIds.reduce((s, id) => s + (pTrauma[id] ?? 0), 0) : 0;
 
+  // Left unrounded on purpose. Rounding here and then summing across blocks lets up to
+  // half an hour of error per block accumulate into the year-to-date figure, which shows
+  // up as two residents with identical availability appearing 1h apart. Callers round
+  // once, at the point of display.
   const share = (demand: number, potential: number, sum: number) =>
-    sum > 0 ? Math.round(demand * potential / sum) : 0;
+    sum > 0 ? demand * potential / sum : 0;
 
   const out: Record<string, ResidentEquityLines> = {};
   for (const id of poolIds) {
