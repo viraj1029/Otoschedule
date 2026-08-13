@@ -11,13 +11,15 @@ export async function GET() {
   const isResident = session.role === 'resident';
   const { rows } = isResident
     ? await sql`
-        SELECT id, block_id, name, start_date, end_date, published, generated_at, schedule_type
+        SELECT id, block_id, name, start_date, end_date, published, generated_at, schedule_type,
+               (data::jsonb ->> 'mergedFrom') IS NOT NULL AS is_merged
         FROM schedules
         WHERE published = TRUE
         ORDER BY start_date ASC, generated_at DESC
       `
     : await sql`
-        SELECT id, block_id, name, start_date, end_date, published, generated_at, schedule_type
+        SELECT id, block_id, name, start_date, end_date, published, generated_at, schedule_type,
+               (data::jsonb ->> 'mergedFrom') IS NOT NULL AS is_merged
         FROM schedules
         ORDER BY start_date ASC, generated_at DESC
       `;

@@ -161,11 +161,14 @@ export async function GET(req: Request) {
   const acYearStart = `${acYearNum}-07-01`;
   const acYearEnd   = `${acYearNum + 1}-06-30`;
 
-  // All published schedules this academic year
+  // All published schedules this academic year. Combined schedules are excluded —
+  // they repeat the assignments of the schedules they were built from, so counting
+  // them here would double every period and the YTD totals.
   const { rows: schedRows } = await sql`
     SELECT id, name, start_date, end_date, schedule_type, data
     FROM schedules
     WHERE published = TRUE
+      AND (data::jsonb ->> 'mergedFrom') IS NULL
       AND start_date >= ${acYearStart}
       AND end_date   <= ${acYearEnd}
     ORDER BY start_date ASC

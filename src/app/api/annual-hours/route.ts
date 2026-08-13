@@ -54,12 +54,14 @@ export async function GET(req: Request) {
   const acYearStart = `${acYear}-07-01`;
   const acYearEnd   = `${acYear + 1}-06-30`;
 
-  // Fetch all published CUH/PMH schedules in the current academic year
+  // Fetch all published CUH/PMH schedules in the current academic year.
+  // Combined schedules are skipped — they duplicate their source schedules' hours.
   const { rows: schedRows } = await sql`
     SELECT data
     FROM schedules
     WHERE published      = TRUE
       AND COALESCE(schedule_type, 'cuh_pmh') = 'cuh_pmh'
+      AND (data::jsonb ->> 'mergedFrom') IS NULL
       AND start_date    >= ${acYearStart}
       AND end_date      <= ${acYearEnd}
     ORDER BY start_date

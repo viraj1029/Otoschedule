@@ -71,6 +71,18 @@ Mark a PGY-4 as **Research** status. They receive:
 - 1 backup weekend day
 - Excluded from the regular senior rotation
 
+### Combining Schedule Periods
+Schedules are generated one period at a time (e.g. July, then Aug–Sep). To review equity across
+several periods at once, tick them in **Schedule View → Schedule Library** and press **⧉ Combine**.
+
+- Creates a new draft schedule spanning the full range — the originals are left untouched
+- Hours and Equity tabs then show cumulative per-resident totals (assigned hours *and* the
+  potential-hours denominators) for the whole span
+- Periods must be of the same type (CUH/PMH, VA or CMC) and must not overlap — overlapping periods
+  would double-count call hours
+- A combined schedule is a snapshot; it is excluded from resident year-to-date stats and from
+  junior carry-over so nothing is counted twice
+
 ### Vacation Requests
 - Max 5 weekdays per block (holidays don't count toward cap)
 - Weekend-off requests: unlimited, ~7–8 approved per block

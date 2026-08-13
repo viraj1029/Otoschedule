@@ -299,6 +299,7 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
         const typeKey = hospitalGroup === 'CUH_PMH' ? 'cuh_pmh' : hospitalGroup === 'CMC' ? 'cmc' : 'va';
         const overlapping = existingSchedules.filter((s) => {
           if ((s.schedule_type ?? 'cuh_pmh') !== typeKey) return false;
+          if (s.is_merged) return false;  // combined views always span their sources — not a real conflict
           if (!s.start_date || !s.end_date) return false;
           return parseDate(s.end_date) >= parseDate(schedStart) && parseDate(s.start_date) <= parseDate(schedEnd);
         });

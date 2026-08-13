@@ -9,6 +9,10 @@ function academicYear(dateStr: string): number {
   return m >= 7 ? d.getFullYear() : d.getFullYear() - 1;
 }
 
+// Combined schedules (built from other schedules via /api/schedules/merge) are
+// skipped here — their sources already contribute, so counting them too would
+// double the carry-in hours.
+//
 // Carry-in for a CUH/PMH junior schedule about to be generated.
 // Defined as the cumulative junior hours from PUBLISHED (finalized) CUH/PMH
 // schedules earlier in the same academic year — i.e. blocks whose date range
@@ -40,6 +44,7 @@ export async function GET(req: Request) {
     FROM schedules
     WHERE published = TRUE
       AND COALESCE(schedule_type, 'cuh_pmh') = 'cuh_pmh'
+      AND (data::jsonb ->> 'mergedFrom') IS NULL
       AND end_date  <  ${before}
       AND start_date >= ${acYearStart}
     ORDER BY start_date, generated_at DESC
