@@ -195,7 +195,46 @@ export interface SessionData {
   blockId?: string;
 }
 
+// ─── Pool equity (CUH/PMH junior call) ────────────────────────────────────────
+// Served by GET /api/pool-equity. `target` is the resident's pro-rated share of the
+// call that actually existed — pool demand × their potential ÷ the pool's potential —
+// so targets sum to the real work and shrink automatically for anyone who was only in
+// the pool part of the year. `worked - target` is the resident's running balance.
+
+export interface EquityLine {
+  worked: number;
+  target: number;
+  potential: number;
+}
+
+export interface PoolEquityMember {
+  personId: string;
+  name: string;
+  pgy: number;
+  color: string;
+  isMe: boolean;
+  total: EquityLine;
+  weekend: EquityLine;
+  trauma: EquityLine;
+}
+
+export interface EquityPeriod {
+  scheduleId: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  members: PoolEquityMember[];
+}
+
+export interface PoolEquityResponse {
+  academicYearStart: string;
+  periods: EquityPeriod[];
+  ytd: PoolEquityMember[];
+}
+
+export type EquityAxis = 'total' | 'weekend' | 'trauma';
+
 // ─── App UI state ─────────────────────────────────────────────────────────────
 
 export type Step = 1 | 2 | 3 | 4;
-export type Tab = 'calendar' | 'senior' | 'junior' | 'hours' | 'equity' | 'stats';
+export type Tab = 'calendar' | 'senior' | 'junior' | 'hours' | 'equity' | 'stats' | 'usage';

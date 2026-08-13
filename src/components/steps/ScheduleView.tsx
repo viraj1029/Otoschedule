@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, type ReactElement } from 'react';
-import type { Block, Resident, Request, ScheduleData, CMCScheduleData, VAScheduleData, AnyScheduleData, Schedule, Tab, Role } from '@/types';
+import type { Block, Resident, Request, ScheduleData, CMCScheduleData, VAScheduleData, AnyScheduleData, Schedule, Tab, Role, PoolEquityResponse, PoolEquityMember, EquityAxis } from '@/types';
 import { HOLIDAYS, HOLIDAY_NAMES, TRAUMA_WEEKS, parseDate, fmtShort, dk, addDays, isWeekendCall, isOnRotation } from '@/lib/scheduler';
 import { api } from '../App';
 import OverrideModal from '../modals/OverrideModal';
@@ -98,12 +98,12 @@ export default function ScheduleView({
   const [cmcOverride, setCmcOverride] = useState<{ open: boolean; dateKey: string }>({ open: false, dateKey: '' });
   const [poolOverrideResId, setPoolOverrideResId] = useState('');
 
-  const [annualHours, setAnnualHours] = useState<{
-    tracked: boolean;
-    pgy?: number;
-    hoursWorked?: number;
-    targetHours?: number;
-  } | null>(null);
+  // Pool-wide junior call equity: every resident's worked hours against their
+  // pro-rated share, per block and year-to-date. Published to residents and chiefs
+  // alike so call load is not private.
+  const [poolEquity, setPoolEquity] = useState<PoolEquityResponse | null>(null);
+  // Which period the chief's usage tab is showing: 'ytd' or a specific schedule id.
+  const [usagePeriodId, setUsagePeriodId] = useState<string>('ytd');
 
   interface MyStatsData {
     residentId: string;
@@ -126,24 +126,29 @@ export default function ScheduleView({
   const [myStats, setMyStats] = useState<MyStatsData | null>(null);
   const [expandedPeriods, setExpandedPeriods] = useState<Set<string>>(new Set());
 
+  // The academic year to report on, derived from the block being viewed rather than
+  // from "now" — in June, today's date would resolve to the previous academic year.
+  const acYearParam = (() => {
+    const bStartStr = schedule?.bStart ?? block?.start_date;
+    if (!bStartStr) return null;
+    const d = parseDate(bStartStr);
+    const m = d.getMonth() + 1;
+    const y = m >= 7 ? d.getFullYear() : d.getFullYear() - 1;
+    return `${y}-07-01`;
+  })();
+
   useEffect(() => {
     if (role !== 'resident' || !currentResId) return;
-    const bStartStr = schedule?.bStart ?? block?.start_date;
-    const acYearParam = bStartStr ? (() => {
-      const d = parseDate(bStartStr);
-      const m = d.getMonth() + 1;
-      const y = m >= 7 ? d.getFullYear() : d.getFullYear() - 1;
-      return `${y}-07-01`;
-    })() : null;
-
     const statsUrl = acYearParam ? `/my-stats?acYearStart=${acYearParam}` : '/my-stats';
     api<MyStatsData>(statsUrl).then(setMyStats).catch(() => {});
+  }, [role, currentResId, acYearParam]);
 
-    const url = acYearParam ? `/annual-hours?acYearStart=${acYearParam}` : '/annual-hours';
-    api<{ tracked: boolean; pgy?: number; hoursWorked?: number; targetHours?: number }>(url)
-      .then((data) => setAnnualHours(data))
-      .catch(() => {});
-  }, [role, currentResId, schedule, block?.start_date]);
+  // Pool equity is fetched for chiefs too — it backs the all-resident usage tab.
+  useEffect(() => {
+    if (!role) return;
+    const url = acYearParam ? `/pool-equity?acYearStart=${acYearParam}` : '/pool-equity';
+    api<PoolEquityResponse>(url).then(setPoolEquity).catch(() => {});
+  }, [role, acYearParam]);
 
   useEffect(() => {
     if (schedule) {
@@ -894,6 +899,347 @@ export default function ScheduleView({
     );
   }
 
+  // ── Pro-rated call equity rendering ─────────────────────────────────────────
+  // Shared by the resident's own balance, the peer table on their profile, and the
+  // chief's all-resident usage tab, so all three read the same numbers.
+
+  const EQUITY_AXES: { key: EquityAxis; label: string; short: string; blurb: string }[] = [
+    { key: 'total',   label: 'Total call hours',   short: 'Total',
+      blurb: 'All CUH/PMH junior call hours.' },
+    { key: 'weekend', label: 'Weekend call hours', short: 'Weekend',
+      blurb: 'Friday, Saturday, Sunday and holiday call. Friday counts because the Friday junior is paired to the following Sunday.' },
+    { key: 'trauma',  label: 'Trauma call hours',  short: 'Trauma',
+      blurb: 'Call falling inside a designated trauma week.' },
+  ];
+
+  // A balance within ±5% of target is treated as on-share: the generator itself only
+  // balances to a tolerance, so smaller gaps are noise rather than unfairness.
+  function balanceColor(worked: number, target: number) {
+    if (target <= 0) return 'var(--muted)';
+    const drift = Math.abs(worked - target) / target;
+    if (drift <= 0.05) return 'var(--green)';
+    if (drift <= 0.15) return 'var(--gold)';
+    return worked > target ? 'var(--orange)' : 'var(--blue)';
+  }
+
+  function balanceLabel(worked: number, target: number) {
+    const d = worked - target;
+    if (target <= 0) return 'no share this period';
+    if (d === 0) return 'exactly on share';
+    return d > 0 ? `${d}h above share` : `${-d}h below share`;
+  }
+
+  // Horizontal bar with the fair share marked as a tick, so over- and under-shooting
+  // are both visible against the same reference.
+  function equityBar(worked: number, target: number, color: string) {
+    const scale = Math.max(worked, target, 1) * 1.15;
+    return (
+      <div style={{ position: 'relative', height: 10, background: 'var(--s2)', borderRadius: 99, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${Math.min(100, (worked / scale) * 100)}%`, background: color, borderRadius: 99, transition: 'width .4s ease' }} />
+        {target > 0 && (
+          <div
+            title={`fair share: ${target}h`}
+            style={{
+              position: 'absolute', top: -2, bottom: -2,
+              left: `${Math.min(100, (target / scale) * 100)}%`,
+              width: 2, background: 'var(--fg)', opacity: 0.7,
+            }}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // One resident's three axes, stacked. Used for the caller's own balance.
+  function renderMyBalance(m: PoolEquityMember, heading: string, sub: string) {
+    return (
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div className="ch">
+          <div>
+            <div className="ct">{heading}</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{sub}</div>
+          </div>
+        </div>
+        <div className="cb" style={{ display: 'grid', gap: 18 }}>
+          {EQUITY_AXES.map(({ key, label, blurb }) => {
+            const line = m[key];
+            if (line.potential === 0 && line.worked === 0) return null;
+            const color = balanceColor(line.worked, line.target);
+            return (
+              <div key={key}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 7 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.5px' }}>{label}</span>
+                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 13, fontWeight: 700, color }}>
+                    {line.worked}h / {line.target}h
+                  </span>
+                </div>
+                {equityBar(line.worked, line.target, color)}
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 11, color: 'var(--muted)' }}>
+                  <span>{blurb}</span>
+                  <span style={{ color, fontWeight: 600, whiteSpace: 'nowrap', marginLeft: 12 }}>{balanceLabel(line.worked, line.target)}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // The whole pool for one axis, ranked. `highlightMe` outlines the caller's row.
+  function renderPoolTable(members: PoolEquityMember[], axis: EquityAxis) {
+    const rows = [...members].sort((a, b) => (b[axis].worked - b[axis].target) - (a[axis].worked - a[axis].target));
+    const anyData = rows.some((m) => m[axis].potential > 0 || m[axis].worked > 0);
+    if (!anyData) {
+      return (
+        <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>
+          No {axis === 'total' ? 'call' : axis} data recorded for this period.
+        </div>
+      );
+    }
+    return (
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <thead>
+          <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '.5px' }}>
+            <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>Resident</th>
+            <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600 }}>Worked</th>
+            <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600 }}>Fair share</th>
+            <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600 }}>Balance</th>
+            <th style={{ width: '32%', padding: '6px 8px' }} />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((m) => {
+            const line = m[axis];
+            const color = balanceColor(line.worked, line.target);
+            const delta = line.worked - line.target;
+            return (
+              <tr
+                key={m.personId}
+                style={{
+                  borderTop: '1px solid var(--border)',
+                  background: m.isMe ? 'var(--blue-dim)' : undefined,
+                }}
+              >
+                <td style={{ padding: '8px', whiteSpace: 'nowrap' }}>
+                  <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: m.color, marginRight: 8 }} />
+                  <span style={{ fontWeight: m.isMe ? 700 : 400 }}>{m.name}</span>
+                  <span style={{ color: 'var(--muted)', marginLeft: 6, fontSize: 11 }}>PGY-{m.pgy}</span>
+                </td>
+                <td style={{ padding: '8px', textAlign: 'right', fontFamily: "'JetBrains Mono',monospace" }}>{line.worked}h</td>
+                <td style={{ padding: '8px', textAlign: 'right', fontFamily: "'JetBrains Mono',monospace", color: 'var(--muted)' }}>{line.target}h</td>
+                <td style={{ padding: '8px', textAlign: 'right', fontFamily: "'JetBrains Mono',monospace", fontWeight: 700, color }}>
+                  {delta > 0 ? `+${delta}` : delta}h
+                </td>
+                <td style={{ padding: '8px' }}>{equityBar(line.worked, line.target, color)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    );
+  }
+
+  // Resident-facing equity block: own year-to-date balance, own per-block history, and
+  // the full pool. Rendered only for residents who are actually in the junior call pool.
+  function renderMyEquity() {
+    if (!poolEquity) return null;
+    const me = poolEquity.ytd.find((m) => m.isMe);
+    const myPeriods = poolEquity.periods
+      .map((p) => ({ period: p, mine: p.members.find((m) => m.isMe) }))
+      .filter((x): x is { period: typeof x.period; mine: PoolEquityMember } => !!x.mine);
+
+    if (!me) {
+      // Not in the junior pool this year — still show the pool, since the point is
+      // that call load is public.
+      return poolEquity.ytd.length > 0 ? renderPoolSection() : null;
+    }
+
+    return (
+      <>
+        {renderMyBalance(
+          me,
+          '⚖️ My Call Equity — Year to Date',
+          'Your fair share is your portion of the call that actually existed, weighted by how much of it you were available to cover. Being above share means the generator will weight future blocks against you until it evens out.',
+        )}
+
+        {myPeriods.length > 1 && (
+          <div className="card" style={{ marginBottom: 20 }}>
+            <div className="ch">
+              <div>
+                <div className="ct">📆 My Balance by Block</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                  Each block&apos;s share is computed from that block&apos;s call and your availability during it, so a block you were mostly off-service for carries a smaller share.
+                </div>
+              </div>
+            </div>
+            <div className="cb" style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '.5px' }}>
+                    <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>Block</th>
+                    {EQUITY_AXES.map((a) => (
+                      <th key={a.key} style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600, whiteSpace: 'nowrap' }}>{a.short}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {myPeriods.map(({ period, mine }) => (
+                    <tr key={period.scheduleId} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td style={{ padding: '8px', whiteSpace: 'nowrap' }}>
+                        <div>{period.name}</div>
+                        <div style={{ fontSize: 10, color: 'var(--muted)' }}>{fmtShort(period.startDate)} – {fmtShort(period.endDate)}</div>
+                      </td>
+                      {EQUITY_AXES.map(({ key }) => {
+                        const line = mine[key];
+                        const delta = line.worked - line.target;
+                        const color = balanceColor(line.worked, line.target);
+                        return (
+                          <td key={key} style={{ padding: '8px', textAlign: 'right', fontFamily: "'JetBrains Mono',monospace", whiteSpace: 'nowrap' }}>
+                            <span>{line.worked}h / {line.target}h</span>
+                            <span style={{ color, fontWeight: 700, marginLeft: 8 }}>{delta > 0 ? `+${delta}` : delta}h</span>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                  <tr style={{ borderTop: '2px solid var(--border)', fontWeight: 700 }}>
+                    <td style={{ padding: '8px' }}>Year to date</td>
+                    {EQUITY_AXES.map(({ key }) => {
+                      const line = me[key];
+                      const delta = line.worked - line.target;
+                      const color = balanceColor(line.worked, line.target);
+                      return (
+                        <td key={key} style={{ padding: '8px', textAlign: 'right', fontFamily: "'JetBrains Mono',monospace", whiteSpace: 'nowrap' }}>
+                          <span>{line.worked}h / {line.target}h</span>
+                          <span style={{ color, marginLeft: 8 }}>{delta > 0 ? `+${delta}` : delta}h</span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {renderPoolSection()}
+      </>
+    );
+  }
+
+  // The whole junior pool, year-to-date, on all three axes. Shown to residents on
+  // their own profile so nobody has to guess what anyone else is carrying.
+  function renderPoolSection() {
+    if (!poolEquity || poolEquity.ytd.length === 0) return null;
+    return (
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div className="ch">
+          <div>
+            <div className="ct">👥 Everyone&apos;s Call — Year to Date</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+              Every junior in the CUH/PMH pool, ranked by how far above or below their own fair share they are. Shares differ between residents because availability does.
+            </div>
+          </div>
+        </div>
+        <div className="cb" style={{ display: 'grid', gap: 22 }}>
+          {EQUITY_AXES.map(({ key, label }) => (
+            <div key={key}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8 }}>{label}</div>
+              <div style={{ overflowX: 'auto' }}>{renderPoolTable(poolEquity.ytd, key)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Usage tab (chief: every resident's call load in one view) ────────────────
+  // Spans the whole academic year rather than the schedule currently open, so a chief
+  // can see cumulative load — the same figures that drive the generator's carry-in.
+  function renderUsageTab() {
+    if (!poolEquity) {
+      return <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>Loading usage…</div>;
+    }
+    if (poolEquity.ytd.length === 0) {
+      return (
+        <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>
+          No published CUH/PMH schedules for this academic year yet.
+        </div>
+      );
+    }
+
+    const selected = usagePeriodId === 'ytd'
+      ? null
+      : poolEquity.periods.find((p) => p.scheduleId === usagePeriodId) ?? null;
+    const members = selected ? selected.members : poolEquity.ytd;
+    const acYear = poolEquity.academicYearStart.slice(0, 4);
+
+    // Worst gap on each axis, as a quick read on whether the pool is actually even.
+    const spread = (axis: EquityAxis) => {
+      const deltas = members.filter((m) => m[axis].target > 0).map((m) => m[axis].worked - m[axis].target);
+      if (deltas.length === 0) return null;
+      return { low: Math.min(...deltas), high: Math.max(...deltas) };
+    };
+
+    return (
+      <div>
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div className="ch">
+            <div>
+              <div className="ct">👥 Resident Usage — {acYear}–{Number(acYear) + 1}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                Worked hours against each resident&apos;s pro-rated fair share. Shares are weighted by availability, so they differ between residents and sum to the call that actually existed.
+              </div>
+            </div>
+            <select
+              value={usagePeriodId}
+              onChange={(e) => setUsagePeriodId(e.target.value)}
+              style={{ fontSize: 12, maxWidth: 260 }}
+            >
+              <option value="ytd">Year to date (all blocks)</option>
+              {poolEquity.periods.map((p) => (
+                <option key={p.scheduleId} value={p.scheduleId}>
+                  {p.name} ({fmtShort(p.startDate)} – {fmtShort(p.endDate)})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="cb" style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+            {EQUITY_AXES.map(({ key, short }) => {
+              const s = spread(key);
+              if (!s) return null;
+              const worst = Math.max(Math.abs(s.low), Math.abs(s.high));
+              const color = worst <= 12 ? 'var(--green)' : worst <= 30 ? 'var(--gold)' : 'var(--orange)';
+              return (
+                <div key={key}>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 600, marginBottom: 4 }}>
+                    {short} spread
+                  </div>
+                  <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 20, fontWeight: 700, color }}>
+                    {s.low > 0 ? `+${s.low}` : s.low}h … {s.high > 0 ? `+${s.high}` : s.high}h
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {EQUITY_AXES.map(({ key, label, blurb }) => (
+          <div className="card" key={key} style={{ marginBottom: 18 }}>
+            <div className="ch">
+              <div>
+                <div className="ct">{label}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{blurb}</div>
+              </div>
+            </div>
+            <div className="cb" style={{ overflowX: 'auto' }}>{renderPoolTable(members, key)}</div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   // ── Stats tab (resident personal dashboard — year-to-date across all published schedules) ──
   function renderStatsTab() {
     if (!currentResId) return null;
@@ -1049,31 +1395,8 @@ export default function ScheduleView({
           )}
         </div>
 
-        {/* Annual CUH/PMH hours progress bar (PGY2/PGY3) */}
-        {annualHours?.tracked && annualHours.targetHours != null && annualHours.hoursWorked != null && (
-          (() => {
-            const worked = annualHours.hoursWorked!;
-            const target = annualHours.targetHours!;
-            const pct = Math.min(100, Math.round((worked / target) * 100));
-            const over = worked > target;
-            const barColor = over ? 'var(--orange)' : pct >= 80 ? 'var(--green)' : 'var(--blue)';
-            return (
-              <div style={{ marginBottom: 24, padding: '16px 20px', background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Annual CUH/PMH Call Hours</span>
-                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 13, fontWeight: 700, color: barColor }}>{worked}h / {target}h</span>
-                </div>
-                <div style={{ height: 10, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${pct}%`, background: barColor, borderRadius: 99, transition: 'width 0.4s ease' }} />
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 7, fontSize: 11, color: 'var(--muted)' }}>
-                  <span>{pct}% of annual target</span>
-                  <span>{over ? `${worked - target}h over target` : `${target - worked}h remaining`}</span>
-                </div>
-              </div>
-            );
-          })()
-        )}
+        {/* Pro-rated call equity: my balance, my per-block history, and the whole pool. */}
+        {renderMyEquity()}
 
         {!myStats && (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>Loading stats…</div>
@@ -2201,6 +2524,7 @@ export default function ScheduleView({
     ...(role === 'chief' ? [
       { id: 'hours' as Tab, label: '⏱ Hours' },
       { id: 'equity' as Tab, label: '📊 Equity' },
+      { id: 'usage' as Tab, label: '👥 Usage' },
     ] : []),
   ];
 
@@ -2758,6 +3082,7 @@ export default function ScheduleView({
               {tab === 'stats' && renderStatsTab()}
               {tab === 'hours' && renderHoursTab()}
               {tab === 'equity' && renderEquityTab()}
+              {tab === 'usage' && renderUsageTab()}
 
               {/* Print-only calendar */}
               <div className="print-cal">
