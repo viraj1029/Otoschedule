@@ -163,6 +163,9 @@ export default function ScheduleView({
 
   async function switchToTab(tab: HospitalTab) {
     setHospitalTab(tab);
+    // The Usage tab only exists for CUH/PMH; leaving it selected while switching to
+    // another hospital would land the chief on an empty panel.
+    if (tab !== 'cuh_pmh') setTab((t) => (t === 'usage' ? 'calendar' : t));
     setSelectMode(false);
     setSelectedKeys([]);
     setMergeSel([]);
@@ -1059,7 +1062,7 @@ export default function ScheduleView({
       <>
         {renderMyBalance(
           me,
-          '⚖️ My Call Equity — Year to Date',
+          '⚖️ My CUH/PMH Call Equity — Year to Date',
           'Your fair share is your portion of the call that actually existed, weighted by how much of it you were available to cover. Being above share means the generator will weight future blocks against you until it evens out.',
         )}
 
@@ -1067,7 +1070,7 @@ export default function ScheduleView({
           <div className="card" style={{ marginBottom: 20 }}>
             <div className="ch">
               <div>
-                <div className="ct">📆 My Balance by Block</div>
+                <div className="ct">📆 My CUH/PMH Balance by Block</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
                   Each block&apos;s share is computed from that block&apos;s call and your availability during it, so a block you were mostly off-service for carries a smaller share.
                 </div>
@@ -1136,7 +1139,7 @@ export default function ScheduleView({
       <div className="card" style={{ marginBottom: 20 }}>
         <div className="ch">
           <div>
-            <div className="ct">👥 Everyone&apos;s Call — Year to Date</div>
+            <div className="ct">👥 Everyone&apos;s CUH/PMH Call — Year to Date</div>
             <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
               Every junior in the CUH/PMH pool, ranked by how far above or below their own fair share they are. Shares differ between residents because availability does.
             </div>
@@ -1187,7 +1190,7 @@ export default function ScheduleView({
         <div className="card" style={{ marginBottom: 20 }}>
           <div className="ch">
             <div>
-              <div className="ct">👥 Resident Usage — {acYear}–{Number(acYear) + 1}</div>
+              <div className="ct">👥 CUH/PMH Junior Call Usage — {acYear}–{Number(acYear) + 1}</div>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
                 Worked hours against each resident&apos;s pro-rated fair share. Shares are weighted by availability, so they differ between residents and sum to the call that actually existed.
               </div>
@@ -2524,7 +2527,10 @@ export default function ScheduleView({
     ...(role === 'chief' ? [
       { id: 'hours' as Tab, label: '⏱ Hours' },
       { id: 'equity' as Tab, label: '📊 Equity' },
-      { id: 'usage' as Tab, label: '👥 Usage' },
+      // Pro-rated usage is CUH/PMH junior call only — the CMC and VA pools are
+      // scheduled by different generators with their own equity models, so there is
+      // nothing to show for them here.
+      ...(hospitalTab === 'cuh_pmh' ? [{ id: 'usage' as Tab, label: '👥 Usage' }] : []),
     ] : []),
   ];
 
