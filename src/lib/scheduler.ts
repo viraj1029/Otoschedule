@@ -77,6 +77,13 @@ export function fmtShort(s: string): string {
   });
 }
 
+// Hours-per-available-day assumed for a carry-in that arrives without an explicit
+// potentialHours (legacy callers only — /api/jr-carry always sends one now). It is the
+// midpoint of a 12h weekday and a 24h weekend day; the true blended average for a
+// typical block is nearer 15–16, so this slightly overstates prior potential and
+// therefore under-weights history relative to the current block.
+export const LEGACY_AVG_DAY_HOURS = 18;
+
 export function shiftHours(key: string): number {
   if (HOLIDAYS.has(key)) return 24;
   const dow = parseDate(key).getDay();
@@ -142,6 +149,23 @@ export const TRAUMA_WEEKS = buildTraumaSet();
 
 export type ScheduleMode = 'merged' | 'senior' | 'junior';
 
+// Cumulative junior call history from earlier published blocks in the same academic
+// year, keyed by person_id (see /api/jr-carry). Each metric carries its own
+// potential-hours denominator so the sort compares cumulative hours against the
+// cumulative hours that resident could have worked — putting a running total over a
+// single block's potential would inflate the ratio for anyone with a short rotation.
+// The *PotentialHours fields are optional so older callers still typecheck; when one
+// is absent the sort falls back to the current block's potential alone.
+export interface CarryIn {
+  hours: number;
+  availDays: number;
+  wkndHours?: number;
+  traumaHours?: number;
+  potentialHours?: number;
+  wkndPotentialHours?: number;
+  traumaPotentialHours?: number;
+}
+
 // Returns true if the resident has a CUH, PMH, or Research rotation segment overlapping [periodStart, periodEnd].
 // Research residents (PGY4+) count as CUH/PMH eligible because they do backup weeks there.
 // Falls back to checking r.hospital / r.status if no segments are defined.
@@ -177,7 +201,7 @@ export function generateSchedule(
   bEndStr: string,
   blockPublished: boolean,
   mode: ScheduleMode = 'merged',
-  carryIn: Record<string, { hours: number; availDays: number; wkndHours?: number; traumaHours?: number }> = {},
+  carryIn: Record<string, CarryIn> = {},
 ): ScheduleData {
   const bStart = parseDate(bStartStr);
   const bEnd   = parseDate(bEndStr);
@@ -625,39 +649,59 @@ export function generateSchedule(
     rotWkndAvailDays[r.id] = Math.max(1, wkndAvail);
   });
 
+  // Cumulative utilization ratios, each of the form
+  //   (carried hours + this block's hours) / (carried potential + this block's potential).
+  // Both halves of every fraction span the same set of blocks, so a resident with a
+  // short rotation this block isn't pushed off weekend or trauma call by history that
+  // has no matching denominator. When a carry-in denominator is missing (legacy data,
+  // or a caller that passes no carry-in at all) the term is zero and the ratio reduces
+  // to this block alone.
+  const EMPTY_CARRY: CarryIn = { hours: 0, availDays: 0 };
+  const carryFor = (r: Resident): CarryIn => carryIn[r.person_id ?? ''] ?? EMPTY_CARRY;
+
+  const totalRatio = (r: Resident, c: CarryIn) =>
+    (c.hours + jrH[r.id]) /
+    ((c.potentialHours ?? c.availDays * LEGACY_AVG_DAY_HOURS) + rotPotentialHours[r.id]);
+  const wkndRatio = (r: Resident, c: CarryIn) =>
+    ((c.wkndHours ?? 0) + jrHwknd[r.id]) /
+    ((c.wkndPotentialHours ?? 0) + rotWkndPotentialHours[r.id]);
+  const traumaRatio = (r: Resident, c: CarryIn) =>
+    ((c.traumaHours ?? 0) + jrTH[r.id]) /
+    ((c.traumaPotentialHours ?? 0) + rotPotentialTraumaHours[r.id]);
+
   function pickJr(key: string, ex: string | null = null, isWeekendSlot = false, skipGap = false, isTraumaDay = false): Resident {
     const d = parseDate(key);
 
     function sortFn(a: Resident, b: Resident) {
-      const aC = carryIn[a.person_id ?? ''] ?? { hours: 0, availDays: 0, wkndHours: 0, traumaHours: 0 };
-      const bC = carryIn[b.person_id ?? ''] ?? { hours: 0, availDays: 0, wkndHours: 0, traumaHours: 0 };
+      const aC = carryFor(a);
+      const bC = carryFor(b);
 
       // For shifts that are both weekend AND trauma: use a blended score (weekend ratio + trauma ratio)
       // so neither axis dominates. This prevents a resident with low weekend hours but high trauma hours
       // from repeatedly winning trauma-weekend slots just because of the weekend sort.
       if (isWeekendSlot && isTraumaDay) {
-        const aWr = ((aC.wkndHours ?? 0) + jrHwknd[a.id]) / rotWkndPotentialHours[a.id];
-        const bWr = ((bC.wkndHours ?? 0) + jrHwknd[b.id]) / rotWkndPotentialHours[b.id];
-        const aTr = ((aC.traumaHours ?? 0) + jrTH[a.id]) / rotPotentialTraumaHours[a.id];
-        const bTr = ((bC.traumaHours ?? 0) + jrTH[b.id]) / rotPotentialTraumaHours[b.id];
+        const aWr = wkndRatio(a, aC);
+        const bWr = wkndRatio(b, bC);
+        const aTr = traumaRatio(a, aC);
+        const bTr = traumaRatio(b, bC);
         const aBlend = aWr + aTr;
         const bBlend = bWr + bTr;
         if (Math.abs(aBlend - bBlend) > 0.001) return aBlend - bBlend;
       } else if (isWeekendSlot) {
         // Weekend-only: primary sort is weekend utilization ratio vs available weekend-call hours.
-        const aWr = ((aC.wkndHours ?? 0) + jrHwknd[a.id]) / rotWkndPotentialHours[a.id];
-        const bWr = ((bC.wkndHours ?? 0) + jrHwknd[b.id]) / rotWkndPotentialHours[b.id];
+        const aWr = wkndRatio(a, aC);
+        const bWr = wkndRatio(b, bC);
         if (Math.abs(aWr - bWr) > 0.001) return aWr - bWr;
       } else if (isTraumaDay) {
         // Trauma-only (weekday): primary sort is trauma utilization ratio.
-        const aTr = ((aC.traumaHours ?? 0) + jrTH[a.id]) / rotPotentialTraumaHours[a.id];
-        const bTr = ((bC.traumaHours ?? 0) + jrTH[b.id]) / rotPotentialTraumaHours[b.id];
+        const aTr = traumaRatio(a, aC);
+        const bTr = traumaRatio(b, bC);
         if (Math.abs(aTr - bTr) > 0.001) return aTr - bTr;
       }
 
-      // Total utilization ratio as fallback (carry-in availDays × 18 approximates prior potential hours).
-      const ar = (aC.hours + jrH[a.id]) / (aC.availDays * 18 + rotPotentialHours[a.id]);
-      const br = (bC.hours + jrH[b.id]) / (bC.availDays * 18 + rotPotentialHours[b.id]);
+      // Total utilization ratio as fallback.
+      const ar = totalRatio(a, aC);
+      const br = totalRatio(b, bC);
       if (Math.abs(ar - br) > 0.001) return ar - br;
 
       // Final tiebreaker: date-seeded hash using full resident ID for even distribution.
@@ -970,7 +1014,7 @@ export function generateSchedule(
   // Equal length ⇒ each keeps the same weekend hours (and same total hours); only trauma
   // hours move. Weekend and total equity are therefore preserved exactly.
   function traumaSwap(tol = 0.05) {
-    const ratioOf = (r: Resident) => jrTH[r.id] / rotPotentialTraumaHours[r.id];
+    const ratioOf = (r: Resident) => traumaRatio(r, carryFor(r));
     for (let iter = 0; iter < 400; iter++) {
       const sorted = [...jrs].sort((a, b) => ratioOf(a) - ratioOf(b));
       if (ratioOf(sorted[sorted.length - 1]) - ratioOf(sorted[0]) <= tol) break;
@@ -1023,17 +1067,22 @@ export function generateSchedule(
   //   3. Trauma     — moves B only             → fine-tunes trauma in 12h steps (weekday-only, so
   //                   weekend stays put); only total hours shift, fixed by step 4.
   //   4. Total      — moves A only             → evens total hours, touching neither weekend nor trauma.
+  // Each pass equalizes the CUMULATIVE ratio (carry-in + this block), the same measure
+  // pickJr sorts on. Using a within-block ratio here would undo the correction pickJr
+  // just applied: a resident who came into the block ahead on weekends gets fewer of
+  // them from the sort, which leaves them below the within-block average, and a
+  // within-block pass would hand those shifts straight back.
   rebalance(
-    (r) => jrHwknd[r.id] / rotWkndPotentialHours[r.id],
+    (r) => wkndRatio(r, carryFor(r)),
     (jd) => isWeekendCall(jd.dateKey) && !jd.isTrauma,
   );
   traumaSwap();
   rebalance(
-    (r) => jrTH[r.id] / rotPotentialTraumaHours[r.id],
+    (r) => traumaRatio(r, carryFor(r)),
     (jd) => jd.isTrauma && !isWeekendCall(jd.dateKey),
   );
   rebalance(
-    (r) => jrH[r.id] / rotPotentialHours[r.id],
+    (r) => totalRatio(r, carryFor(r)),
     (jd) => !isWeekendCall(jd.dateKey) && !jd.isTrauma,
     0.035, // tighter target for total hours (user wants within ~4%); safe — moves only
            // weekday non-trauma shifts, so it can't disturb weekend or trauma balance.

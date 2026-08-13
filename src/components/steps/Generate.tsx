@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import type { Block, Resident, Request, AnyScheduleData, Schedule } from '@/types';
 import { parseDate, generateSchedule, generateCMCSchedule, generateVASchedule } from '@/lib/scheduler';
-import type { ScheduleMode } from '@/lib/scheduler';
+import type { ScheduleMode, CarryIn } from '@/lib/scheduler';
 import { api } from '../App';
 
 interface Props {
@@ -138,7 +138,7 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
         scheduleData = generateVASchedule(vaPool, allRequests, scheduleName, schedStart, schedEnd);
       } else {
         // Carry-in = cumulative junior hours from published blocks earlier this academic year.
-        const carryIn = await api<Record<string, { hours: number; availDays: number; wkndHours: number; traumaHours: number }>>(`/jr-carry?before=${encodeURIComponent(schedStart)}`);
+        const carryIn = await api<Record<string, CarryIn>>(`/jr-carry?before=${encodeURIComponent(schedStart)}`);
         scheduleData = generateSchedule(residents, allRequests, scheduleName, schedStart, schedEnd, false, mode, carryIn);
       }
 
