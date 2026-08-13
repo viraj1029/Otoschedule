@@ -46,6 +46,24 @@ function getResRequests(allRequests: Request[], resId: string) {
 
 type HospitalTab = 'cuh_pmh' | 'va' | 'cmc';
 
+/** Default name offered when combining schedules — e.g. "Jul – Sep 2026 - Junior Schedule (Combined)". */
+function combinedNameSuggestion(list: Schedule[]): string {
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const start = list.map((s) => s.start_date).filter(Boolean).sort()[0];
+  const ends = list.map((s) => s.end_date).filter(Boolean).sort();
+  const end = ends[ends.length - 1];
+  if (!start || !end) return 'Combined Schedule';
+  const [sy, sm] = start.split('-').map(Number);
+  const [ey, em] = end.split('-').map(Number);
+  const range = sy === ey
+    ? `${M[sm - 1]} – ${M[em - 1]} ${sy}`
+    : `${M[sm - 1]} ${sy} – ${M[em - 1]} ${ey}`;
+  // Keep the shared suffix (e.g. "Junior Schedule") when every source has the same one
+  const suffixes = list.map((s) => s.name.split(' - ').slice(1).join(' - ').trim()).filter(Boolean);
+  const suffix = suffixes.length === list.length && suffixes.every((x) => x === suffixes[0]) ? suffixes[0] : '';
+  return suffix ? `${range} - ${suffix} (Combined)` : `${range} (Combined)`;
+}
+
 export default function ScheduleView({
   schedule, schedules = [], activeScheduleId, residents, allRequests, block, role,
   onScheduleChanged, onBlockChanged, onScheduleSelected, onScheduleListChanged, onScheduleDeleted, onRegenerate, showToast, currentResId,
@@ -70,6 +88,8 @@ export default function ScheduleView({
   const [editingRounding, setEditingRounding] = useState<string | null>(null);
   const [editingScheduleName, setEditingScheduleName] = useState<string | null>(null); // schedule id being renamed
   const [scheduleNameDraft, setScheduleNameDraft] = useState('');
+  const [mergeSel, setMergeSel] = useState<string[]>([]);   // schedule ids ticked for combining
+  const [merging, setMerging] = useState(false);
 
   const initialHospTab: HospitalTab = schedule?.type === 'va' ? 'va' : schedule?.type === 'cmc' ? 'cmc' : 'cuh_pmh';
   const [hospitalTab, setHospitalTab] = useState<HospitalTab>(initialHospTab);
@@ -140,6 +160,7 @@ export default function ScheduleView({
     setHospitalTab(tab);
     setSelectMode(false);
     setSelectedKeys([]);
+    setMergeSel([]);
     const match = schedules.filter((s) => (s.schedule_type ?? 'cuh_pmh') === tab)[0];
     if (!match) return;
     const currentSchedId = (schedule as AnyScheduleData & { _scheduleId?: string })?._scheduleId ?? activeScheduleId;
@@ -2193,6 +2214,62 @@ export default function ScheduleView({
   );
   const currentTabSchedule = scheduleMatchesTab ? schedule : null;
 
+  // ── Combining schedules ───────────────────────────────────────────────────────
+  // Two schedule periods (e.g. July and Aug/Sep) folded into one so the equity
+  // tab shows cumulative hours per resident across the whole span.
+  async function mergeSelected() {
+    const picked = tabScheduleList
+      .filter((s) => mergeSel.includes(s.id))
+      .sort((a, b) => (a.start_date ?? '').localeCompare(b.start_date ?? ''));
+    if (picked.length < 2) { showToast('Tick at least two schedules to combine', true); return; }
+
+    const suggested = combinedNameSuggestion(picked);
+    const name = window.prompt(
+      `Combine these ${picked.length} schedules into one?\n\n` +
+      picked.map((s) => `• ${s.name}`).join('\n') +
+      '\n\nThe originals are kept. Name for the combined schedule:',
+      suggested,
+    );
+    if (name === null) return;
+
+    setMerging(true);
+    try {
+      const res = await api<{ ok: boolean; id: string; name: string; warnings: string[] }>(
+        '/schedules/merge', 'POST', { ids: picked.map((s) => s.id), name: name.trim() },
+      );
+      setMergeSel([]);
+      await onScheduleListChanged?.();
+      await onScheduleSelected?.(res.id);
+      showToast(res.warnings?.length ? `Combined — note: ${res.warnings[0]}` : `Combined into "${res.name}"`);
+    } catch (e) {
+      showToast((e as Error).message, true);
+    } finally {
+      setMerging(false);
+    }
+  }
+
+  function mergedNote(sched: AnyScheduleData) {
+    if (!sched.mergedFrom?.length) return null;
+    return (
+      <div style={{
+        marginTop: 8, padding: '8px 12px', fontSize: 11, lineHeight: 1.6,
+        background: 'var(--s2)', border: '1px solid var(--border)', borderRadius: 'var(--r)',
+        color: 'var(--muted)',
+      }}>
+        <strong style={{ color: 'var(--fg)' }}>⧉ Combined schedule</strong> — built from{' '}
+        {sched.mergedFrom.map((m, i) => (
+          <span key={m.id}>
+            {i > 0 ? ', ' : ''}<span style={{ color: 'var(--fg)' }}>{m.name}</span> ({fmtDate(m.bStart)} → {fmtDate(m.bEnd)})
+          </span>
+        ))}
+        .{role === 'chief' && (
+          <> Totals and equity bars cover the full span. This is a snapshot: edits here don&apos;t change the
+          source schedules, and it&apos;s left out of resident year-to-date stats so nothing is counted twice.</>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div>
       {/* Hospital type tab bar */}
@@ -2252,8 +2329,27 @@ export default function ScheduleView({
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                   Schedule Library
                 </span>
-                <button className="btn bsm bg" onClick={onRegenerate}>＋ New Schedule</button>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {tabScheduleList.length > 1 && (
+                    <button
+                      className={`btn bsm ${mergeSel.length >= 2 ? 'bg' : 'bgh'}`}
+                      disabled={mergeSel.length < 2 || merging}
+                      onClick={mergeSelected}
+                      title="Combine the ticked schedules into one continuous schedule with cumulative equity metrics"
+                    >
+                      {merging ? <><span className="spinner" /> Combining…</> : `⧉ Combine${mergeSel.length >= 2 ? ` ${mergeSel.length}` : ''} selected`}
+                    </button>
+                  )}
+                  <button className="btn bsm bg" onClick={onRegenerate}>＋ New Schedule</button>
+                </div>
               </div>
+              {tabScheduleList.length > 1 && (
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+                  Tick two or more consecutive periods and choose <strong>Combine</strong> to view them as one
+                  schedule — the Hours and Equity tabs then show cumulative totals per resident across the whole
+                  span. The original schedules stay untouched.
+                </div>
+              )}
               {tabScheduleList.length === 0 ? (
                 <div style={{ padding: '14px 16px', background: 'var(--s2)', borderRadius: 'var(--r)', color: 'var(--muted)', fontSize: 13 }}>
                   No {hospitalTab === 'cuh_pmh' ? 'CUH/PMH' : hospitalTab.toUpperCase()} schedules generated yet.
@@ -2277,6 +2373,19 @@ export default function ScheduleView({
                           transition: 'background 0.15s',
                         }}
                       >
+                        {/* Combine selector */}
+                        {tabScheduleList.length > 1 && (
+                          <input
+                            type="checkbox"
+                            checked={mergeSel.includes(s.id)}
+                            title="Select to combine with other periods"
+                            onChange={(e) => setMergeSel((prev) => (
+                              e.target.checked ? [...prev, s.id] : prev.filter((x) => x !== s.id)
+                            ))}
+                            style={{ flexShrink: 0, width: 15, height: 15, cursor: 'pointer', accentColor: 'var(--blue)' }}
+                          />
+                        )}
+
                         {/* Status badge */}
                         <div style={{
                           flexShrink: 0, width: 70, textAlign: 'center',
@@ -2318,12 +2427,17 @@ export default function ScheduleView({
                               <button type="button" className="btn bsm" style={{ flexShrink: 0 }} onClick={() => setEditingScheduleName(null)}>✕</button>
                             </form>
                           ) : (
-                            <div
-                              style={{ fontSize: 13, fontWeight: isActive ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'text' }}
-                              title="Click to rename"
-                              onClick={() => { setEditingScheduleName(s.id); setScheduleNameDraft(s.name); }}
-                            >
-                              {s.name}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                              <div
+                                style={{ fontSize: 13, fontWeight: isActive ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'text' }}
+                                title="Click to rename"
+                                onClick={() => { setEditingScheduleName(s.id); setScheduleNameDraft(s.name); }}
+                              >
+                                {s.name}
+                              </div>
+                              {s.is_merged && (
+                                <span className="bdg bb" style={{ fontSize: 9, flexShrink: 0 }} title="Built by combining other schedules">⧉ Combined</span>
+                              )}
                             </div>
                           )}
                           {s.start_date && s.end_date && (
@@ -2392,6 +2506,7 @@ export default function ScheduleView({
                 )}
               </div>
               <div className="page-sub">{fmtDate(currentTabSchedule.bStart)} → {fmtDate(currentTabSchedule.bEnd)}</div>
+              {mergedNote(currentTabSchedule)}
               {role === 'chief' && published && (
                 <div style={{ marginBottom: 12, padding: '8px 14px', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: 'var(--r)', display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
                   <span>⚠️</span>
@@ -2476,6 +2591,7 @@ export default function ScheduleView({
                 )}
               </div>
               <div className="page-sub">{fmtDate(currentTabSchedule.bStart)} → {fmtDate(currentTabSchedule.bEnd)}</div>
+              {mergedNote(currentTabSchedule)}
               {role === 'chief' && published && (
                 <div style={{ marginBottom: 12, padding: '8px 14px', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: 'var(--r)', display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
                   <span>⚠️</span>
@@ -2567,6 +2683,8 @@ export default function ScheduleView({
               <div className="page-sub">
                 {fmtDate(currentTabSchedule.bStart)} → {fmtDate(currentTabSchedule.bEnd)}
               </div>
+
+              {mergedNote(currentTabSchedule)}
 
               {/* Live-edit warning */}
               {role === 'chief' && published && (

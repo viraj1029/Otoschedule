@@ -19,6 +19,15 @@ export interface Schedule {
   published: boolean;
   generated_at?: string;
   schedule_type?: string;
+  is_merged?: boolean; // true when this schedule was built by combining others
+}
+
+/** One source period folded into a combined schedule. */
+export interface MergedSource {
+  id: string;
+  name: string;
+  bStart: string; // YYYY-MM-DD
+  bEnd: string;   // YYYY-MM-DD
 }
 
 export type Hospital = 'CUH' | 'PMH' | 'CMC' | 'VA' | 'Research';
@@ -122,6 +131,7 @@ export interface ScheduleData {
   jrWkndPotentialHours?: Record<string, number>;
   jrPotentialHours?: Record<string, number>;
   jrPotentialTraumaHours?: Record<string, number>;
+  mergedFrom?: MergedSource[];  // present when built by combining other schedules
   _scheduleId?: string;  // injected by GET /api/schedule
 }
 
@@ -144,6 +154,7 @@ export interface CMCScheduleData {
   counts: Record<string, number>;  // call days per resident
   hours: Record<string, number>;   // call hours per resident
   published: boolean;
+  mergedFrom?: MergedSource[];
   _scheduleId?: string;
 }
 
@@ -167,6 +178,7 @@ export interface VAScheduleData {
   days: Record<string, number>;    // call days per resident
   hours: Record<string, number>;   // call hours per resident
   published: boolean;
+  mergedFrom?: MergedSource[];
   _scheduleId?: string;
 }
 
