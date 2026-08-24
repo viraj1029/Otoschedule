@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, type ReactElement } from 'react';
 import type { Block, Resident, Request, ScheduleData, CMCScheduleData, VAScheduleData, AnyScheduleData, Schedule, Tab, Role, PoolEquityResponse, PoolEquityMember, EquityAxis } from '@/types';
-import { HOLIDAYS, HOLIDAY_NAMES, TRAUMA_WEEKS, parseDate, fmtShort, dk, addDays, isWeekendCall, isOnRotation } from '@/lib/scheduler';
+import { HOLIDAYS, HOLIDAY_NAMES, TRAUMA_WEEKS, parseDate, fmtShort, dk, addDays, isWeekendCall, isOnRotation, hospitalOn, hospitalLabel } from '@/lib/scheduler';
 import { api } from '../App';
 import OverrideModal from '../modals/OverrideModal';
 
@@ -90,6 +90,16 @@ export default function ScheduleView({
   const [scheduleNameDraft, setScheduleNameDraft] = useState('');
   const [mergeSel, setMergeSel] = useState<string[]>([]);   // schedule ids ticked for combining
   const [merging, setMerging] = useState(false);
+
+  // The `res` copies frozen into a schedule carry whatever rotations existed at generation
+  // time; edits made since then only land on the live residents list. Resolve back to the
+  // live record (by id, then by person_id for someone with a new row in a later period) so
+  // hospital labels track current rotations rather than the snapshot.
+  function liveRes<T extends Resident>(res: T): Resident {
+    return residents.find((r) => r.id === res.id)
+      ?? (res.person_id ? residents.find((r) => r.person_id === res.person_id) : undefined)
+      ?? res;
+  }
 
   const initialHospTab: HospitalTab = schedule?.type === 'va' ? 'va' : schedule?.type === 'cmc' ? 'cmc' : 'cuh_pmh';
   const [hospitalTab, setHospitalTab] = useState<HospitalTab>(initialHospTab);
@@ -470,7 +480,7 @@ export default function ScheduleView({
               {w.isBackup && <span className="bdg bpk" style={{ fontSize: 9, marginLeft: 6 }}>Backup</span>}
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-              PGY-{w.res.pgy} · {w.res.hospital}
+              PGY-{w.res.pgy} · {hospitalLabel(liveRes(w.res), w.wS, w.wE)}
               {w.isBackup ? ' · Research backup week' : ' · Rounds both hospitals on weekends'}
             </div>
           </div>
@@ -522,7 +532,10 @@ export default function ScheduleView({
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             {avatar(jd.res)}
             <span style={{ fontSize: 13, fontWeight: 500 }}>{jd.res.name}</span>
-            <span className={`bdg ${jd.res.hospital === 'CUH' ? 'bgr' : 'bp'}`} style={{ fontSize: 9 }}>{jd.res.hospital}</span>
+            {(() => {
+              const h = hospitalOn(liveRes(jd.res), jd.dateKey);
+              return <span className={`bdg ${h === 'CUH' ? 'bgr' : 'bp'}`} style={{ fontSize: 9 }}>{h}</span>;
+            })()}
             {ri}
           </div>
           <div>{jd.override && <span className="bdg bo" style={{ fontSize: 9 }}>override</span>}</div>
@@ -566,6 +579,10 @@ export default function ScheduleView({
     const prefix = curHrs ? `${curHrs.year}-${String(curHrs.month + 1).padStart(2, '0')}-` : '';
     const dim = curHrs ? new Date(curHrs.year, curHrs.month + 1, 0).getDate() : 30;
     const wks = Math.ceil(dim / 7);
+    // Hospital for the month on display, not the legacy column — a resident who transfers
+    // mid-year should read differently in July than in December.
+    const monthHosp = (r: Resident) =>
+      prefix ? hospitalLabel(r, `${prefix}01`, `${prefix}${String(dim).padStart(2, '0')}`) : (r.hospital ?? '');
 
     const monthRows = jrs.map((res) => {
       const days = cuhSched!.juniorDays.filter((d) => d.res.id === res.id && d.dateKey.startsWith(prefix));
@@ -786,7 +803,7 @@ export default function ScheduleView({
                   <tr key={res.id}>
                     <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{avatar(res)}<span style={{ fontWeight: 500 }}>{res.name}</span></div></td>
                     <td><span className="bdg bb">PGY-{res.pgy}</span></td>
-                    <td><span className={`bdg ${res.hospital === 'CUH' ? 'bgr' : 'bp'}`}>{res.hospital}</span></td>
+                    <td><span className={`bdg ${monthHosp(res) === 'CUH' ? 'bgr' : 'bp'}`}>{monthHosp(res)}</span></td>
                     <td className="r"><span className="hn">{s12}</span></td>
                     <td className="r"><span className="hn">{s24}</span></td>
                     <td className="r"><span className="ht" style={{ color: 'var(--green)' }}>{total}h</span></td>
@@ -1263,6 +1280,16 @@ export default function ScheduleView({
       return (parts.length === 1 ? parts[0].slice(0, 2) : parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
     })();
 
+    // Rotations across the academic year on display, in order — a resident who moves between
+    // sites reads "CUH → PMH" instead of whichever single value the legacy column happens to hold.
+    const yearStartKey = myStats?.academicYearStart ?? schedule?.bStart ?? block?.start_date ?? '';
+    const yearEndKey = block?.end_date ?? schedule?.bEnd ?? (yearStartKey
+      ? `${Number(yearStartKey.slice(0, 4)) + 1}-06-30`
+      : '');
+    const yearHosp = (yearStartKey && yearEndKey)
+      ? hospitalLabel(res, yearStartKey, yearEndKey)
+      : (res.hospital ?? '');
+
     function sc(label: string, value: number, unit: string, color: string, sub?: string) {
       return (
         <div className="card" style={{ padding: '18px 20px' }}>
@@ -1394,7 +1421,7 @@ export default function ScheduleView({
           <div>
             <div style={{ fontSize: 15, fontWeight: 600 }}>{res.name}</div>
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-              PGY-{res.pgy} · {res.hospital} · {isJunior ? 'Junior Call' : 'Senior Call'}
+              PGY-{res.pgy} · {yearHosp} · {isJunior ? 'Junior Call' : 'Senior Call'}
             </div>
           </div>
           {myStats && (
@@ -3278,9 +3305,11 @@ function RoundingEditor({ dateKey, residents, currentOverride, onSave }: {
       : '__infer__'
   );
   const [saving, setSaving] = useState(false);
-  const cuhResidents = residents.filter(r => r.hospital === 'CUH' && r.status !== 'away');
-  const pmhResidents = residents.filter(r => r.hospital === 'PMH' && r.status !== 'away');
-  void dateKey;
+  // Offer the residents actually at each site on this day. This previously filtered on the
+  // legacy `hospital` column and discarded dateKey entirely, so after a rotation swap the
+  // correct rounder could be missing from the list.
+  const cuhResidents = residents.filter(r => hospitalOn(r, dateKey) === 'CUH' && r.status !== 'away');
+  const pmhResidents = residents.filter(r => hospitalOn(r, dateKey) === 'PMH' && r.status !== 'away');
   return (
     <div style={{ background: 'var(--s2)', border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginTop: 4, fontSize: 11 }}>
       <div style={{ marginBottom: 6, fontWeight: 600 }}>Override Rounding</div>

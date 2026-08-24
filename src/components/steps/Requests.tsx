@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import type { Block, Resident, Request, Role, ScheduleData, AnyScheduleData, Hospital } from '@/types';
-import { HOLIDAYS, parseDate, fmtShort, isOnRotation } from '@/lib/scheduler';
+import { HOLIDAYS, parseDate, fmtShort, isOnRotation, hospitalOn, hospitalLabel } from '@/lib/scheduler';
 import { api } from '../App';
 import ScheduleView from './ScheduleView';
 
@@ -59,11 +59,7 @@ function VacationsView({ residents, allRequests, bStart }: {
 
   // For a date, find the hospital from the resident's rotation segments
   function hospitalForDate(rep: Resident, dateStr: string): Hospital {
-    if (rep.rotations && rep.rotations.length > 0) {
-      const seg = rep.rotations.find((s) => dateStr >= s.start_date && dateStr <= s.end_date);
-      return (seg?.hospital ?? rep.hospital) as Hospital;
-    }
-    return rep.hospital;
+    return (hospitalOn(rep, dateStr) || rep.hospital) as Hospital;
   }
 
   return (
@@ -194,6 +190,13 @@ export default function Requests({
 
   const [calYear, setCalYear] = useState(bStart.getFullYear());
   const [calMonth, setCalMonth] = useState(bStart.getMonth());
+
+  // Hospital for the month the calendar is showing, so the header agrees with the days below.
+  function monthHosp(r: Resident): string {
+    const mp = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-`;
+    const dim = new Date(calYear, calMonth + 1, 0).getDate();
+    return hospitalLabel(r, `${mp}01`, `${mp}${String(dim).padStart(2, '0')}`) || r.hospital;
+  }
   const [selectedResId, setSelectedResId] = useState<string>(
     role === 'resident' ? (currentResId ?? '') :
     residents.length > 0 ? '__all__' : ''
@@ -364,11 +367,7 @@ export default function Requests({
   // Build map of other residents' official vacation days (for resident personal view)
   // Only include peers who are at the same hospital as the current resident on that date.
   function hospOnDate(res: Resident, dateStr: string): string {
-    if (res.rotations && res.rotations.length > 0) {
-      const seg = res.rotations.find((s) => dateStr >= s.start_date && dateStr <= s.end_date);
-      return seg?.hospital ?? res.hospital;
-    }
-    return res.hospital;
+    return hospitalOn(res, dateStr) || res.hospital;
   }
   const othersVacOffMap: Record<string, Resident[]> = {};
   if (role === 'resident' && currentResidentFull) {
@@ -559,7 +558,7 @@ export default function Requests({
             {avatar(activeRes, 32)}
             <div>
               <div style={{ fontSize: 14, fontWeight: 600 }}>{activeRes.name}</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)' }}>PGY-{activeRes.pgy} · {activeRes.hospital}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>PGY-{activeRes.pgy} · {monthHosp(activeRes)}</div>
             </div>
             <div style={{ flex: 1 }} />
             <span className="bdg bgr" style={{ padding: '6px 12px', fontSize: 11 }}>● Saved to server</span>

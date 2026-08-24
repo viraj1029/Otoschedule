@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import type { Block, Resident, Request, AnyScheduleData, Schedule } from '@/types';
-import { parseDate, generateSchedule, generateCMCSchedule, generateVASchedule } from '@/lib/scheduler';
+import { parseDate, generateSchedule, generateCMCSchedule, generateVASchedule, hospitalLabel } from '@/lib/scheduler';
 import type { ScheduleMode, CarryIn } from '@/lib/scheduler';
 import { api } from '../App';
 
@@ -99,19 +99,9 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
     return r.status === 'research';
   }
 
-  // Where a resident actually is during the selected period. The `hospital` column is a
-  // legacy/primary value and goes stale as soon as rotations move, so read the rotation
-  // segments that overlap this window instead. Multiple segments are listed in order.
-  function hospitalsInPeriod(r: typeof residents[0]): string {
-    const segs = (r.rotations ?? []).filter(
-      (seg) => parseDate(seg.start_date) <= parseDate(schedEnd) && parseDate(seg.end_date) >= parseDate(schedStart),
-    );
-    if (!segs.length) return r.hospital;
-    const ordered = [...segs].sort((a, b) => a.start_date.localeCompare(b.start_date));
-    const names: string[] = [];
-    for (const seg of ordered) if (!names.includes(seg.hospital)) names.push(seg.hospital);
-    return names.join(' → ');
-  }
+  // Where a resident actually is during the selected period, read from their rotation
+  // segments rather than the legacy `hospital` column (see hospitalLabel in scheduler.ts).
+  const hospitalsInPeriod = (r: typeof residents[0]) => hospitalLabel(r, schedStart, schedEnd);
   const resR = residents.filter((r) => r.pgy >= 4 && hasResearchRotation(r));
   const resRIds = new Set(resR.map((r) => r.id));
   const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active' && !resRIds.has(r.id) && (hasHospRotation(r, 'CUH') || hasHospRotation(r, 'PMH')));

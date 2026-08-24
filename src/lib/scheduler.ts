@@ -121,6 +121,43 @@ export function isOnRotation(
   return all.length === 0;
 }
 
+// Companion to isOnRotation: which hospital(s) is this resident at over a window, read from
+// the same rotation segments. The legacy `hospital` column is a single stale value that does
+// not move when rotations are edited, so it is only a last resort — used when the resident
+// has no segments at all, or none covering the window.
+//   • Distinct hospitals are returned in start-date order, so a resident who moves mid-window
+//     reads e.g. ['PMH', 'CUH'] rather than arbitrarily picking one.
+export function hospitalsBetween(
+  r: { hospital?: string; rotations?: { hospital: string; start_date: string; end_date: string }[] },
+  startKey: string,
+  endKey: string,
+): string[] {
+  const segs = (r.rotations ?? [])
+    .filter((s) => s.start_date <= endKey && s.end_date >= startKey)
+    .sort((a, b) => a.start_date.localeCompare(b.start_date));
+  const names: string[] = [];
+  for (const seg of segs) if (!names.includes(seg.hospital)) names.push(seg.hospital);
+  if (names.length) return names;
+  return r.hospital ? [r.hospital] : [];
+}
+
+/** The single hospital a resident is at on one day (see hospitalsBetween for the fallback rules). */
+export function hospitalOn(
+  r: { hospital?: string; rotations?: { hospital: string; start_date: string; end_date: string }[] },
+  dateKey: string,
+): string {
+  return hospitalsBetween(r, dateKey, dateKey)[0] ?? '';
+}
+
+/** Same, formatted for display — "PMH → CUH" when a resident moves inside the window. */
+export function hospitalLabel(
+  r: { hospital?: string; rotations?: { hospital: string; start_date: string; end_date: string }[] },
+  startKey: string,
+  endKey: string,
+): string {
+  return hospitalsBetween(r, startKey, endKey).join(' → ');
+}
+
 // ─── Trauma weeks ─────────────────────────────────────────────────────────────
 
 function buildTraumaSet(): Set<string> {
