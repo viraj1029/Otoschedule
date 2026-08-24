@@ -98,6 +98,20 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
       return r.rotations.some((seg) => seg.hospital === 'Research' && parseDate(seg.start_date) <= parseDate(schedEnd) && parseDate(seg.end_date) >= parseDate(schedStart));
     return r.status === 'research';
   }
+
+  // Where a resident actually is during the selected period. The `hospital` column is a
+  // legacy/primary value and goes stale as soon as rotations move, so read the rotation
+  // segments that overlap this window instead. Multiple segments are listed in order.
+  function hospitalsInPeriod(r: typeof residents[0]): string {
+    const segs = (r.rotations ?? []).filter(
+      (seg) => parseDate(seg.start_date) <= parseDate(schedEnd) && parseDate(seg.end_date) >= parseDate(schedStart),
+    );
+    if (!segs.length) return r.hospital;
+    const ordered = [...segs].sort((a, b) => a.start_date.localeCompare(b.start_date));
+    const names: string[] = [];
+    for (const seg of ordered) if (!names.includes(seg.hospital)) names.push(seg.hospital);
+    return names.join(' → ');
+  }
   const resR = residents.filter((r) => r.pgy >= 4 && hasResearchRotation(r));
   const resRIds = new Set(resR.map((r) => r.id));
   const srs = residents.filter((r) => r.pgy >= 4 && r.status === 'active' && !resRIds.has(r.id) && (hasHospRotation(r, 'CUH') || hasHospRotation(r, 'PMH')));
@@ -117,7 +131,7 @@ export default function Generate({ block, residents, allRequests, onScheduleGene
         {avatar(r)}
         <div>
           <div style={{ fontSize: 13, fontWeight: 500 }}>{r.name}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>PGY-{r.pgy} · {r.hospital}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>PGY-{r.pgy} · {hospitalsInPeriod(r)}</div>
         </div>
       </div>
     ));
