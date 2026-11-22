@@ -18,6 +18,9 @@ import type {
 } from '@/types';
 
 // ─── US Federal Holidays (static set matching the original) ──────────────────
+// Covers whole academic years (Jul 1 → Jun 30), not calendar years — the Jan–Jun
+// holidays belong to the academic year that started the previous July. Weekend
+// holidays use the observed weekday (e.g. Jul 4 2026 → Fri Jul 3).
 export const HOLIDAYS = new Set([
   '2026-01-01',
   '2026-01-19',
@@ -30,6 +33,11 @@ export const HOLIDAYS = new Set([
   '2026-11-11',
   '2026-11-26',
   '2026-12-25',
+  '2027-01-01',
+  '2027-01-18',
+  '2027-02-15',
+  '2027-05-31',
+  '2027-06-18',
 ]);
 
 export const HOLIDAY_NAMES: Record<string, string> = {
@@ -44,6 +52,11 @@ export const HOLIDAY_NAMES: Record<string, string> = {
   '2026-11-11': 'Veterans Day',
   '2026-11-26': 'Thanksgiving',
   '2026-12-25': 'Christmas',
+  '2027-01-01': "New Year's Day",
+  '2027-01-18': 'MLK Day',
+  '2027-02-15': "Presidents' Day",
+  '2027-05-31': 'Memorial Day',
+  '2027-06-18': 'Juneteenth (observed)',
 };
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
