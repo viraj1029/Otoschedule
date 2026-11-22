@@ -18,6 +18,9 @@ import type {
 } from '@/types';
 
 // ─── US Federal Holidays (static set matching the original) ──────────────────
+// Covers whole academic years (Jul 1 → Jun 30), not calendar years — the Jan–Jun
+// holidays belong to the academic year that started the previous July. Weekend
+// holidays use the observed weekday (e.g. Jul 4 2026 → Fri Jul 3).
 export const HOLIDAYS = new Set([
   '2026-01-01',
   '2026-01-19',
@@ -30,6 +33,11 @@ export const HOLIDAYS = new Set([
   '2026-11-11',
   '2026-11-26',
   '2026-12-25',
+  '2027-01-01',
+  '2027-01-18',
+  '2027-02-15',
+  '2027-05-31',
+  '2027-06-18',
 ]);
 
 export const HOLIDAY_NAMES: Record<string, string> = {
@@ -44,6 +52,11 @@ export const HOLIDAY_NAMES: Record<string, string> = {
   '2026-11-11': 'Veterans Day',
   '2026-11-26': 'Thanksgiving',
   '2026-12-25': 'Christmas',
+  '2027-01-01': "New Year's Day",
+  '2027-01-18': 'MLK Day',
+  '2027-02-15': "Presidents' Day",
+  '2027-05-31': 'Memorial Day',
+  '2027-06-18': 'Juneteenth (observed)',
 };
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
@@ -171,7 +184,24 @@ function buildTraumaSet(): Set<string> {
     '2026-10-26',
     '2026-11-23',
     '2026-12-07',
-    '2026-12-28',
+    '2026-12-28', // runs through Sun 2027-01-03
+    '2027-01-11',
+    '2027-02-01',
+    '2027-02-22',
+    '2027-03-15',
+    '2027-04-12',
+    '2027-04-26',
+    '2027-05-10',
+    '2027-06-14',
+    '2027-07-12',
+    '2027-08-02',
+    '2027-08-23',
+    '2027-09-06',
+    '2027-09-27',
+    '2027-10-11',
+    '2027-11-01',
+    '2027-11-29',
+    '2027-12-13',
   ];
   const s = new Set<string>();
   for (const mon of mondays) {
