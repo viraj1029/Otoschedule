@@ -112,6 +112,12 @@ export default function ScheduleView({
   // pro-rated share, per block and year-to-date. Published to residents and chiefs
   // alike so call load is not private.
   const [poolEquity, setPoolEquity] = useState<PoolEquityResponse | null>(null);
+  // Bumped whenever a change could alter the published CUH/PMH pool (publish/unpublish,
+  // overrides, deletes) so the usage and equity figures are refetched. Without it the
+  // fetch only re-runs when the academic year changes, and every block in a year shares
+  // one acYearParam — so publishing a new block left the Usage tab stale until reload.
+  const [equityVersion, setEquityVersion] = useState(0);
+  const refreshEquity = () => setEquityVersion((v) => v + 1);
   // Which period the chief's usage tab is showing: 'ytd' or a specific schedule id.
   const [usagePeriodId, setUsagePeriodId] = useState<string>('ytd');
 
@@ -158,7 +164,7 @@ export default function ScheduleView({
     if (!role) return;
     const url = acYearParam ? `/pool-equity?acYearStart=${acYearParam}` : '/pool-equity';
     api<PoolEquityResponse>(url).then(setPoolEquity).catch(() => {});
-  }, [role, acYearParam]);
+  }, [role, acYearParam, equityVersion]);
 
   useEffect(() => {
     if (schedule) {
@@ -196,6 +202,7 @@ export default function ScheduleView({
     onScheduleChanged(updated);
     if (schedId) {
       try { await api('/schedule', 'PUT', { id: schedId, scheduleData: updated }); } catch { /* non-critical */ }
+      refreshEquity();
     }
   }
 
@@ -212,6 +219,7 @@ export default function ScheduleView({
     setPublished(next);
     const scheduleId = (schedule as AnyScheduleData & { _scheduleId?: string })?._scheduleId ?? activeScheduleId;
     await api('/block/publish', 'POST', { published: next, scheduleId });
+    refreshEquity();
     if (block) onBlockChanged({ ...block, published: next });
     if (schedule) onScheduleChanged({ ...schedule, published: next });
     onScheduleListChanged?.();
@@ -2837,6 +2845,7 @@ export default function ScheduleView({
                               if (!confirm(msg)) return;
                               await onScheduleDeleted?.(s.id);
                               onScheduleListChanged?.();
+                              refreshEquity();
                               showToast('Schedule deleted');
                             }}
                           >
