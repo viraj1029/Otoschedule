@@ -485,8 +485,8 @@ export function generateSchedule(
         let bestDist = Infinity;
         let d = new Date(wS);
         for (let i = 0; i < pLen - 1; i++) {
-          // Valid: last day of first half must NOT be Saturday (keeps Sat+Sun together)
-          if (d.getDay() !== 6) {
+          // Valid: last day of first half must NOT be Fri or Sat (keeps Fri+Sat+Sun together)
+          if (d.getDay() !== 5 && d.getDay() !== 6) {
             const dist = Math.abs((i + 1) - idealP1);
             if (dist < bestDist) { bestDist = dist; chosenSplit = i; }
           }
@@ -540,7 +540,7 @@ export function generateSchedule(
   // vacation conflicts. Iteratively find the most-over and most-under resident,
   // then split one of the over-resident's periods and give the tail to the
   // under-resident (if they have no conflict there, and the split doesn't land
-  // on a Saturday boundary). Repeats until the gap is ≤ 2 or no valid split
+  // inside a Fri–Sun weekend). Repeats until the gap is ≤ 2 or no valid split
   // can be found.
   console.log('[sched] pre-rebalance:', JSON.stringify(Object.fromEntries(srs.map(r => [r.name, srDays[r.id]]))));
   for (let iter = 0; iter < 60; iter++) {
@@ -565,7 +565,7 @@ export function generateSchedule(
 
       let d2 = new Date(wS2);
       for (let i = 0; i < pLen2 - 1; i++) {
-        if (d2.getDay() !== 6) { // valid: don't land between Sat and Sun
+        if (d2.getDay() !== 5 && d2.getDay() !== 6) { // valid: don't split Fri/Sat/Sun
           const p2Start = addDays(d2, 1);
           const p2Len = pLen2 - (i + 1);
           // Only consider transfers that strictly shrink the gap (p2Len < gap).
