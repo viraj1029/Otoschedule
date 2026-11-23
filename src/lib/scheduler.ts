@@ -352,9 +352,9 @@ export function generateSchedule(
   });
 
   // ── Research resident call week (senior modes only) ─────────────────────────
-  // Research residents are full seniors for ONE Mon–Sun week (5 weekdays + Sat/Sun).
+  // Research residents are full seniors for ONE Fri–Thu week (Fri/Sat/Sun + Mon–Thu).
   // They own that week as primary call; active seniors skip it entirely.
-  // Ideal: conflict-free Mon–Sun; fallback: longest run anchored to Monday.
+  // Ideal: conflict-free Fri–Thu; fallback: longest run anchored to Friday.
   const resBkpWeeks: ResBkpWeek[] = [];
   const resBkpDays: ResBkpDay[] = []; // kept for ScheduleData compat
 
@@ -362,10 +362,10 @@ export function generateSchedule(
     for (const rr of resR) {
       let assigned = false;
       let c = new Date(bStart);
-      while (c.getDay() !== 1) c = addDays(c, 1);
+      while (c.getDay() !== 5) c = addDays(c, 1);
       while (c <= bEnd && !assigned) {
         const wS = new Date(c);
-        const wE = addDays(c, 6); // Mon–Sun (7 days)
+        const wE = addDays(c, 6); // Fri–Thu (7 days)
         const wEC = wE > bEnd ? new Date(bEnd) : new Date(wE);
         let ok = true;
         let d2 = new Date(wS);
@@ -397,12 +397,12 @@ export function generateSchedule(
         if (runs.length) {
           let { wS: rS, wE: rE, len } = runs[0];
           if (len >= 7) {
-            let mon = parseDate(rS);
+            let fri = parseDate(rS);
             const runEnd = parseDate(rE);
-            while (mon <= runEnd && mon.getDay() !== 1) mon = addDays(mon, 1);
-            if (mon <= runEnd) {
-              const sun = addDays(mon, 6);
-              rS = dk(mon); rE = dk(sun > runEnd ? runEnd : sun);
+            while (fri <= runEnd && fri.getDay() !== 5) fri = addDays(fri, 1);
+            if (fri <= runEnd) {
+              const thu = addDays(fri, 6);
+              rS = dk(fri); rE = dk(thu > runEnd ? runEnd : thu);
             } else {
               rE = dk(addDays(parseDate(rS), 6) > parseDate(rE) ? parseDate(rE) : addDays(parseDate(rS), 6));
             }
@@ -493,8 +493,8 @@ export function generateSchedule(
         let bestDist = Infinity;
         let d = new Date(wS);
         for (let i = 0; i < pLen - 1; i++) {
-          // Valid: last day of first half must NOT be Saturday (keeps Sat+Sun together)
-          if (d.getDay() !== 6) {
+          // Valid: last day of first half must NOT be Fri or Sat (keeps Fri+Sat+Sun together)
+          if (d.getDay() !== 5 && d.getDay() !== 6) {
             const dist = Math.abs((i + 1) - idealP1);
             if (dist < bestDist) { bestDist = dist; chosenSplit = i; }
           }
@@ -524,17 +524,17 @@ export function generateSchedule(
     seniorWeeks.push({ wS: dk(wS), wE: dk(wEC), res: best, isBackup: false, override: false });
   }
 
-  // Cover any partial days before the first Monday
+  // Cover any partial days before the first Friday
   let cur = new Date(bStart);
-  if (cur.getDay() !== 1) {
+  if (cur.getDay() !== 5) {
     const partialEnd = new Date(cur);
-    while (partialEnd.getDay() !== 0) partialEnd.setDate(partialEnd.getDate() + 1);
+    while (partialEnd.getDay() !== 4) partialEnd.setDate(partialEnd.getDate() + 1);
     const pEC = partialEnd > bEnd ? new Date(bEnd) : new Date(partialEnd);
     if (!resWeekDatesSet.has(dk(cur))) assignPeriod(cur, pEC);
     cur = addDays(partialEnd, 1);
   }
 
-  // Full Monday-to-Sunday weeks — skip weeks owned by a research resident
+  // Full Friday-to-Thursday weeks — skip weeks owned by a research resident
   while (cur <= bEnd) {
     const wS = new Date(cur);
     const wE = addDays(cur, 6);
@@ -548,7 +548,7 @@ export function generateSchedule(
   // vacation conflicts. Iteratively find the most-over and most-under resident,
   // then split one of the over-resident's periods and give the tail to the
   // under-resident (if they have no conflict there, and the split doesn't land
-  // on a Saturday boundary). Repeats until the gap is ≤ 2 or no valid split
+  // inside a Fri–Sun weekend). Repeats until the gap is ≤ 2 or no valid split
   // can be found.
   console.log('[sched] pre-rebalance:', JSON.stringify(Object.fromEntries(srs.map(r => [r.name, srDays[r.id]]))));
   for (let iter = 0; iter < 60; iter++) {
@@ -573,11 +573,13 @@ export function generateSchedule(
 
       let d2 = new Date(wS2);
       for (let i = 0; i < pLen2 - 1; i++) {
-        if (d2.getDay() !== 6) { // valid: don't land between Sat and Sun
+        if (d2.getDay() !== 5 && d2.getDay() !== 6) { // valid: don't split Fri/Sat/Sun
           const p2Start = addDays(d2, 1);
           const p2Len = pLen2 - (i + 1);
-          // Only consider transfers that don't flip who is over-assigned
-          if (p2Len <= gap && noConflict(under, p2Start, wEC2)) {
+          // Only consider transfers that strictly shrink the gap (p2Len < gap).
+          // Allowing p2Len === gap just swaps who is over and oscillates forever,
+          // fragmenting weeks into 1-day pieces.
+          if (p2Len < gap && noConflict(under, p2Start, wEC2)) {
             const diff = Math.abs(p2Len - targetTransfer);
             if (diff < bestDiff) { bestDiff = diff; bestInfo = { idx, splitDay: i, p2Len }; }
           }
