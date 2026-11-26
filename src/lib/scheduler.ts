@@ -231,6 +231,14 @@ export interface CarryIn {
   potentialHours?: number;
   wkndPotentialHours?: number;
   traumaPotentialHours?: number;
+  // Cumulative fair-share TARGET hours from those same blocks: the sum of each block's
+  // pro-rated share, exactly as the Usage tab computes it. The generator balances
+  // (carried worked − carried target) + (this block's worked − this block's share), so
+  // it corrects the same year-to-date deviation the Usage tab displays. When absent
+  // (legacy callers) the history is treated as already on target.
+  targetHours?: number;
+  wkndTargetHours?: number;
+  traumaTargetHours?: number;
 }
 
 // Returns true if the resident has a CUH, PMH, or Research rotation segment overlapping [periodStart, periodEnd].
@@ -718,25 +726,55 @@ export function generateSchedule(
     rotWkndAvailDays[r.id] = Math.max(1, wkndAvail);
   });
 
-  // Cumulative utilization ratios, each of the form
-  //   (carried hours + this block's hours) / (carried potential + this block's potential).
-  // Both halves of every fraction span the same set of blocks, so a resident with a
-  // short rotation this block isn't pushed off weekend or trauma call by history that
-  // has no matching denominator. When a carry-in denominator is missing (legacy data,
-  // or a caller that passes no carry-in at all) the term is zero and the ratio reduces
-  // to this block alone.
+  // ── Equity measure ──────────────────────────────────────────────────────────
+  // Every balancing decision below works on a resident's YEAR-TO-DATE deviation from
+  // their fair share, in hours, on each axis (total / weekend / trauma):
+  //
+  //   dev_r = (carried worked − carried target) + (block worked − block share)
+  //   block share_r = D × P_r / Σ_j P_j
+  //
+  // where D is this block's demand on that axis and P_r is the resident's equity-basis
+  // potential hours. This is precisely the "worked − fair share" figure the Usage tab
+  // shows, so driving every dev toward zero is driving the Usage tab toward even.
+  //
+  // It replaces an earlier measure that equalized a pooled cumulative ratio,
+  // (carried hours + block hours) / (carried potential + block potential). That is NOT
+  // the same as summing per-block shares: a resident who worked a thinly staffed block
+  // (big per-head share) looked over-worked to it even when exactly on target, so it
+  // took call off them and the Usage deviation grew block after block. Its ratio
+  // tolerances also let 100h+ gaps pass as "balanced" once a year of potential sat in
+  // the denominator.
   const EMPTY_CARRY: CarryIn = { hours: 0, availDays: 0 };
-  const carryFor = (r: Resident): CarryIn => carryIn[r.person_id ?? ''] ?? EMPTY_CARRY;
+  const carryFor = (r: Resident): CarryIn => carryIn[r.person_id ?? r.id] ?? EMPTY_CARRY;
 
+  // This block's demand per axis: every date gets exactly one junior (a Sunday paired
+  // with its Friday is still one shift on that date), so demand is fixed up front.
+  let demTotal = 0, demWknd = 0, demTrauma = 0;
+  for (let dd = new Date(bStart); dd <= bEnd; dd = addDays(dd, 1)) {
+    const key = dk(dd);
+    const h = shiftHours(key);
+    demTotal += h;
+    if (isWeekendCall(key)) demWknd += h;
+    if (TRAUMA_WEEKS.has(key)) demTrauma += h;
+  }
+  const sumPot = (m: Record<string, number>) => jrs.reduce((acc, r) => acc + (m[r.id] ?? 0), 0);
+  const sPTotal = sumPot(rotPotentialHours);
+  const sPWknd = sumPot(rotWkndPotentialHours);
+  const sPTrauma = sumPot(rotPotentialTraumaHours);
+  const blockShareTotal  = (r: Resident) => (sPTotal  > 0 ? demTotal  * rotPotentialHours[r.id]       / sPTotal  : 0);
+  const blockShareWknd   = (r: Resident) => (sPWknd   > 0 ? demWknd   * rotWkndPotentialHours[r.id]   / sPWknd   : 0);
+  const blockShareTrauma = (r: Resident) => (sPTrauma > 0 ? demTrauma * rotPotentialTraumaHours[r.id] / sPTrauma : 0);
+
+  // Names kept from the ratio era; each now returns hours above (+) / below (−) share.
   const totalRatio = (r: Resident, c: CarryIn) =>
-    (c.hours + jrH[r.id]) /
-    ((c.potentialHours ?? c.availDays * LEGACY_AVG_DAY_HOURS) + rotPotentialHours[r.id]);
+    (c.hours - (c.targetHours ?? c.hours)) + jrH[r.id] - blockShareTotal(r);
   const wkndRatio = (r: Resident, c: CarryIn) =>
-    ((c.wkndHours ?? 0) + jrHwknd[r.id]) /
-    ((c.wkndPotentialHours ?? 0) + rotWkndPotentialHours[r.id]);
+    ((c.wkndHours ?? 0) - (c.wkndTargetHours ?? c.wkndHours ?? 0)) + jrHwknd[r.id] - blockShareWknd(r);
   const traumaRatio = (r: Resident, c: CarryIn) =>
-    ((c.traumaHours ?? 0) + jrTH[r.id]) /
-    ((c.traumaPotentialHours ?? 0) + rotPotentialTraumaHours[r.id]);
+    ((c.traumaHours ?? 0) - (c.traumaTargetHours ?? c.traumaHours ?? 0)) + jrTH[r.id] - blockShareTrauma(r);
+
+  // Ties within half an hour are ties.
+  const DEV_EPS = 0.5;
 
   function pickJr(key: string, ex: string | null = null, isWeekendSlot = false, skipGap = false, isTraumaDay = false): Resident {
     const d = parseDate(key);
@@ -755,23 +793,23 @@ export function generateSchedule(
         const bTr = traumaRatio(b, bC);
         const aBlend = aWr + aTr;
         const bBlend = bWr + bTr;
-        if (Math.abs(aBlend - bBlend) > 0.001) return aBlend - bBlend;
+        if (Math.abs(aBlend - bBlend) > DEV_EPS) return aBlend - bBlend;
       } else if (isWeekendSlot) {
         // Weekend-only: primary sort is weekend utilization ratio vs available weekend-call hours.
         const aWr = wkndRatio(a, aC);
         const bWr = wkndRatio(b, bC);
-        if (Math.abs(aWr - bWr) > 0.001) return aWr - bWr;
+        if (Math.abs(aWr - bWr) > DEV_EPS) return aWr - bWr;
       } else if (isTraumaDay) {
         // Trauma-only (weekday): primary sort is trauma utilization ratio.
         const aTr = traumaRatio(a, aC);
         const bTr = traumaRatio(b, bC);
-        if (Math.abs(aTr - bTr) > 0.001) return aTr - bTr;
+        if (Math.abs(aTr - bTr) > DEV_EPS) return aTr - bTr;
       }
 
       // Total utilization ratio as fallback.
       const ar = totalRatio(a, aC);
       const br = totalRatio(b, bC);
-      if (Math.abs(ar - br) > 0.001) return ar - br;
+      if (Math.abs(ar - br) > DEV_EPS) return ar - br;
 
       // Final tiebreaker: date-seeded hash using full resident ID for even distribution.
       let h = 2166136261;
@@ -999,7 +1037,7 @@ export function generateSchedule(
   function rebalance(
     ratioOf: (r: Resident) => number,
     isCandidate: (jd: JuniorDay) => boolean,
-    tol = 0.05,
+    tol = 12, // hours: stop once every resident is within one weekday shift of each other
   ) {
     for (let iter = 0; iter < 400; iter++) {
       const sorted = [...jrs].sort((a, b) => ratioOf(a) - ratioOf(b));
@@ -1082,7 +1120,7 @@ export function generateSchedule(
   // resident's trauma weekend for an under-trauma resident's equal-length NON-trauma weekend.
   // Equal length ⇒ each keeps the same weekend hours (and same total hours); only trauma
   // hours move. Weekend and total equity are therefore preserved exactly.
-  function traumaSwap(tol = 0.05) {
+  function traumaSwap(tol = 12) {
     const ratioOf = (r: Resident) => traumaRatio(r, carryFor(r));
     for (let iter = 0; iter < 400; iter++) {
       const sorted = [...jrs].sort((a, b) => ratioOf(a) - ratioOf(b));
@@ -1153,8 +1191,7 @@ export function generateSchedule(
   rebalance(
     (r) => totalRatio(r, carryFor(r)),
     (jd) => !isWeekendCall(jd.dateKey) && !jd.isTrauma,
-    0.035, // tighter target for total hours (user wants within ~4%); safe — moves only
-           // weekday non-trauma shifts, so it can't disturb weekend or trauma balance.
+    // Moves only weekday non-trauma shifts, so it can't disturb weekend or trauma balance.
   );
 
   } // end needJr
