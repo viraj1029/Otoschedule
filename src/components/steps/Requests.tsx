@@ -383,14 +383,19 @@ export default function Requests({
   }
 
   // Build all-residents request map for chief "all" view
-  const allResMap: Record<string, Resident[]> = {};
+  // Each entry records whether the day is an official vacation day so it can be styled differently.
+  const allResMap: Record<string, { res: Resident; official: boolean }[]> = {};
   if (isAllView) {
     residents.forEach((res) => {
-      const { vacDays: v, weekends: w, holidayReqs: h } = getResRequests(allRequests, [res.id]);
-      [...v, ...w, ...h].forEach((d) => {
+      const { vacDays: v, vacOfficial: vo, weekends: w, holidayReqs: h } = getResRequests(allRequests, [res.id]);
+      const add = (d: string, official: boolean) => {
         if (!allResMap[d]) allResMap[d] = [];
-        if (!allResMap[d].find((x) => x.id === res.id)) allResMap[d].push(res);
-      });
+        const existing = allResMap[d].find((x) => x.res.id === res.id);
+        if (existing) existing.official = existing.official || official;
+        else allResMap[d].push({ res, official });
+      };
+      vo.forEach((d) => add(d, true));
+      [...v, ...w, ...h].forEach((d) => add(d, false));
     });
   }
 
@@ -604,7 +609,7 @@ export default function Requests({
 
                 if (isAllView) {
                   const allForDay = allResMap[key] ?? [];
-                  const rList = allForDay.filter((r) =>
+                  const rList = allForDay.filter(({ res: r }) =>
                     resFilter === 'senior' ? r.pgy >= 4 :
                     resFilter === 'junior' ? (r.pgy >= 2 && r.pgy <= 3) :
                     resFilter === 'intern' ? r.pgy === 1 : true
@@ -618,10 +623,11 @@ export default function Requests({
                       <span style={isToday ? { fontWeight: 700, color: 'var(--text)' } : {}}>{day}</span>
                       {rList.length > 0 && (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, marginTop: 2, justifyContent: 'center' }}>
-                          {rList.map((r) => (
-                            <div key={r.id} title={r.name} style={{
+                          {rList.map(({ res: r, official }) => (
+                            <div key={r.id} title={`${r.name} — ${official ? 'official vacation' : 'prefer off / unavailable'}`} style={{
                               background: r.color, color: '#000', borderRadius: 3,
                               fontSize: 10, fontWeight: 700, padding: '1px 3px', lineHeight: 1.3, flexShrink: 0,
+                              outline: official ? '2px solid #eab308' : undefined, outlineOffset: official ? 1 : undefined,
                             }}>
                               {initials(r.name)}
                             </div>
@@ -698,6 +704,12 @@ export default function Requests({
                   Initials = peer official vacation (read-only)
                 </div>
               )}
+              {isAllView && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <div style={{ width: 10, height: 10, background: 'var(--muted)', borderRadius: 2, outline: '2px solid #eab308', outlineOffset: 1 }} />
+                  Gold outline = official vacation
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -772,10 +784,12 @@ export default function Requests({
               <div className="ch"><div className="ct">All Residents</div></div>
               <div className="cb">
                 {sortedResidents.map((res) => {
-                  const { vacDays: v, weekends: w, holidayReqs: h } = getResRequests(allRequests, [res.id]);
-                  const vac = [...v].filter((d) => {
+                  const { vacDays: v, vacOfficial: vo, weekends: w, holidayReqs: h } = getResRequests(allRequests, [res.id]);
+                  const inBlockWeekday = (d: string) => {
                     const dd = parseDate(d); return dd >= bStart && dd <= bEnd && !HOLIDAYS.has(d);
-                  }).length;
+                  };
+                  const vac = [...v].filter(inBlockWeekday).length;
+                  const vacOff = [...vo].filter(inBlockWeekday).length;
                   return (
                     <div key={res.id} style={{
                       display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0',
@@ -785,7 +799,8 @@ export default function Requests({
                       <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{res.name}</span>
                       <span className="bdg bm">PGY-{res.pgy}</span>
                       {(res.status === 'research' || res.rotations?.some((s) => s.hospital === 'Research')) && <span className="bdg bpk" style={{ fontSize: 9 }}>Res</span>}
-                      <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: 'var(--blue)' }}>{vac}d</span>
+                      {vacOff > 0 && <span title="Official vacation days" style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: '#b45309' }}>{vacOff}vac</span>}
+                      <span title="Prefer-off days" style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: 'var(--blue)' }}>{vac}d</span>
                       <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: 'var(--purple)' }}>{w.size}wk</span>
                       {h.size > 0 && <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: 'var(--orange)' }}>{h.size}hol</span>}
                     </div>
